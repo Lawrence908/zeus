@@ -24,6 +24,9 @@ flowchart TD
   safetyLayer --> tts["VoiceboxLuxTTS"]
   tts --> speaker["SpeakerOutput"]
 
+  coreApi --> phaosWs["PhaosVoiceStateWS"]
+  phaosWs --> browserViz["BrowserWebXRClient"]
+
   ingestSources["IngestSources"] --> iris["IrisIngestPipeline"]
   iris --> memoryLayer
 ```
@@ -35,6 +38,7 @@ flowchart TD
 - `mnemosyne`: memory abstraction over mem0 + Qdrant
 - `iris`: source ingestion and chunk persistence pipeline
 - `orpheus`: voice interaction loop (wake -> STT -> LLM -> TTS)
+- `phaos`: voice-state visualization (WebSocket from Core, Three.js / WebXR in browser; Orpheus publishes state via HTTP when not colocated)
 - `aegis`: policy and safety filtering layer
 
 ## Deployment Topology
@@ -89,7 +93,7 @@ flowchart TD
 1. Complete Sprint 1-4 baseline path (memory loop, voice, safety, deploy)
 2. Implement orchestration runtime for agent YAMLs (Sprint 5)
 3. Implement session continuity (Sprint 6)
-4. Implement chat UI and MCP integration (Sprint 7-8)
+4. Implement chat UI and MCP integration (Sprint 7-8); Phaos viz ships with chat early (see roadmap Sprint 7 notes)
 5. Add observability and scheduled ingest (Sprint 9)
 
 ## Legacy Planning Sources

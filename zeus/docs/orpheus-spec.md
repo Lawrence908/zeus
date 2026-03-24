@@ -38,6 +38,40 @@ The pipeline is designed around **streaming at every stage** — TTS begins as s
 
 ---
 
+## Phaos — browser / WebXR visualization
+
+**Phaos** is the visual presence during voice turns (orb in the chat UI or standalone `/viz`). Zeus Core already exposes:
+
+- `WS /ws/voice-state` — JSON events (`type: voice_state`, `state`, `audio_level`, …)
+- `POST /voice-state/publish` — ingest the same payload from host-native Orpheus (optional `X-Zeus-Voice-State-Secret`)
+
+**In-process:** pass `VoiceStateHub` from Core into Orpheus only if they share a process (unusual).
+
+**Normal case (Orpheus host-native, Core in Docker/systemd):** construct a `VoiceStateEmitter` with `publish_url` set to Core’s public URL + `/voice-state/publish`, and the same secret as Core’s `ZEUS_VOICE_STATE_SECRET` if configured.
+
+```python
+from zeus.voice.state import VoiceStateEmitter
+
+emitter = VoiceStateEmitter(
+    publish_url=os.getenv("ZEUS_VOICE_STATE_PUBLISH_URL", "http://localhost:8203/voice-state/publish"),
+)
+
+# After wake word:
+await emitter.emit("wake_detected")
+# While streaming STT / listening:
+await emitter.emit("listening", audio_level=mic_rms_01)
+# Oracle + LLM:
+await emitter.emit("processing")
+# TTS playback:
+await emitter.emit("speaking", audio_level=tts_rms_01)
+# Done:
+await emitter.emit("idle")
+```
+
+Wire these calls at the real stage boundaries in `zeus/voice/pipeline.py` once STT/TTS are connected. Full wire format: [`phaos-voice-state-protocol.md`](phaos-voice-state-protocol.md).
+
+---
+
 ## Components
 
 ### openWakeWord
@@ -253,7 +287,7 @@ logger = logging.getLogger("orpheus")
 ORACLE_URL = os.getenv("ZEUS_CORE_URL", "http://localhost:8000")
 VOICEBOX_URL = os.getenv("VOICEBOX_URL", "http://localhost:5050")
 ORPHEUS_VOICE_ID = os.getenv("ORPHEUS_VOICE_ID", "")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11435")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
 MAX_RESPONSE_TOKENS = 512

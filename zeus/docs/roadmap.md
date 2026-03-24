@@ -102,7 +102,13 @@ curl -s -X POST localhost:8001/context/query \
    - Keep response tokens ≤ 512 for latency
    - Stream TTS as tokens arrive (don't wait for full completion)
 
-6. **Add Orpheus to `compose.yaml`** (optional — voice pipeline may stay host-native for audio device access)
+6. **Phaos state emission (voice UI)**
+   - Wire `VoiceStateEmitter` from [`zeus/voice/state.py`](../voice/state.py) through the pipeline stages
+   - When Core runs separately (Docker/systemd), set `ZEUS_VOICE_STATE_PUBLISH_URL` to `http://<host>:<port>/voice-state/publish` and optional `ZEUS_VOICE_STATE_SECRET`
+   - Emit transitions: `idle` → `wake_detected` → `listening` (with mic `audio_level` when available) → `processing` → `speaking` (with TTS level when available) → `idle`
+   - Protocol reference: [`docs/phaos-voice-state-protocol.md`](phaos-voice-state-protocol.md)
+
+7. **Add Orpheus to `compose.yaml`** (optional — voice pipeline may stay host-native for audio device access)
 
 **Latency budget (target on 5080):**
 | Stage | Target |
@@ -119,6 +125,7 @@ curl -s -X POST localhost:8001/context/query \
 - `zeus/voice/tts.py`
 - `zeus/voice/wake.py`
 - `zeus/voice/pipeline.py`
+- `zeus/voice/state.py` (Phaos hub types + `VoiceStateEmitter` — **scaffold present**; finish wiring in pipeline)
 - `zeus/voice/Dockerfile` (if containerising)
 
 **Exit criterion:**
@@ -280,7 +287,7 @@ curl -s -X POST localhost:8000/chat/message \
 
 ## Sprint 7 — Text Chat Interface
 
-**Goal:** Add a minimal local chat UI for development, testing, and non-voice interaction.
+**Goal:** Add a minimal local web chat UI for development, testing, and non-voice interaction.
 
 **Tasks:**
 
@@ -289,6 +296,18 @@ curl -s -X POST localhost:8000/chat/message \
 3. Use same LLM + Oracle context path as Orpheus
 4. Use session model from Sprint 6
 5. Add basic request/latency logging for chat calls
+
+**Land early (already in tree):**
+
+- `GET /chat`, `GET /viz`, `POST /chat/message`, static mount `/static`, in-memory session continuity (until Sprint 6 SQLite)
+- Phaos orb embedded in `chat.html` + standalone [`zeus/core/static/viz/viz.html`](../core/static/viz/viz.html) (Three.js + WebXR VR button)
+- `ZEUS_LLM` respected for chat (`claude` | `ollama` | unset → dev+key uses Claude)
+
+**Still open for Sprint 7 “done”:**
+
+- `GET /chat/stream` (SSE) and `GET /chat/sessions/{session_id}` per [`chat-interface-spec.md`](chat-interface-spec.md)
+- Structured logging fields (request_id, prompt_hash, …)
+- Aegis on chat path once Sprint 3 lands
 
 **Exit criterion:**
 ```bash
@@ -362,3 +381,25 @@ curl -s localhost:8000/admin/ingest/stats | python3 -m json.tool
 python -m zeus.ingest.run --source all --dry-run
 # Dry-run lists chunks from all registered sources without failures
 ```
+
+---
+
+## Future / backlog (post–Sprint 10)
+
+Work that does not block the baseline sprints but extends Phaos, voice UX, and XR.
+
+### Phaos and browser voice
+
+- **TTS level sync:** Analyze PCM from Voicebox/LuxTTS (or speaker loopback) in Orpheus and send `audio_level` on `speaking` over `POST /voice-state/publish` so the orb matches the model’s voice without guessing from state alone.
+- **Browser voice turn:** Push-to-talk or continuous capture → STT (WhisperLiveKit or Web Speech API prototype) → same Core/Oracle/LLM path → TTS playback, with Phaos driven by real pipeline state instead of debug buttons.
+- **Visual polish:** Optional particle / arc layer on the orb; shader tuning for “lightning” motif; reduced motion / high-contrast accessibility toggle.
+
+### WebXR and AR
+
+- **Immersive AR:** Three.js `ARButton` + `immersive-ar` session (passthrough) using the same scene as VR; scale and anchor orb for comfortable viewing on Quest / Vision Pro browsers.
+- **Session stability:** Test long-lived WebSocket + XR session handoff (tab background, headset sleep).
+
+### Hardening
+
+- Rate-limit or auth on `POST /voice-state/publish` when Core is exposed beyond localhost (secret is already supported).
+- Integration tests: WebSocket receives published state; chat round-trip with mock LLM.

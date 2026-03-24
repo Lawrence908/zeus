@@ -13,9 +13,12 @@ Provide a minimal local web chat interface for Zeus that shares the same context
 ## Routes
 
 - `GET /chat` -> serves `chat.html`
+- `GET /viz` -> standalone Phaos (voice-state orb) page; links to chat
 - `POST /chat/message` -> request/response chat API
 - `GET /chat/stream` -> optional SSE streaming endpoint
 - `GET /chat/sessions/{session_id}` -> fetch session transcript
+
+Static assets (Three.js import maps, `phaos.js`, `orb.js`, …) are served from `GET /static/...` via FastAPI `StaticFiles` on `zeus/core/static/`.
 
 ## Request / Response Models
 
@@ -53,6 +56,7 @@ flowchart TD
 - Input box + send button + enter-to-send
 - Session ID badge and "new session" action
 - Basic error toast for failed requests
+- **Phaos:** embedded voice-state visualization (Three.js orb) that subscribes to `WS /ws/voice-state`; optional WebXR VR entry button; mic level via Web Audio during `listening` (see [`phaos-voice-state-protocol.md`](phaos-voice-state-protocol.md))
 
 ## Non-Functional Targets
 
@@ -80,9 +84,10 @@ For each message:
 ## Implementation Notes
 
 - Place routes in `zeus/core/chat.py`
-- Serve static UI from `zeus/core/static/chat.html`
-- Reuse existing model routing from core/voice path where possible
-- Integrate with session module from `sessions-spec.md`
+- Serve static UI from `zeus/core/static/chat.html` and Phaos from `zeus/core/static/viz/`
+- Voice-state WebSocket and publish endpoint live in `zeus/core/voice_ws.py`; hub types in `zeus/voice/state.py`
+- Reuse existing model routing from core/voice path where possible (`ZEUS_LLM`, `ZEUS_ENV`, Ollama vs Claude)
+- Integrate with session module from `sessions-spec.md` (in-memory sessions are a temporary stand-in until Sprint 6)
 
 ## Acceptance Criteria
 
