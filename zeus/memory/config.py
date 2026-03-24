@@ -22,7 +22,7 @@ def get_memory_config() -> dict[str, Any]:
 
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
     qdrant_collection = os.getenv("QDRANT_COLLECTION", "zeus_memories")
-    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11435")
     embed_model = os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text")
 
     # Shared: vector store and embedder are identical in both envs
