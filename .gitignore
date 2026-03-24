@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Zeus data directory (raw exports, processed chunks)
+zeus/data/*
+!zeus/data/.gitkeep
+
+# Swarm memory (Ruflo)
+.swarm/
