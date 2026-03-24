@@ -1,3 +1,0 @@
-# DEPRECATED — renamed to orpheus.yaml
-# "apollo" conflicts with the homelab tower PC hostname.
-# Ruflo no longer loads this file. See agents/orpheus.yaml.
