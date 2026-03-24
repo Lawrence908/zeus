@@ -226,22 +226,139 @@ python scripts/smoke_test.py
 
 ---
 
-## Post-Sprint 4 — Future Work
+## Sprint 5 — Agent Runtime Engine
 
-These are tracked but not yet scoped into sprints. Pick up after Olympus is stable.
+**Goal:** Move from static YAML contracts to a running orchestration engine in Python.
 
-**Continuous ingest** — Iris runs on a schedule (cron or Ruflo timer) to pick up new notes/exports automatically.
+**Tasks:**
 
-**Memory consolidation** — mem0 deduplication pass: merge overlapping memories, promote frequently-accessed ones.
+1. Build `zeus/orchestration/runtime.py` to load `orchestration/agents/*.yaml`
+2. Build `zeus/orchestration/bus.py` for inter-agent request routing over FastAPI
+3. Build `zeus/orchestration/hooks.py` for before/after policy hooks
+4. Add lifecycle control for olympians (start, stop, status)
+5. Add a lightweight event bus for asynchronous agent notifications
 
-**Additional ingest sources:**
-- Obsidian vault sync
-- Browser history (selective)
-- Calendar/task data (Google Calendar, Todoist)
-- Git commit messages from active projects
+**Exit criterion:**
+```bash
+# Start zeus-core
+uvicorn zeus.core.main:app --reload
 
-**Multi-agent tasks** — use Ruflo's swarm mode to dispatch parallel olympians for research, summarisation, code review.
+# Confirm runtime loaded and agents are visible
+curl -s localhost:8000/orchestration/status | python3 -m json.tool
+```
 
-**Web UI** — minimal local dashboard (Next.js or plain HTML) showing memory stats, recent queries, ingest history.
+---
 
-**Telephony** — route voice to a SIP endpoint so Zeus can answer calls via a physical handset or phone number.
+## Sprint 6 — Conversation Sessions
+
+**Goal:** Add multi-turn continuity so Zeus is no longer stateless per request.
+
+**Tasks:**
+
+1. Add session model (`session_id`, turns, summary, metadata)
+2. Store recent turns and rolling summaries
+3. Make Oracle session-aware (`/context/query` can include `session_id`)
+4. Add session resume and expiration behavior
+5. Persist session artifacts in memory layer (or SQLite sidecar)
+
+**Exit criterion:**
+```bash
+# Start zeus-core
+uvicorn zeus.core.main:app --reload
+
+# Run two turns in same session and verify contextual continuity
+curl -s -X POST localhost:8000/chat/message \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"test-session-1","message":"I am working on Zeus sprint planning"}' | python3 -m json.tool
+
+curl -s -X POST localhost:8000/chat/message \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"test-session-1","message":"what did I just say I was working on?"}' | python3 -m json.tool
+```
+
+---
+
+## Sprint 7 — Text Chat Interface
+
+**Goal:** Add a minimal local chat UI for development, testing, and non-voice interaction.
+
+**Tasks:**
+
+1. Add `zeus/core/chat.py` routes (`/chat`, `/chat/message`, optional stream endpoint)
+2. Add `zeus/core/static/chat.html` lightweight UI
+3. Use same LLM + Oracle context path as Orpheus
+4. Use session model from Sprint 6
+5. Add basic request/latency logging for chat calls
+
+**Exit criterion:**
+```bash
+uvicorn zeus.core.main:app --reload
+# Open http://localhost:8000/chat and send messages
+# Context-assisted replies should render in the UI
+```
+
+---
+
+## Sprint 8 — Zeus MCP Server
+
+**Goal:** Make Zeus memory and profile functions callable from MCP clients.
+
+**Tasks:**
+
+1. Add `zeus/mcp/server.py` and `zeus/mcp/tools.py`
+2. Implement tools:
+   - `zeus_query` (context lookup)
+   - `zeus_remember` (store memory)
+   - `zeus_profile` (profile summary)
+3. Wire MCP calls to Oracle and memory layer endpoints
+4. Provide `mcp.json` example config for Cursor/Claude clients
+
+**Exit criterion:**
+```bash
+# Run MCP server
+python -m zeus.mcp.server
+
+# From MCP client, call zeus_query with a natural language prompt
+# Tool returns structured context and source references
+```
+
+---
+
+## Sprint 9 — Observability + Continuous Ingest
+
+**Goal:** Improve day-2 operations with metrics, logging, and automatic ingest.
+
+**Tasks:**
+
+1. Add query logging (query text hash, latency, source counts)
+2. Add ingest stats endpoint (`/admin/ingest/stats`)
+3. Add minimal admin dashboard (`/admin`)
+4. Add scheduler for periodic Iris runs
+5. Add memory consolidation job (dedup, merge overlap candidates)
+
+**Exit criterion:**
+```bash
+uvicorn zeus.core.main:app --reload
+curl -s localhost:8000/admin/ingest/stats | python3 -m json.tool
+# Dashboard and stats should reflect recent query and ingest activity
+```
+
+---
+
+## Sprint 10 — Additional Ingest Sources
+
+**Goal:** Expand memory coverage with high-signal personal data sources.
+
+**Tasks:**
+
+1. Add Obsidian parser (`zeus/ingest/sources/obsidian.py`)
+2. Add Git history parser (`zeus/ingest/sources/git.py`)
+3. Add Google Calendar parser (`zeus/ingest/sources/gcal.py`)
+4. Add bookmarks parser (`zeus/ingest/sources/bookmarks.py`)
+5. Register each source in `zeus/ingest/run.py` and `orchestration/agents/iris.yaml`
+
+**Exit criterion:**
+```bash
+python -m zeus.ingest.run --source all --dry-run
+# Dry-run lists chunks from all registered sources without failures
+```
