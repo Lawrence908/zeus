@@ -1,0 +1,11 @@
+# zeus/.gitignore
+.env
+__pycache__/
+*.pyc
+.venv/
+data/raw/
+data/*.json
+data/*.csv
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
