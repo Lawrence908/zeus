@@ -20,6 +20,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - web
 
   # --- Ollama: Local LLM runtime ---
   # Prod: serves Qwen2.5-7B-Instruct Q4_K_M on RTX 3080
@@ -41,6 +43,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - web
 
   # --- Zeus Core: FastAPI API bus ---
   zeus-core:
@@ -63,7 +67,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - web
 
 volumes:
   qdrant_data:
   ollama_data:
+
+networks:
+  web:
+    external: true
+    name: homelab-web
