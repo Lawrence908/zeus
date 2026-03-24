@@ -5,15 +5,20 @@ from typing import Any
 
 
 def get_memory_config() -> dict[str, Any]:
-    """Return mem0 configuration dict based on ZEUS_ENV.
+    """Return mem0 configuration dict based on environment and provider override.
 
-    Dev:  Claude API (Sonnet 4.6) for extraction, Ollama for embeddings
-    Prod: Ollama (Qwen2.5-7B) for extraction, Ollama for embeddings
+    Default provider selection:
+      - dev  -> Claude API
+      - prod -> Ollama
 
-    Both environments use the same Qdrant instance and embedding model
-    so vectors are compatible across dev/prod.
+    Optional override:
+      - ZEUS_LLM=claude forces Claude in any environment
+      - ZEUS_LLM=ollama forces Ollama in any environment
+
+    Embeddings always use Ollama so vectors remain compatible across environments.
     """
     env = os.getenv("ZEUS_ENV", "dev")
+    llm_override = os.getenv("ZEUS_LLM", "").strip().lower()
 
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
     qdrant_collection = os.getenv("QDRANT_COLLECTION", "zeus_memories")
@@ -41,31 +46,49 @@ def get_memory_config() -> dict[str, Any]:
         "version": "v1.1",
     }
 
-    if env == "prod":
-        # Prod: Ollama running Qwen2.5-7B-Instruct for memory extraction
-        prod_model = os.getenv("ZEUS_PROD_MODEL", "qwen2.5:7b-instruct-q4_K_M")
+    if llm_override and llm_override not in {"claude", "ollama"}:
+        raise ValueError(
+            "ZEUS_LLM must be one of: 'claude', 'ollama', or unset."
+        )
+
+    if llm_override:
+        provider = llm_override
+    else:
+        provider = "ollama" if env == "prod" else "claude"
+
+    # Provider-specific model values with compatibility fallbacks.
+    claude_model = os.getenv(
+        "ZEUS_CLAUDE_MODEL",
+        os.getenv("ZEUS_DEV_MODEL", "claude-sonnet-4-6-20250514"),
+    )
+    ollama_model = os.getenv(
+        "ZEUS_OLLAMA_MODEL",
+        os.getenv("ZEUS_PROD_MODEL", "qwen2.5:7b-instruct-q4_K_M"),
+    )
+
+    if provider == "ollama":
+        # Local extraction path (default in prod, optional in dev).
         base_config["llm"] = {
             "provider": "ollama",
             "config": {
-                "model": prod_model,
+                "model": ollama_model,
                 "ollama_base_url": ollama_url,
                 "temperature": 0.1,
                 "max_tokens": 2048,
             },
         }
     else:
-        # Dev: Claude API for higher-quality extraction during development
+        # Cloud extraction path (default in dev, optional in prod).
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        dev_model = os.getenv("ZEUS_DEV_MODEL", "claude-sonnet-4-6-20250514")
         if not api_key:
             raise ValueError(
-                "ANTHROPIC_API_KEY required when ZEUS_ENV=dev. "
-                "Set it in .env or switch to ZEUS_ENV=prod for local-only mode."
+                "ANTHROPIC_API_KEY required when using Claude "
+                "(ZEUS_ENV=dev default or ZEUS_LLM=claude override)."
             )
         base_config["llm"] = {
             "provider": "anthropic",
             "config": {
-                "model": dev_model,
+                "model": claude_model,
                 "api_key": api_key,
                 "temperature": 0.1,
                 "max_tokens": 2048,
