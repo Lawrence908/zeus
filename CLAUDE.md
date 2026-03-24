@@ -12,8 +12,12 @@ Zeus is a self-hosted, voice-first, privacy-preserving AI assistant built from p
 | TTS | Voicebox REST API → LuxTTS | Voice cloning, 150x RT |
 | Wake word | openWakeWord | CPU, passive trigger |
 | Memory | mem0 | Self-hosted, hybrid vector+graph+KV |
+| Sessions | Zeus session layer | Multi-turn chat/voice continuity + rolling summaries |
 | Vector DB | Qdrant | Docker, self-hosted, port 6333 |
 | API bus | FastAPI | Routes all services |
+| Chat UI | FastAPI static/chat routes | Local text interface for dev + fallback use |
+| MCP | Zeus MCP server | Exposes context/profile/memory tools to MCP clients |
+| Observability | Zeus admin/metrics | Query and ingest metrics + operational status |
 | Embeddings | nomic-embed-text via Ollama | |
 | Dev LLM | Claude API (Sonnet 4.6) | Used during development |
 | Prod LLM | Qwen2.5-7B-Instruct Q4_K_M | Ollama on 3080 (10GB VRAM) |
@@ -43,6 +47,10 @@ zeus/
   voice/          # Orpheus: STT (WhisperLiveKit), TTS (Voicebox), VAD
   safety/         # Aegis: NemoClaw/OpenShell config and policies
   api/            # Oracle: Zeus Context API
+  mcp/            # Zeus MCP server and tool definitions
+  core/static/    # Chat/admin UI assets
+  core/chat.py    # Text chat routes
+  core/sessions.py # Session lifecycle and continuity logic
   models/         # Ollama configs, prompt templates
   data/           # Raw exports (gitignored), processed chunks
   docs/           # Architecture docs
@@ -108,3 +116,7 @@ All services must check `ZEUS_ENV` and configure themselves accordingly. Never h
 - Ruflo v3.5 over LangGraph/CrewAI because it's Claude Code native and supports swarm patterns without framework lock-in
 - Voicebox + LuxTTS over Coqui/Bark because 150x realtime speed makes conversational latency viable on consumer GPUs
 - Qwen2.5-7B Q4_K_M fits in 10GB VRAM on the 3080 while maintaining instruction-following quality adequate for structured agent tasks
+- Text chat is intentionally included as a first-class fallback to accelerate development and support non-voice interaction modes
+- MCP exposure is a first-class integration boundary so Zeus memory/context can be reused by external assistant clients
+- Session continuity is required for natural multi-turn interactions across both chat and voice paths
+- Observability is mandatory once always-on deployment begins (query latency, ingest cadence, service health)
