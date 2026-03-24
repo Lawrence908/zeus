@@ -1,0 +1,31 @@
+# zeus/orchestration/agents/mnemosyne.yaml — Memory layer agent
+# Mnemosyne is the gatekeeper for all reads and writes to mem0 + Qdrant.
+# Other agents never touch the DB directly — they call mnemosyne.
+
+name: mnemosyne
+description: "Memory layer: read/write personal memory via mem0 + Qdrant"
+model:
+  dev: claude-sonnet-4-6-20250514
+  prod: qwen2.5:7b-instruct-q4_K_M
+
+tools:
+  - mem0_read
+  - mem0_write
+  - mem0_search
+
+context:
+  - self   # mnemosyne has access to its own memory namespace for meta-queries
+
+safety:
+  policy: memory       # blocks PII writes without explicit user consent flag
+
+endpoints:
+  - path: /memory/search
+    method: POST
+    description: "Semantic search over personal memory"
+  - path: /memory/ingest
+    method: POST
+    description: "Store new memories (called by iris)"
+  - path: /memory/get
+    method: GET
+    description: "Retrieve memory by ID or namespace"

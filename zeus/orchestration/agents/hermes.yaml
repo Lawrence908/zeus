@@ -1,0 +1,3 @@
+# DEPRECATED — renamed to iris.yaml
+# "hermes" conflicts with the homelab NAS hostname.
+# Ruflo no longer loads this file. See agents/iris.yaml.
