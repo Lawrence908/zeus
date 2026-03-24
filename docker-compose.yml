@@ -1,0 +1,2 @@
+# DEPRECATED — renamed to compose.yaml (modern Docker Compose standard)
+# This file is intentionally empty. Use compose.yaml instead.
