@@ -26,9 +26,27 @@ logger = logging.getLogger("iris")
 def build_sources(args) -> list:
     """Construct IngestSource instances from CLI args."""
     from zeus.ingest.sources.chatgpt import ChatGPTSource
+    from zeus.ingest.sources.context_pack import ContextPackSource
     from zeus.ingest.sources.markdown import MarkdownSource
 
     sources = []
+
+    if args.source in ("context_pack", "all"):
+        context_pack_path = args.path or "zeus/data/raw/context_pack.md"
+        if not Path(context_pack_path).exists():
+            if args.source == "context_pack":
+                logger.error(f"context pack not found: {context_pack_path}")
+                sys.exit(1)
+            logger.warning(f"skipping context_pack — file not found: {context_pack_path}")
+        else:
+            sources.append(
+                ContextPackSource(
+                    path=context_pack_path,
+                    chunk_size=min(args.chunk_size, 256),
+                    chunk_overlap=min(args.chunk_overlap, 32),
+                    user_id=args.user_id,
+                )
+            )
 
     if args.source in ("markdown", "all"):
         globs = args.glob if args.glob else ["**/*.md"]
@@ -122,7 +140,7 @@ Examples:
     )
     p.add_argument(
         "--source",
-        choices=["markdown", "chatgpt", "all"],
+        choices=["context_pack", "markdown", "chatgpt", "all"],
         required=True,
         help="Which source type to ingest",
     )
