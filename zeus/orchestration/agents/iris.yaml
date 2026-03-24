@@ -1,0 +1,34 @@
+# zeus/orchestration/agents/iris.yaml — Ingest pipeline agent
+# Iris ingests raw data from sources, chunks it, embeds it, and stores
+# it in mnemosyne. It never writes directly to Qdrant — it calls mnemosyne.
+
+name: iris
+description: "Data ingest pipeline: reads sources, chunks, embeds, stores via mnemosyne"
+model:
+  dev: claude-sonnet-4-6-20250514
+  prod: qwen2.5:7b-instruct-q4_K_M
+
+tools:
+  - file_read          # read raw export files from zeus/data/raw/
+  - bus_call           # POST to mnemosyne /ingest endpoint
+
+context: []            # Iris produces context, it doesn't consume it
+
+safety:
+  policy: ingest       # permissive — input is trusted personal data
+
+triggers:
+  - type: manual       # invoked via CLI: ruflo run iris
+  - type: webhook
+    path: /iris/ingest
+
+config:
+  chunk_size: 512      # tokens
+  chunk_overlap: 64
+  sources:
+    - type: markdown
+      glob: "zeus/data/raw/**/*.md"
+    - type: chatgpt
+      path: "zeus/data/raw/chatgpt_export.json"
+    - type: context_pack
+      path: "zeus/data/raw/context_pack.md"

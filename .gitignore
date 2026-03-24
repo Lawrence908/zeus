@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Zeus — raw data exports (too large and potentially sensitive)
+zeus/data/raw/
+zeus/data/*.json
+zeus/data/*.csv
+zeus/data/*.jsonl
+zeus/data/*.zip
+
+# Zeus — local model weights (Ollama manages these)
+*.gguf
+*.bin
+*.safetensors

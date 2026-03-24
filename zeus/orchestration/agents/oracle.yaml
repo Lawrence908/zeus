@@ -1,0 +1,34 @@
+# zeus/orchestration/agents/oracle.yaml — Context API agent
+# Oracle serves structured personal context to the swarm.
+# It sits on top of mnemosyne and formats context for agent consumption.
+
+name: oracle
+description: "Context API: serves structured personal context to agents and LLMs"
+model:
+  dev: claude-sonnet-4-6-20250514
+  prod: qwen2.5:7b-instruct-q4_K_M
+
+tools:
+  - bus_call           # calls mnemosyne /memory/search
+
+context:
+  - mnemosyne          # oracle's context source is mnemosyne
+
+safety:
+  policy: standard
+
+endpoints:
+  - path: /context/query
+    method: POST
+    description: "Natural language query → structured context block"
+    request:
+      query: str
+      max_tokens: int        # default 2048
+      namespaces: list[str]  # optional filter
+    response:
+      context: str           # formatted context ready for LLM injection
+      sources: list[str]     # memory IDs used
+
+  - path: /context/profile
+    method: GET
+    description: "Return user profile summary (stable facts about Chris)"

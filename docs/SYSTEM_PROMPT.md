@@ -12,6 +12,10 @@ A personal AI assistant stack composed from proven open-source repos. The goal i
 - Memory: mem0 (self-hosted, hybrid vector+graph+KV)
 - Vector DB: Qdrant (Docker, self-hosted)
 - API bus: FastAPI (routes all services)
+- Session layer: conversation sessions + rolling summaries (chat + voice continuity)
+- MCP server: Zeus MCP tool surface for external assistant integration
+- Chat UI: local text interface for dev and fallback interaction mode
+- Observability: query/ingest metrics + admin dashboard
 - Embed model: nomic-embed-text via Ollama
 - Dev model: Claude API (Sonnet 4.6)
 - Prod model: Ollama → Qwen2.5-7B-Instruct Q4_K_M on 3080
@@ -26,15 +30,19 @@ zeus/
   voice/       # STT (WhisperLiveKit), TTS (Voicebox client), VAD
   safety/      # NemoClaw/OpenShell config and policies
   api/         # Zeus Context API (successor to context-pack)
+  mcp/         # Zeus MCP server + tool definitions
   models/      # Ollama configs, prompt templates
+  core/static/ # Chat/admin UI assets
+  core/chat.py # Text chat routes
+  core/sessions.py # Session lifecycle and turn storage
   data/        # Raw exports (gitignored), processed chunks
   docs/        # Architecture docs
 
 ## Greek naming convention
 - zeus = main system
 - mnemosyne = memory layer
-- hermes = ingest pipeline
-- apollo = voice interface
+- iris = ingest pipeline
+- orpheus = voice interface
 - aegis = safety layer
 - olympians = agent swarm
 - olympus = production server

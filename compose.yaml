@@ -1,0 +1,78 @@
+# zeus/compose.yaml — Zeus service stack
+# Usage: docker compose up -d
+# This base file is CPU-safe. For GPU passthrough, include compose.gpu.yaml.
+
+services:
+  # --- Mnemosyne: Vector DB ---
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: zeus-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+    networks:
+      - web
+
+  # --- Ollama: Local LLM runtime ---
+  # Prod: serves Qwen2.5-7B-Instruct Q4_K_M on RTX 3080
+  # Dev: serves test models on RTX 5080
+  ollama:
+    image: ollama/ollama:latest
+    container_name: zeus-ollama
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - web
+
+  # --- Zeus Core: FastAPI API bus ---
+  zeus-core:
+    build:
+      context: .
+      dockerfile: zeus/core/Dockerfile
+    container_name: zeus-core
+    ports:
+      - "${ZEUS_CORE_PORT:-8203}:8000"
+    env_file:
+      - .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_URL=http://ollama:11434
+    depends_on:
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/status', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - web
+
+volumes:
+  qdrant_data:
+  ollama_data:
+
+networks:
+  web:
+    external: true
+    name: homelab-web
