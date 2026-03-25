@@ -49,7 +49,16 @@ services:
     container_name: zeus-whisper
     ports:
       - "${WHISPER_PORT:-9090}:9090"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WHISPER_DEVICE=cpu
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost',9090)); s.close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     networks:
       - web
 
