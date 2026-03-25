@@ -1,13 +1,15 @@
 # zeus/ingest/run.py — Iris ingest CLI
 # Usage:
 #   python -m zeus.ingest.run --source markdown --glob "data/raw/**/*.md" --dry-run
-#   python -m zeus.ingest.run --source chatgpt --path data/raw/chatgpt_export.json
+#   python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chat-history
+#   python -m zeus.ingest.run --source chatgpt --llm claude   # fast cloud extraction
 #   python -m zeus.ingest.run --source all  # runs all configured sources from iris.yaml defaults
 #
 # Always run --dry-run first to preview chunk output before writing to mnemosyne.
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -62,14 +64,20 @@ def build_sources(args) -> list:
         )
 
     if args.source in ("chatgpt", "all"):
-        path = args.path or "zeus/data/raw/chatgpt_export.json"
+        path = args.path or "zeus/data/raw/chat-history"
         if not Path(path).exists():
-            if args.source == "chatgpt":
+            # Fall back to legacy single-file path
+            legacy = Path("zeus/data/raw/chatgpt_export.json")
+            if legacy.exists():
+                path = str(legacy)
+            elif args.source == "chatgpt":
                 logger.error(f"chatgpt export not found: {path}")
                 sys.exit(1)
             else:
-                logger.warning(f"skipping chatgpt — file not found: {path}")
-        else:
+                logger.warning(f"skipping chatgpt — not found: {path}")
+                path = None
+
+        if path:
             sources.append(
                 ChatGPTSource(
                     path=path,
@@ -89,10 +97,15 @@ def build_sources(args) -> list:
 async def main(args) -> None:
     from zeus.ingest.pipeline import run_ingest
 
+    if args.llm:
+        os.environ["ZEUS_LLM"] = args.llm
+        logger.info(f"iris: LLM override → {args.llm}")
+
     sources = build_sources(args)
 
     mode = "DRY RUN" if args.dry_run else "LIVE"
-    logger.info(f"iris: starting {mode} ingest — {len(sources)} source(s)")
+    llm_label = args.llm or os.getenv("ZEUS_LLM", "auto")
+    logger.info(f"iris: starting {mode} ingest — {len(sources)} source(s), llm={llm_label}")
 
     results = await run_ingest(
         sources=sources,
@@ -131,8 +144,11 @@ Examples:
   # Preview markdown chunking without writing anything
   python -m zeus.ingest.run --source markdown --glob "zeus/data/raw/**/*.md" --dry-run
 
-  # Ingest ChatGPT export (live)
-  python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/conversations.json
+  # Ingest ChatGPT export using Claude for fast extraction
+  python -m zeus.ingest.run --source chatgpt --llm claude
+
+  # Ingest with local Ollama (slow but free)
+  python -m zeus.ingest.run --source chatgpt --llm ollama
 
   # Run all sources with custom chunk size
   python -m zeus.ingest.run --source all --chunk-size 256 --dry-run
@@ -146,7 +162,7 @@ Examples:
     )
     p.add_argument(
         "--path",
-        help="Path to a single file (chatgpt source)",
+        help="Path to a file or directory (chatgpt: dir with conversations-NNN.json)",
     )
     p.add_argument(
         "--glob",
@@ -156,6 +172,12 @@ Examples:
     p.add_argument(
         "--base-dir",
         help="Base directory for glob expansion (default: .)",
+    )
+    p.add_argument(
+        "--llm",
+        choices=["claude", "ollama"],
+        default=None,
+        help="LLM for fact extraction (overrides ZEUS_LLM env var)",
     )
     p.add_argument(
         "--dry-run",

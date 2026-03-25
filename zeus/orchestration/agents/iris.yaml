@@ -5,7 +5,7 @@
 name: iris
 description: "Data ingest pipeline: reads sources, chunks, embeds, stores via mnemosyne"
 model:
-  dev: claude-sonnet-4-6-20250514
+  dev: claude-sonnet-4-6
   prod: qwen2.5:7b-instruct-q4_K_M
 
 tools:

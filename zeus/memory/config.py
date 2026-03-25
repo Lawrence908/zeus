@@ -59,7 +59,7 @@ def get_memory_config() -> dict[str, Any]:
     # Provider-specific model values with compatibility fallbacks.
     claude_model = os.getenv(
         "ZEUS_CLAUDE_MODEL",
-        os.getenv("ZEUS_DEV_MODEL", "claude-sonnet-4-6-20250514"),
+        os.getenv("ZEUS_DEV_MODEL", "claude-sonnet-4-6"),
     )
     ollama_model = os.getenv(
         "ZEUS_OLLAMA_MODEL",
@@ -98,9 +98,32 @@ def get_memory_config() -> dict[str, Any]:
     return base_config
 
 
+def _patch_anthropic_params():
+    """Patch mem0's Anthropic LLM to avoid sending both temperature and top_p.
+
+    claude-sonnet-4-6 rejects requests that include both parameters.
+    mem0's base class always sends both, so we strip top_p before the
+    Anthropic client sees the kwargs.
+    """
+    try:
+        from mem0.llms.anthropic import AnthropicLLM
+    except ImportError:
+        return
+
+    _orig = AnthropicLLM._get_common_params
+
+    def _patched(self, **kwargs):
+        params = _orig(self, **kwargs)
+        params.pop("top_p", None)
+        return params
+
+    AnthropicLLM._get_common_params = _patched
+
+
 def get_memory_client():
     """Initialize and return a configured mem0 Memory instance."""
     from mem0 import Memory
 
+    _patch_anthropic_params()
     config = get_memory_config()
     return Memory.from_config(config)

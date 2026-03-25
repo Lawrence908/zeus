@@ -323,7 +323,7 @@ async def call_llm_streaming(prompt: str, context: str):
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
         async with client.messages.stream(
-            model=os.getenv("ZEUS_DEV_MODEL", "claude-sonnet-4-6-20250514"),
+            model=os.getenv("ZEUS_DEV_MODEL", "claude-sonnet-4-6"),
             max_tokens=MAX_RESPONSE_TOKENS,
             system=system,
             messages=[{"role": "user", "content": prompt}],
