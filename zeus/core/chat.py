@@ -133,13 +133,21 @@ async def voice_interact(
         yield wav_bytes
 
     transcript = ""
-    async for evt in stt.transcribe(audio_source=_one_chunk()):
-        transcript = str(evt.get("text") or "").strip()
-        if evt.get("is_final"):
-            break
+    try:
+        async for evt in stt.transcribe(audio_source=_one_chunk()):
+            transcript = str(evt.get("text") or "").strip()
+            if evt.get("is_final"):
+                break
+    except ConnectionRefusedError:
+        raise HTTPException(
+            status_code=503,
+            detail="WhisperLive STT service is not reachable. Start it with: docker compose up whisper -d",
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"STT connection failed: {exc}") from exc
 
     if not transcript:
-        raise HTTPException(status_code=502, detail="no transcript produced")
+        raise HTTPException(status_code=422, detail="no transcript produced — audio may be silent or too short")
 
     result = await engine.query(
         transcript,
