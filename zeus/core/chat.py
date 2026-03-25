@@ -1,30 +1,20 @@
 # zeus/core/chat.py — Text chat UI routes (Sprint 7) + Phaos integration surface
 from __future__ import annotations
 
-import os
+import json
 import time
-import uuid
 from pathlib import Path
+from typing import Any, AsyncIterator
 
-import httpx
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from zeus.memory.search import format_context_block, search_memories
+from zeus.core.query import QueryEngine, _active_model_name
+from zeus.core.sessions import Session, SessionManager
 
 router = APIRouter(tags=["chat"])
 
-ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
-ZEUS_LLM = os.getenv("ZEUS_LLM", "").strip().lower()
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11435")
-OLLAMA_MODEL = os.getenv("ZEUS_OLLAMA_MODEL") or os.getenv(
-    "ZEUS_PROD_MODEL", "qwen2.5:7b-instruct-q4_K_M"
-)
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ZEUS_DEV_MODEL = os.getenv("ZEUS_DEV_MODEL") or os.getenv(
-    "ZEUS_CLAUDE_MODEL", "claude-sonnet-4-6-20250514"
-)
 _STATIC = Path(__file__).resolve().parent / "static"
 
 
@@ -40,12 +30,35 @@ class ChatMessageResponse(BaseModel):
     assistant_message: str
     context_sources: list[str]
     latency_ms: int
+    model_used: str
+    token_estimate: int
 
 
-def _sessions(request: Request) -> dict[str, list[dict[str, str]]]:
-    if not hasattr(request.app.state, "chat_sessions"):
-        request.app.state.chat_sessions = {}
-    return request.app.state.chat_sessions  # type: ignore[assignment]
+class ChatSessionSummary(BaseModel):
+    id: str
+    created_at: float
+    updated_at: float
+    turn_count: int
+    summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatSessionsListResponse(BaseModel):
+    sessions: list[ChatSessionSummary]
+
+
+def _session_manager(request: Request) -> SessionManager:
+    sm = getattr(request.app.state, "session_manager", None)
+    if sm is None:
+        raise HTTPException(status_code=503, detail="Session manager not initialized")
+    return sm
+
+
+def _query_engine(request: Request) -> QueryEngine:
+    qe = getattr(request.app.state, "query_engine", None)
+    if qe is None:
+        raise HTTPException(status_code=503, detail="Query engine not initialized")
+    return qe
 
 
 @router.get("/chat")
@@ -66,98 +79,125 @@ async def viz_page() -> FileResponse:
 
 @router.post("/chat/message", response_model=ChatMessageResponse)
 async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessageResponse:
-    t0 = time.monotonic()
     memory = getattr(request.app.state, "memory", None)
     if memory is None:
         raise HTTPException(status_code=503, detail="Memory client not initialized")
 
-    sessions = _sessions(request)
-    sid = body.session_id or str(uuid.uuid4())
-    if sid not in sessions:
-        sessions[sid] = []
-
-    context = ""
-    sources: list[str] = []
-    if body.use_context:
-        try:
-            results = search_memories(
-                memory=memory,
-                query=body.message,
-                user_id="chris",
-                top_k=5,
-                namespaces=[],
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Memory search failed: {e}") from e
-        if results:
-            context, _ = format_context_block(results, max_tokens=2048)
-            for mem in results:
-                sources.append(mem.get("metadata", {}).get("source", "unknown"))
-
-    history = sessions[sid][-10:]
-    transcript_lines: list[str] = []
-    for turn in history:
-        transcript_lines.append(f"User: {turn['user']}")
-        transcript_lines.append(f"Assistant: {turn['assistant']}")
-    transcript_block = "\n".join(transcript_lines)
-    system = (
-        "You are Zeus, a personal AI assistant for Chris. Be concise and helpful.\n"
-        "You are in a text chat — markdown is ok but keep answers readable.\n"
-    )
-    if context:
-        system += f"\n## Personal Context\n{context}\n"
-
-    user_block = transcript_block + ("\n" if transcript_block else "") + f"User: {body.message}\nAssistant:"
-
+    engine = _query_engine(request)
     max_out = body.max_tokens or 512
     try:
-        reply = await _run_llm(system=system, user_prompt=user_block, max_tokens=max_out)
+        result = await engine.query(
+            body.message,
+            body.session_id,
+            use_context=body.use_context,
+            max_tokens=max_out,
+            source="chat",
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM call failed: {e}") from e
+        raise HTTPException(status_code=502, detail=f"Query failed: {e}") from e
 
-    sessions[sid].append({"user": body.message, "assistant": reply})
-    latency_ms = int((time.monotonic() - t0) * 1000)
     return ChatMessageResponse(
-        session_id=sid,
-        assistant_message=reply,
-        context_sources=sources,
-        latency_ms=latency_ms,
+        session_id=result.session_id,
+        assistant_message=result.assistant_message,
+        context_sources=result.context_sources,
+        latency_ms=result.latency_ms,
+        model_used=result.model_used,
+        token_estimate=result.token_estimate,
     )
 
 
-def _chat_use_claude() -> bool:
-    """Honor ZEUS_LLM override, then fall back to dev + API key."""
-    if ZEUS_LLM == "ollama":
-        return False
-    if ZEUS_LLM == "claude":
-        return bool(ANTHROPIC_API_KEY)
-    return ZEUS_ENV == "dev" and bool(ANTHROPIC_API_KEY)
+def _sse_token_event(content: str) -> str:
+    return f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
 
-async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
-    if _chat_use_claude():
-        import anthropic
+def _sse_done_event(*, session_id: str, latency_ms: int, model_used: str) -> str:
+    payload = {"type": "done", "session_id": session_id, "latency_ms": latency_ms, "model_used": model_used}
+    return f"data: {json.dumps(payload)}\n\n"
 
-        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-        msg = await client.messages.create(
-            model=ZEUS_DEV_MODEL,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user_prompt}],
+
+def _sse_error_event(detail: str) -> str:
+    return f"data: {json.dumps({'type': 'error', 'detail': detail})}\n\n"
+
+
+@router.post("/chat/stream")
+async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingResponse:
+    memory = getattr(request.app.state, "memory", None)
+    if memory is None:
+        raise HTTPException(status_code=503, detail="Memory client not initialized")
+
+    engine = _query_engine(request)
+    max_out = body.max_tokens or 512
+    session = await engine.sessions.get_or_create(
+        body.session_id,
+        metadata={"source": "chat"},
+    )
+    session_id_out = session.id
+
+    async def event_iter() -> AsyncIterator[bytes]:
+        t0 = time.monotonic()
+        try:
+            async for chunk in engine.query_stream(
+                body.message,
+                session_id_out,
+                use_context=body.use_context,
+                max_tokens=max_out,
+                source="chat",
+            ):
+                yield _sse_token_event(chunk).encode("utf-8")
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            yield _sse_done_event(
+                session_id=session_id_out,
+                latency_ms=latency_ms,
+                model_used=_active_model_name(),
+            ).encode("utf-8")
+        except Exception as e:
+            yield _sse_error_event(str(e)).encode("utf-8")
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/chat/sessions", response_model=ChatSessionsListResponse)
+async def list_chat_sessions(
+    request: Request,
+    limit: int = Query(10, ge=1, le=50),
+) -> ChatSessionsListResponse:
+    sm = _session_manager(request)
+    recent = await sm.list_recent(limit=limit)
+    summaries = [
+        ChatSessionSummary(
+            id=s.id,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+            turn_count=len(s.turns),
+            summary=s.summary,
+            metadata=s.metadata,
         )
-        block = msg.content[0]
-        if block.type != "text":
-            return ""
-        return block.text
+        for s in recent
+    ]
+    return ChatSessionsListResponse(sessions=summaries)
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": f"{system}\n\n{user_prompt}",
-        "stream": False,
-        "options": {"num_predict": max_tokens},
-    }
-    async with httpx.AsyncClient() as client:
-        r = await client.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=120.0)
-        r.raise_for_status()
-        data = r.json()
-        return (data.get("response") or "").strip()
+
+@router.get("/chat/sessions/{session_id}", response_model=Session)
+async def get_chat_session(session_id: str, request: Request) -> Session:
+    sm = _session_manager(request)
+    session = await sm.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@router.delete("/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str, request: Request) -> dict[str, bool]:
+    sm = _session_manager(request)
+    ok = await sm.delete(session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"ok": True}

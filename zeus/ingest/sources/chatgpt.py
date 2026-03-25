@@ -1,6 +1,8 @@
 # zeus/ingest/sources/chatgpt.py — Iris ChatGPT export parser
-# Parses the conversations.json from a ChatGPT data export (Settings → Export).
-# Each conversation is flattened into user+assistant turn pairs and chunked.
+# Parses ChatGPT data exports (Settings → Export).
+# Supports both the legacy single-file format (conversations.json) and the
+# newer multi-file export (conversations-000.json, conversations-001.json, …
+# plus media directories).  Pass a file or a directory as `path`.
 # Only user messages are ingested by default — they contain Chris's actual
 # thoughts, preferences, and questions, which is what mnemosyne needs.
 import json
@@ -19,9 +21,13 @@ DEFAULT_ROLES = {"user"}
 
 class ChatGPTSource:
     """
-    Parse a ChatGPT conversations.json export and yield chunks.
+    Parse a ChatGPT export and yield chunks.
 
-    Export format (as of 2024):
+    Accepts either:
+      - A single JSON file (legacy conversations.json)
+      - A directory containing conversations-NNN.json files (2025+ export format)
+
+    Export format (both variants):
       list[Conversation]
       Conversation = { "title": str, "create_time": float, "mapping": { id: Node } }
       Node = { "message": Message | null, "parent": str | null, "children": list[str] }
@@ -35,7 +41,7 @@ class ChatGPTSource:
         chunk_size: int = 512,
         chunk_overlap: int = 64,
         user_id: str = "chris",
-        min_chars: int = 50,       # skip very short messages (greetings, ack)
+        min_chars: int = 50,
     ) -> None:
         self.path = Path(path)
         self.roles = roles
@@ -43,6 +49,40 @@ class ChatGPTSource:
         self.chunk_overlap = chunk_overlap
         self.user_id = user_id
         self.min_chars = min_chars
+
+    def _discover_files(self) -> list[Path]:
+        """Return conversation JSON files to process."""
+        if self.path.is_file():
+            return [self.path]
+
+        if self.path.is_dir():
+            files = sorted(self.path.glob("conversations*.json"))
+            if not files:
+                logger.error(f"chatgpt: no conversations*.json files in {self.path}")
+            else:
+                logger.info(f"chatgpt: found {len(files)} conversation file(s) in {self.path}")
+            return files
+
+        logger.error(f"chatgpt: path does not exist — {self.path}")
+        return []
+
+    def _load_file(self, filepath: Path) -> list[dict]:
+        """Load and validate a single conversation JSON file."""
+        try:
+            raw = filepath.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error(f"chatgpt: cannot load {filepath} — {e}")
+            return []
+
+        if not isinstance(data, list):
+            logger.error(
+                f"chatgpt: expected list at root of {filepath.name}, "
+                f"got {type(data).__name__}"
+            )
+            return []
+
+        return data
 
     def _iter_messages(self, data: list[dict]):
         """Walk each conversation tree and yield (conv_title, role, text) tuples."""
@@ -60,7 +100,6 @@ class ChatGPTSource:
                     continue
 
                 content = msg.get("content", {})
-                # content_type "text" has a "parts" list of strings
                 if content.get("content_type") != "text":
                     continue
 
@@ -73,26 +112,31 @@ class ChatGPTSource:
                 yield title, role, text
 
     async def chunks(self) -> AsyncIterator[Chunk]:
-        try:
-            raw = self.path.read_text(encoding="utf-8")
-            data = json.loads(raw)
-        except (OSError, json.JSONDecodeError) as e:
-            logger.error(f"chatgpt: cannot load {self.path} — {e}")
+        files = self._discover_files()
+        if not files:
             return
 
-        if not isinstance(data, list):
-            logger.error(f"chatgpt: expected list at root, got {type(data).__name__}")
-            return
+        total_convs = 0
+        for filepath in files:
+            data = self._load_file(filepath)
+            if not data:
+                continue
 
-        for conv_title, role, text in self._iter_messages(data):
-            for chunk_text_piece in chunk_text(text, self.chunk_size, self.chunk_overlap):
-                yield Chunk(
-                    text=chunk_text_piece,
-                    source=f"chatgpt:{conv_title}",
-                    metadata={
-                        "conversation": conv_title,
-                        "role": role,
-                        "type": "chatgpt_export",
-                    },
-                    user_id=self.user_id,
-                )
+            total_convs += len(data)
+            logger.info(f"chatgpt: processing {filepath.name} ({len(data)} conversations)")
+
+            for conv_title, role, text in self._iter_messages(data):
+                for chunk_text_piece in chunk_text(text, self.chunk_size, self.chunk_overlap):
+                    yield Chunk(
+                        text=chunk_text_piece,
+                        source=f"chatgpt:{conv_title}",
+                        metadata={
+                            "conversation": conv_title,
+                            "role": role,
+                            "type": "chatgpt_export",
+                            "source_file": filepath.name,
+                        },
+                        user_id=self.user_id,
+                    )
+
+        logger.info(f"chatgpt: finished — {total_convs} conversations across {len(files)} file(s)")

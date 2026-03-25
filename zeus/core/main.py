@@ -11,6 +11,8 @@ from pydantic import BaseModel
 
 from zeus.api.main import router as oracle_router
 from zeus.core.chat import router as chat_router
+from zeus.core.query import QueryEngine, _run_llm
+from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
 from zeus.memory.config import get_memory_client
 from zeus.voice.state import VoiceStateHub
@@ -52,6 +54,13 @@ async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient()
     app.state.memory = get_memory_client()
     app.state.voice_hub = VoiceStateHub()
+    storage = InMemoryStorage()
+    session_manager = SessionManager(storage, llm_fn=_run_llm)
+    app.state.session_manager = session_manager
+    app.state.query_engine = QueryEngine(
+        memory=app.state.memory,
+        session_manager=session_manager,
+    )
     yield
     await app.state.http_client.aclose()
 

@@ -256,17 +256,17 @@ curl -s localhost:8000/orchestration/status | python3 -m json.tool
 
 ---
 
-## Sprint 6 — Conversation Sessions
+## Sprint 6 — Conversation Sessions ✅ (Phase 1 — Mar 2026)
 
 **Goal:** Add multi-turn continuity so Zeus is no longer stateless per request.
 
 **Tasks:**
 
-1. Add session model (`session_id`, turns, summary, metadata)
-2. Store recent turns and rolling summaries
-3. Make Oracle session-aware (`/context/query` can include `session_id`)
-4. Add session resume and expiration behavior
-5. Persist session artifacts in memory layer (or SQLite sidecar)
+1. Add session model (`session_id`, turns, summary, metadata) — done in `zeus/core/sessions.py`
+2. Store recent turns and rolling summaries — in-memory + LLM rolling summary past 20 turns
+3. Make Oracle session-aware (`/context/query` can include `session_id`) — deferred; chat/query path is session-aware
+4. Add session resume and expiration behavior — resume via `GET /chat/sessions`, `GET /chat/sessions/{id}`; no TTL yet
+5. Persist session artifacts in memory layer (or SQLite sidecar) — deferred; `SessionStorage` protocol ready for swap-in
 
 **Exit criterion:**
 ```bash
@@ -303,9 +303,13 @@ curl -s -X POST localhost:8000/chat/message \
 - Phaos orb embedded in `chat.html` + standalone [`zeus/core/static/viz/viz.html`](../core/static/viz/viz.html) (Three.js + WebXR VR button)
 - `ZEUS_LLM` respected for chat (`claude` | `ollama` | unset → dev+key uses Claude)
 
-**Still open for Sprint 7 “done”:**
+**Done in Phase 1 (Mar 2026):**
 
-- `GET /chat/stream` (SSE) and `GET /chat/sessions/{session_id}` per [`chat-interface-spec.md`](chat-interface-spec.md)
+- `POST /chat/stream` (SSE), `GET /chat/sessions`, `GET /chat/sessions/{session_id}`, `DELETE /chat/sessions/{session_id}`
+- Query engine in `zeus/core/query.py`; session layer in `zeus/core/sessions.py`
+
+**Still open for Sprint 7 polish:**
+
 - Structured logging fields (request_id, prompt_hash, …)
 - Aegis on chat path once Sprint 3 lands
 

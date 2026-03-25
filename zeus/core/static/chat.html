@@ -85,6 +85,96 @@
       min-height: 0;
       padding: 0.75rem 1rem 1rem;
     }
+    .chat-inner {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 0.65rem;
+      min-height: 0;
+    }
+    @media (min-width: 900px) {
+      .chat-inner {
+        flex-direction: row;
+        align-items: stretch;
+      }
+    }
+    #sessions-aside {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 0.5rem 0.6rem;
+      max-height: 180px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    @media (min-width: 900px) {
+      #sessions-aside {
+        width: 220px;
+        max-height: none;
+        min-height: 0;
+      }
+    }
+    #sessions-aside.collapsed {
+      max-height: 2rem;
+    }
+    #sessions-aside.collapsed #session-list-wrap {
+      display: none;
+    }
+    .sessions-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .sessions-head button {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.4rem;
+      background: #1a2434;
+      border: 1px solid #2a3848;
+      border-radius: 4px;
+      color: var(--fg);
+      cursor: pointer;
+    }
+    #session-list-wrap {
+      overflow-y: auto;
+      flex: 1;
+      min-height: 0;
+    }
+    #session-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    #session-list li {
+      font-size: 0.75rem;
+      font-family: ui-monospace, monospace;
+      padding: 0.35rem 0.4rem;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--muted);
+      border: 1px solid transparent;
+    }
+    #session-list li:hover {
+      background: #151b26;
+      color: var(--fg);
+    }
+    #session-list li.active {
+      border-color: #2a5080;
+      color: var(--accent);
+      background: #121a28;
+    }
+    .chat-main {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
+    }
     #session-row {
       display: flex;
       align-items: center;
@@ -106,6 +196,11 @@
     }
     .msg { margin-bottom: 0.65rem; line-height: 1.45; font-size: 0.9rem; }
     .msg strong { color: #9ebdff; }
+    .msg-meta {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
     .composer {
       display: flex;
       gap: 0.5rem;
@@ -172,15 +267,31 @@
       <p class="phaos-hint">Phaos reacts to <code>/ws/voice-state</code>. Mic levels blend in while <em>listening</em> (click page once if audio is suspended).</p>
     </aside>
     <main id="chat-panel">
-      <div id="session-row">
-        Session: <span id="session-id">—</span>
-        <button type="button" id="new-session" style="font-size:0.75rem;padding:0.2rem 0.45rem;background:#1a2434;border:1px solid #2a3848;border-radius:4px;color:var(--fg);cursor:pointer;">New</button>
+      <div class="chat-inner">
+        <aside id="sessions-aside" aria-label="Recent sessions">
+          <div class="sessions-head">
+            <span>Sessions</span>
+            <span style="display:flex;gap:0.25rem;">
+              <button type="button" id="refresh-sessions" title="Refresh list">Refresh</button>
+              <button type="button" id="toggle-sessions" title="Collapse">▾</button>
+            </span>
+          </div>
+          <div id="session-list-wrap">
+            <ul id="session-list"></ul>
+          </div>
+        </aside>
+        <div class="chat-main">
+          <div id="session-row">
+            Session: <span id="session-id">—</span>
+            <button type="button" id="new-session" style="font-size:0.75rem;padding:0.2rem 0.45rem;background:#1a2434;border:1px solid #2a3848;border-radius:4px;color:var(--fg);cursor:pointer;">New</button>
+          </div>
+          <div id="transcript"></div>
+          <form class="composer" id="chat-form">
+            <input type="text" id="msg-input" placeholder="Message Zeus…" autocomplete="off" />
+            <button type="submit" id="send">Send</button>
+          </form>
+        </div>
       </div>
-      <div id="transcript"></div>
-      <form class="composer" id="chat-form">
-        <input type="text" id="msg-input" placeholder="Message Zeus…" autocomplete="off" />
-        <button type="submit" id="send">Send</button>
-      </form>
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
@@ -195,6 +306,8 @@
     const sendBtn = document.getElementById('send');
     const toast = document.getElementById('toast');
     const phaosRoot = document.getElementById('phaos-root');
+    const sessionListEl = document.getElementById('session-list');
+    const sessionsAside = document.getElementById('sessions-aside');
 
     let sessionId = null;
 
@@ -204,13 +317,165 @@
       setTimeout(() => toast.classList.remove('show'), 5000);
     }
 
-    function appendMessage(role, text) {
+    function appendMessage(role, text, metaText) {
       const div = document.createElement('div');
       div.className = 'msg';
       div.innerHTML = `<strong>${role}:</strong> `;
       div.appendChild(document.createTextNode(text));
+      if (metaText) {
+        const meta = document.createElement('div');
+        meta.className = 'msg-meta';
+        meta.textContent = metaText;
+        div.appendChild(meta);
+      }
       transcript.appendChild(div);
       transcript.scrollTop = transcript.scrollHeight;
+      return div;
+    }
+
+    function appendAssistantStreaming() {
+      const div = document.createElement('div');
+      div.className = 'msg';
+      div.innerHTML =
+        '<strong>Zeus:</strong> <span class="assistant-body"></span><div class="msg-meta"></div>';
+      transcript.appendChild(div);
+      transcript.scrollTop = transcript.scrollHeight;
+      return div;
+    }
+
+    async function refreshSessionList() {
+      try {
+        const r = await fetch('/chat/sessions?limit=15');
+        if (!r.ok) return;
+        const data = await r.json();
+        const sessions = data.sessions || [];
+        sessionListEl.innerHTML = '';
+        sessions.forEach((s) => {
+          const li = document.createElement('li');
+          li.dataset.id = s.id;
+          li.textContent = `${s.id.slice(0, 8)}… · ${s.turn_count} turns`;
+          if (s.id === sessionId) li.classList.add('active');
+          li.addEventListener('click', () => loadSession(s.id));
+          sessionListEl.appendChild(li);
+        });
+      } catch (_) {}
+    }
+
+    async function loadSession(id) {
+      try {
+        const r = await fetch(`/chat/sessions/${encodeURIComponent(id)}`);
+        if (!r.ok) {
+          showToast('Could not load session');
+          return;
+        }
+        const s = await r.json();
+        transcript.innerHTML = '';
+        sessionId = s.id;
+        sessionEl.textContent = sessionId.slice(0, 8) + '…';
+        (s.turns || []).forEach((t) => {
+          appendMessage('You', t.user || '');
+          const meta = typeof t.latency_ms === 'number' ? `${t.latency_ms} ms` : '';
+          appendMessage('Zeus', t.assistant || '', meta);
+        });
+        await refreshSessionList();
+      } catch (e) {
+        showToast(String(e));
+      }
+    }
+
+    async function sendNonStreaming(text) {
+      const r = await fetch('/chat/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          message: text,
+          use_context: true,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        showToast(data.detail || `Error ${r.status}`);
+        return;
+      }
+      sessionId = data.session_id;
+      sessionEl.textContent = sessionId.slice(0, 8) + '…';
+      const meta =
+        data.model_used && data.latency_ms != null
+          ? `${data.model_used} · ${data.latency_ms} ms (~${data.token_estimate} tok)`
+          : '';
+      appendMessage('Zeus', data.assistant_message || '', meta);
+      await refreshSessionList();
+    }
+
+    async function sendStreaming(text) {
+      const r = await fetch('/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          message: text,
+          use_context: true,
+        }),
+      });
+      if (!r.ok || !r.body) {
+        await sendNonStreaming(text);
+        return;
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      const assistantDiv = appendAssistantStreaming();
+      const bodyEl = assistantDiv.querySelector('.assistant-body');
+      const metaEl = assistantDiv.querySelector('.msg-meta');
+      let gotDone = false;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            const raw = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const lines = raw.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              let payload;
+              try {
+                payload = JSON.parse(line.slice(6));
+              } catch {
+                continue;
+              }
+              if (payload.type === 'token' && payload.content) {
+                bodyEl.appendChild(document.createTextNode(payload.content));
+                transcript.scrollTop = transcript.scrollHeight;
+              } else if (payload.type === 'done') {
+                gotDone = true;
+                if (payload.session_id) sessionId = payload.session_id;
+                sessionEl.textContent = sessionId ? sessionId.slice(0, 8) + '…' : '—';
+                const parts = [];
+                if (payload.model_used) parts.push(payload.model_used);
+                if (payload.latency_ms != null) parts.push(`${payload.latency_ms} ms`);
+                metaEl.textContent = parts.join(' · ');
+              } else if (payload.type === 'error') {
+                showToast(payload.detail || 'Stream error');
+                if (assistantDiv.parentNode) transcript.removeChild(assistantDiv);
+                await sendNonStreaming(text);
+                return;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        showToast(String(err));
+      }
+      if (!gotDone) {
+        if (assistantDiv.parentNode) transcript.removeChild(assistantDiv);
+        showToast('Stream interrupted before completion. Try again.');
+        return;
+      }
+      await refreshSessionList();
     }
 
     const phaos = await initPhaos({ container: phaosRoot, enableMic: true, enableXR: true });
@@ -231,23 +496,7 @@
       appendMessage('You', text);
       sendBtn.disabled = true;
       try {
-        const r = await fetch('/chat/message', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: sessionId,
-            message: text,
-            use_context: true,
-          }),
-        });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          showToast(data.detail || `Error ${r.status}`);
-          return;
-        }
-        sessionId = data.session_id;
-        sessionEl.textContent = sessionId.slice(0, 8) + '…';
-        appendMessage('Zeus', data.assistant_message || '');
+        await sendStreaming(text);
       } catch (err) {
         showToast(String(err));
       } finally {
@@ -260,7 +509,17 @@
       sessionId = null;
       sessionEl.textContent = '—';
       transcript.innerHTML = '';
+      refreshSessionList();
     });
+
+    document.getElementById('refresh-sessions').addEventListener('click', () => refreshSessionList());
+    document.getElementById('toggle-sessions').addEventListener('click', () => {
+      sessionsAside.classList.toggle('collapsed');
+      const btn = document.getElementById('toggle-sessions');
+      btn.textContent = sessionsAside.classList.contains('collapsed') ? '▸' : '▾';
+    });
+
+    refreshSessionList();
 
     fetch('/status')
       .then((r) => r.json())
