@@ -11,6 +11,8 @@ import asyncio
 import logging
 import os
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,6 +25,17 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("iris")
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Human-readable duration string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    return f"{minutes}m {secs}s"
 
 
 def build_sources(args) -> list:
@@ -96,6 +109,7 @@ def build_sources(args) -> list:
 
 async def main(args) -> None:
     from zeus.ingest.pipeline import run_ingest
+    from zeus.memory.config import get_token_usage, reset_token_usage
 
     if args.llm:
         os.environ["ZEUS_LLM"] = args.llm
@@ -107,31 +121,84 @@ async def main(args) -> None:
     llm_label = args.llm or os.getenv("ZEUS_LLM", "auto")
     logger.info(f"iris: starting {mode} ingest — {len(sources)} source(s), llm={llm_label}")
 
+    reset_token_usage()
+    wall_start = time.monotonic()
+    start_ts = datetime.now(timezone.utc)
+
     results = await run_ingest(
         sources=sources,
         chunk_size=args.chunk_size,
         dry_run=args.dry_run,
     )
 
-    # Summary table
-    print("\n── Iris Ingest Summary ──────────────────────")
+    wall_elapsed = time.monotonic() - wall_start
+    tokens = get_token_usage()
+
+    _print_summary(results, args, llm_label, wall_elapsed, start_ts, tokens)
+
+
+def _print_summary(results, args, llm_label, wall_elapsed, start_ts, tokens):
+    """Print a detailed ingest summary to stdout."""
     total_processed = total_stored = total_errors = 0
+    total_ops: dict[str, int] = {"ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0}
+
+    print()
+    print("┌─────────────────────────────────────────────────────────┐")
+    print("│                  Iris Ingest Summary                    │")
+    print("├─────────────────────────────────────────────────────────┤")
+
     for r in results:
         status = "✓" if not r.errors else "⚠"
-        print(f"  {status} {r.source:<20} {r.chunks_stored}/{r.chunks_processed} chunks stored")
+        rate = r.chunks_stored / r.elapsed_sec if r.elapsed_sec > 0 else 0
+        print(f"│  {status} {r.source}")
+        print(f"│    Chunks: {r.chunks_stored}/{r.chunks_processed} stored "
+              f"in {_fmt_duration(r.elapsed_sec)} "
+              f"({rate:.2f} chunks/s)")
+
+        ops_parts = []
+        for op in ("ADD", "UPDATE", "DELETE", "NONE"):
+            count = r.mem0_ops.get(op, 0)
+            if count > 0:
+                ops_parts.append(f"{count} {op}")
+            total_ops[op] += count
+        if ops_parts:
+            print(f"│    Memory ops: {', '.join(ops_parts)}")
+
         if r.errors:
-            for err in r.errors[:5]:
-                print(f"      ! {err}")
-            if len(r.errors) > 5:
-                print(f"      ... and {len(r.errors) - 5} more errors")
+            print(f"│    Errors: {len(r.errors)}")
+            for err in r.errors[:3]:
+                print(f"│      ! {err[:80]}")
+            if len(r.errors) > 3:
+                print(f"│      ... and {len(r.errors) - 3} more")
+
         total_processed += r.chunks_processed
         total_stored += r.chunks_stored
         total_errors += len(r.errors)
 
-    print(f"  {'─' * 40}")
-    print(f"  Total: {total_stored}/{total_processed} stored, {total_errors} errors")
+    print("├─────────────────────────────────────────────────────────┤")
+
+    overall_rate = total_stored / wall_elapsed if wall_elapsed > 0 else 0
+    print(f"│  Chunks:     {total_stored}/{total_processed} stored, "
+          f"{total_errors} errors")
+    print(f"│  Wall time:  {_fmt_duration(wall_elapsed)} "
+          f"({overall_rate:.2f} chunks/s)")
+    print(f"│  Started:    {start_ts.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+    ops_line = ", ".join(f"{v} {k}" for k, v in total_ops.items() if v > 0)
+    if ops_line:
+        print(f"│  Memory ops: {ops_line}")
+
+    if tokens.llm_calls > 0:
+        print(f"│  LLM calls:  {tokens.llm_calls}")
+        print(f"│  Tokens:     {tokens.input_tokens:,} in + "
+              f"{tokens.output_tokens:,} out = "
+              f"{tokens.total_tokens:,} total")
+
+    print(f"│  LLM:        {llm_label}")
     if args.dry_run:
-        print("  [dry-run] nothing written to mnemosyne")
+        print("│  [dry-run]   Nothing written to mnemosyne")
+
+    print("└─────────────────────────────────────────────────────────┘")
     print()
 
 
