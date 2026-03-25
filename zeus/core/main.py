@@ -2,17 +2,25 @@
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from zeus.api.main import router as oracle_router
+from zeus.core.chat import router as chat_router
+from zeus.core.voice_ws import router as voice_state_router
+from zeus.memory.config import get_memory_client
+from zeus.voice.state import VoiceStateHub
 
 ZEUS_VERSION = "0.1.0"
 BOOT_TIME = time.time()
 
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11435")
 
 
 class ServiceHealth(BaseModel):
@@ -42,6 +50,8 @@ async def check_service(client: httpx.AsyncClient, name: str, url: str) -> Servi
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient()
+    app.state.memory = get_memory_client()
+    app.state.voice_hub = VoiceStateHub()
     yield
     await app.state.http_client.aclose()
 
@@ -51,6 +61,13 @@ app = FastAPI(
     version=ZEUS_VERSION,
     lifespan=lifespan,
 )
+app.include_router(oracle_router)
+app.include_router(voice_state_router)
+app.include_router(chat_router)
+
+_static_dir = Path(__file__).resolve().parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 @app.get("/status", response_model=StatusResponse)
@@ -71,4 +88,13 @@ async def status():
 
 @app.get("/")
 async def root():
-    return {"name": "zeus", "version": ZEUS_VERSION, "env": ZEUS_ENV}
+    return {
+        "name": "zeus",
+        "version": ZEUS_VERSION,
+        "env": ZEUS_ENV,
+        "ui": {
+            "chat": "/chat",
+            "phaos_viz": "/viz",
+            "voice_state_ws": "/ws/voice-state",
+        },
+    }

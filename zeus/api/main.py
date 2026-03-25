@@ -1,12 +1,10 @@
-# zeus/api/main.py — Oracle: Zeus Context API
-# Serves structured personal context to agents and LLMs.
-# Sits on top of mnemosyne (mem0) and formats results for injection into prompts.
+# zeus/api/main.py — Oracle router for Zeus Core
 import os
-from contextlib import asynccontextmanager
-from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from zeus.memory.search import format_context_block, get_profile_facts, search_memories
 
 ORACLE_VERSION = "0.1.0"
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
@@ -48,49 +46,32 @@ class ProfileResponse(BaseModel):
     facts: list[str]
 
 
-# ---------------------------------------------------------------------------
-# App setup
-# ---------------------------------------------------------------------------
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    from zeus.memory.config import get_memory_client
-    app.state.memory = get_memory_client()
-    yield
-
-
-app = FastAPI(
-    title="Oracle — Zeus Context API",
-    version=ORACLE_VERSION,
-    lifespan=lifespan,
-)
-
-
-def get_memory(request):
-    return request.app.state.memory
+router = APIRouter(tags=["oracle"])
 
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/context/query", response_model=ContextResponse)
-async def query_context(body: ContextQuery, request=None):
+@router.post("/context/query", response_model=ContextResponse)
+async def query_context(body: ContextQuery, request: Request):
     """
     Retrieve relevant memories and return them as a formatted context block.
 
     The context string is ready to inject into an LLM system prompt:
         system_prompt += f"\\n\\n## Personal Context\\n{context_response.context}"
     """
-    memory = request.app.state.memory if request else None
+    memory = getattr(request.app.state, "memory", None)
     if memory is None:
         raise HTTPException(status_code=503, detail="Memory client not initialized")
 
     try:
-        results = memory.search(
+        results = search_memories(
+            memory=memory,
             query=body.query,
             user_id="chris",
-            limit=body.top_k,
+            top_k=body.top_k,
+            namespaces=body.namespaces,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Memory search failed: {e}")
@@ -98,28 +79,14 @@ async def query_context(body: ContextQuery, request=None):
     if not results:
         return ContextResponse(context="", sources=[], token_estimate=0)
 
-    # Format memories as a numbered list for LLM injection
-    lines: list[str] = []
+    context, token_estimate = format_context_block(results, max_tokens=body.max_tokens)
     sources: list[ContextSource] = []
-
-    for i, mem in enumerate(results, 1):
-        text = mem.get("memory", "")
-        lines.append(f"{i}. {text}")
+    for mem in results:
         sources.append(ContextSource(
             memory_id=mem.get("id", ""),
             source=mem.get("metadata", {}).get("source", "unknown"),
-            relevance=mem.get("score", 0.0),
+            relevance=float(mem.get("score") or 0.0),
         ))
-
-    context = "\n".join(lines)
-    # Rough token estimate: 1 token ≈ 4 chars
-    token_estimate = len(context) // 4
-
-    # Truncate if over budget
-    if token_estimate > body.max_tokens:
-        max_chars = body.max_tokens * 4
-        context = context[:max_chars] + "\n[truncated]"
-        token_estimate = body.max_tokens
 
     return ContextResponse(
         context=context,
@@ -128,22 +95,34 @@ async def query_context(body: ContextQuery, request=None):
     )
 
 
-@app.get("/context/profile", response_model=ProfileResponse)
-async def get_profile(request=None):
+@router.get("/context/profile", response_model=ProfileResponse)
+async def get_profile(request: Request):
     """
     Return stable facts about the user — used as baseline system prompt context.
 
     In Sprint 0 this is a stub. Sprint 1 will populate it from mnemosyne
     after the first ingest run.
     """
-    # TODO: query mnemosyne with a "user profile" namespace after first ingest
+    memory = getattr(request.app.state, "memory", None)
+    if memory is None:
+        raise HTTPException(status_code=503, detail="Memory client not initialized")
+
+    facts = get_profile_facts(memory=memory, user_id="chris", top_k=8)
+    if not facts:
+        return ProfileResponse(
+            user_id="chris",
+            summary="Profile not yet populated. Run iris ingest first.",
+            facts=[],
+        )
+
+    summary = " ".join(facts[:3])
     return ProfileResponse(
         user_id="chris",
-        summary="Profile not yet populated. Run iris ingest first.",
-        facts=[],
+        summary=summary,
+        facts=facts,
     )
 
 
-@app.get("/status")
+@router.get("/context/status")
 async def status():
     return {"service": "oracle", "version": ORACLE_VERSION, "env": ZEUS_ENV}
