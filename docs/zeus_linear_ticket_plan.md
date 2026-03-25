@@ -51,6 +51,7 @@ Key changes from v1:
 
 ## Project 1 — Text Chat + Sessions
 
+**Status (24 Mar 2026):** Phase 1 shipped — `zeus/core/sessions.py`, `zeus/core/query.py`, chat SSE + session APIs + `chat.html` upgrades. Mark **LAB-184** and **LAB-187** done in Linear when validated.
 
 | Parent  | Title               | Labels          | Subs |
 | ------- | ------------------- | --------------- | ---- |
@@ -60,6 +61,7 @@ Key changes from v1:
 
 ## Project 2 — Data Brain
 
+**Status (24 Mar 2026):** **LAB-49 (Query Engine)** implemented as `zeus/core/query.py` (shared brain for chat + future voice). Mark **LAB-49** done in Linear after your smoke tests.
 
 | Parent | Title                                | Labels             | Subs |
 | ------ | ------------------------------------ | ------------------ | ---- |
