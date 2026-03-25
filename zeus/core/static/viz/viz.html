@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phaos — Zeus voice visualization</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0c10;
+      --fg: #e8eef8;
+      --muted: #7a8aa0;
+      --accent: #66aaff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(ellipse at 50% 20%, #12182a 0%, var(--bg) 55%);
+      color: var(--fg);
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1.25rem;
+    }
+    h1 {
+      font-weight: 600;
+      font-size: 1.15rem;
+      letter-spacing: 0.04em;
+      margin: 0 0 0.25rem;
+    }
+    p.sub {
+      margin: 0 0 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    #phaos-root {
+      width: min(92vw, 520px);
+      height: min(52vh, 420px);
+      border-radius: 16px;
+      background: linear-gradient(160deg, #0d1118 0%, #080a0e 100%);
+      border: 1px solid #1e2836;
+      box-shadow: 0 0 0 1px #0008, 0 20px 50px #000a;
+      overflow: hidden;
+      position: relative;
+    }
+    .panel {
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+      background: #111620;
+      border: 1px solid #1e2836;
+      border-radius: 10px;
+      max-width: 520px;
+      width: 100%;
+    }
+    .panel h2 {
+      margin: 0 0 0.5rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    button {
+      background: #1a2434;
+      border: 1px solid #2a3848;
+      color: var(--fg);
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    a { color: var(--accent); }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <h1>Phaos</h1>
+  <p class="sub">Voice-state visualization · WebSocket <code>/ws/voice-state</code> · <a href="/chat">Chat</a></p>
+  <div id="phaos-root" aria-label="Voice visualization"></div>
+  <div class="panel">
+    <h2>Debug states</h2>
+    <p class="sub" style="margin-bottom:0.5rem">Simulate Orpheus without the pipeline. Uses <code>POST /voice-state/publish</code>.</p>
+    <div class="row" id="debug-btns"></div>
+  </div>
+  <script type="module">
+    import { initPhaos } from '/static/viz/phaos.js';
+
+    const root = document.getElementById('phaos-root');
+    const phaos = await initPhaos({ container: root, enableMic: true, enableXR: true });
+    document.body.addEventListener('click', () => phaos.resumeAudio?.(), { once: true });
+
+    const states = ['idle', 'wake_detected', 'listening', 'processing', 'speaking'];
+    const row = document.getElementById('debug-btns');
+    async function publish(state, level = 0) {
+      const headers = { 'Content-Type': 'application/json' };
+      const r = await fetch('/voice-state/publish', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          state,
+          audio_level: level,
+          metadata: { source: 'debug_ui' },
+        }),
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        alert(`Publish failed (${r.status}): ${t || r.statusText}`);
+      }
+    }
+    states.forEach((s) => {
+      const b = document.createElement('button');
+      b.textContent = s;
+      b.addEventListener('click', () => publish(s, s === 'listening' || s === 'speaking' ? 0.55 : 0));
+      row.appendChild(b);
+    });
+    const pulse = document.createElement('button');
+    pulse.textContent = 'speaking + level';
+    pulse.addEventListener('click', () => publish('speaking', 0.85));
+    row.appendChild(pulse);
+  </script>
+</body>
+</html>

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zeus Chat</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07090d;
+      --panel: #0e1218;
+      --border: #1c2530;
+      --fg: #e8eef8;
+      --muted: #6b7a90;
+      --accent: #5c9eff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    header nav a { color: var(--accent); margin-left: 1rem; }
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0;
+      min-height: 0;
+    }
+    @media (min-width: 900px) {
+      .layout {
+        grid-template-columns: minmax(280px, 38%) 1fr;
+      }
+    }
+    #phaos-wrap {
+      min-height: 260px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #0a0e14 0%, #07090d 100%);
+      display: flex;
+      flex-direction: column;
+      padding: 0.75rem;
+    }
+    @media (min-width: 900px) {
+      #phaos-wrap {
+        border-bottom: none;
+        border-right: 1px solid var(--border);
+        min-height: 100%;
+      }
+    }
+    #phaos-root {
+      flex: 1;
+      min-height: 220px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      position: relative;
+    }
+    .phaos-hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 0.35rem 0 0;
+    }
+    #chat-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 0.75rem 1rem 1rem;
+    }
+    #session-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    #session-id { font-family: ui-monospace, monospace; color: var(--accent); }
+    #transcript {
+      flex: 1;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem;
+      background: var(--panel);
+      margin-bottom: 0.65rem;
+      min-height: 200px;
+    }
+    .msg { margin-bottom: 0.65rem; line-height: 1.45; font-size: 0.9rem; }
+    .msg strong { color: #9ebdff; }
+    .composer {
+      display: flex;
+      gap: 0.5rem;
+    }
+    #msg-input {
+      flex: 1;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--fg);
+      padding: 0.55rem 0.65rem;
+      font-size: 0.9rem;
+    }
+    #msg-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    button#send {
+      background: #1a2f4d;
+      border: 1px solid #2a5080;
+      color: var(--fg);
+      padding: 0 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button#send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: #3d1515;
+      border: 1px solid #662222;
+      color: #ffcccc;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      max-width: 320px;
+      display: none;
+    }
+    .toast.show { display: block; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>Zeus</h1>
+    <nav>
+      <span id="env-badge" class="muted"></span>
+      <a href="/viz">Phaos</a>
+      <a href="/status">Status</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside id="phaos-wrap">
+      <div id="phaos-root" aria-label="Voice visualization"></div>
+      <p class="phaos-hint">Phaos reacts to <code>/ws/voice-state</code>. Mic levels blend in while <em>listening</em> (click page once if audio is suspended).</p>
+    </aside>
+    <main id="chat-panel">
+      <div id="session-row">
+        Session: <span id="session-id">—</span>
+        <button type="button" id="new-session" style="font-size:0.75rem;padding:0.2rem 0.45rem;background:#1a2434;border:1px solid #2a3848;border-radius:4px;color:var(--fg);cursor:pointer;">New</button>
+      </div>
+      <div id="transcript"></div>
+      <form class="composer" id="chat-form">
+        <input type="text" id="msg-input" placeholder="Message Zeus…" autocomplete="off" />
+        <button type="submit" id="send">Send</button>
+      </form>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script type="module">
+    import { initPhaos } from '/static/viz/phaos.js';
+
+    const transcript = document.getElementById('transcript');
+    const sessionEl = document.getElementById('session-id');
+    const input = document.getElementById('msg-input');
+    const form = document.getElementById('chat-form');
+    const sendBtn = document.getElementById('send');
+    const toast = document.getElementById('toast');
+    const phaosRoot = document.getElementById('phaos-root');
+
+    let sessionId = null;
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 5000);
+    }
+
+    function appendMessage(role, text) {
+      const div = document.createElement('div');
+      div.className = 'msg';
+      div.innerHTML = `<strong>${role}:</strong> `;
+      div.appendChild(document.createTextNode(text));
+      transcript.appendChild(div);
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+
+    const phaos = await initPhaos({ container: phaosRoot, enableMic: true, enableXR: true });
+
+    document.body.addEventListener(
+      'click',
+      () => {
+        phaos.resumeAudio?.();
+      },
+      { once: true },
+    );
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      appendMessage('You', text);
+      sendBtn.disabled = true;
+      try {
+        const r = await fetch('/chat/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            message: text,
+            use_context: true,
+          }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          showToast(data.detail || `Error ${r.status}`);
+          return;
+        }
+        sessionId = data.session_id;
+        sessionEl.textContent = sessionId.slice(0, 8) + '…';
+        appendMessage('Zeus', data.assistant_message || '');
+      } catch (err) {
+        showToast(String(err));
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    });
+
+    document.getElementById('new-session').addEventListener('click', () => {
+      sessionId = null;
+      sessionEl.textContent = '—';
+      transcript.innerHTML = '';
+    });
+
+    fetch('/status')
+      .then((r) => r.json())
+      .then((s) => {
+        document.getElementById('env-badge').textContent = s.environment || '';
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>
