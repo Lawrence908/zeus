@@ -38,6 +38,8 @@ Key changes from v1:
 
 ## Project 0 — Foundation (Mostly Complete)
 
+**Status (25 Mar 2026):** Core service skeleton is in place (FastAPI bus, env wiring, Qdrant/Ollama health check). Ruflo config + agent YAMLs exist, but the **Ruflo validation spike (LAB-121)** still looks **unverified** in-repo (no safety policy dir present at `safety/policies/`, no runnable Ruflo integration code checked in).
+
 
 | Parent  | Title                              | Labels             | Subs |
 | ------- | ---------------------------------- | ------------------ | ---- |
@@ -51,7 +53,7 @@ Key changes from v1:
 
 ## Project 1 — Text Chat + Sessions
 
-**Status (24 Mar 2026):** Phase 1 shipped — `zeus/core/sessions.py`, `zeus/core/query.py`, chat SSE + session APIs + `chat.html` upgrades. Mark **LAB-184** and **LAB-187** done in Linear when validated.
+**Status (25 Mar 2026):** Phase 1 shipped — session layer + text chat UI are implemented (`zeus/core/sessions.py`, `zeus/core/chat.py`, `zeus/core/static/chat.html`) and wired into the Core app (`zeus/core/main.py`). Mark **LAB-184** and **LAB-187** done in Linear after smoke tests.
 
 | Parent  | Title               | Labels          | Subs |
 | ------- | ------------------- | --------------- | ---- |
@@ -61,7 +63,20 @@ Key changes from v1:
 
 ## Project 2 — Data Brain
 
-**Status (24 Mar 2026):** **LAB-49 (Query Engine)** implemented as `zeus/core/query.py` (shared brain for chat + future voice). Mark **LAB-49** done in Linear after your smoke tests.
+**Status (25 Mar 2026):**
+
+- **Implemented**:
+  - **LAB-45 (ChatGPT Export Parser)**: `zeus/ingest/sources/chatgpt.py`
+  - **LAB-46 (Markdown File Walker)**: `zeus/ingest/sources/markdown.py`
+  - **LAB-47 (Context-Pack Migration)**: `zeus/ingest/sources/context_pack.py`
+  - **Ingest runner/CLI plumbing** (supports the above): `zeus/ingest/run.py`, `zeus/ingest/pipeline.py`
+  - **LAB-48 (Zeus Context API v1 / Oracle)**: `zeus/api/main.py` (mounted by `zeus/core/main.py`)
+  - **LAB-49 (Zeus Query Engine)**: `zeus/core/query.py` (used by chat routes)
+- **Partially implemented / needs validation**:
+  - **LAB-61 (mem0 Integration & Retrieval Quality)**: mem0 client + retrieval helpers exist (`zeus/memory/config.py`, `zeus/memory/search.py`), but quality eval harness / tuning loop isn’t represented as a dedicated suite yet.
+- **Not started (no code present yet)**:
+  - **LAB-56 (Privacy & Data Governance / Aegis)**: no `zeus/safety/` or `safety/policies/` directory present; policy enforcement layer isn’t wired beyond config references.
+  - **LAB-64 (Email Ingest)**: no email source/parser found under `zeus/ingest/sources/`.
 
 | Parent | Title                                | Labels             | Subs |
 | ------ | ------------------------------------ | ------------------ | ---- |
@@ -77,6 +92,14 @@ Key changes from v1:
 
 ## Project 3 — Voice Loop
 
+**Status (25 Mar 2026):** Phaos “voice-state” plumbing + visualization assets exist, but the actual STT/wake/TTS components are not present in-repo yet.
+
+- **Implemented (Phaos surface area)**:
+  - Voice-state protocol + hub/emitter: `zeus/voice/state.py`
+  - WebSocket + publish endpoint: `zeus/core/voice_ws.py`
+  - Viz UI assets: `zeus/core/static/viz/` (served via `/viz` in `zeus/core/chat.py`)
+- **Not started (no code present yet)**:
+  - WhisperLiveKit STT, openWakeWord, Voicebox TTS, and the full Orpheus pipeline implementation.
 
 | Parent | Title                           | Labels           | Subs |
 | ------ | ------------------------------- | ---------------- | ---- |
@@ -89,6 +112,7 @@ Key changes from v1:
 
 ## Project 4 — MCP Server
 
+**Status (25 Mar 2026):** No MCP server implementation appears to be checked in yet (no `zeus/mcp/` package found). Treat **LAB-104 / LAB-107 / LAB-108** as **not started** until code exists.
 
 | Parent  | Title                   | Labels          | Subs |
 | ------- | ----------------------- | --------------- | ---- |
@@ -99,6 +123,7 @@ Key changes from v1:
 
 ## Project 5 — Ruflo Agents
 
+**Status (25 Mar 2026):** Ruflo config and agent definition YAMLs exist (`zeus/orchestration/ruflo.yaml`, `zeus/orchestration/agents/*.yaml`). However, the referenced safety policy directory (`safety/policies`) is missing, and there’s no in-repo “Ruflo runtime” code to mark the spike as validated yet.
 
 | Parent  | Title                          | Labels             | Subs |
 | ------- | ------------------------------ | ------------------ | ---- |
