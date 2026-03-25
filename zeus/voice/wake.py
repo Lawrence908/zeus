@@ -67,6 +67,10 @@ class WakeWordDetector:
         self.model_name = (model_name or os.getenv("WAKE_WORD_MODEL", "hey_jarvis")).strip()
         self.threshold = float(threshold if threshold is not None else os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
         self.inference_framework = os.getenv("WAKE_WORD_INFERENCE_FRAMEWORK", "onnx").strip().lower()
+        self.input_device_index: int | None = None
+        input_idx_raw = os.getenv("WAKE_WORD_INPUT_DEVICE_INDEX", "").strip()
+        if input_idx_raw:
+            self.input_device_index = int(input_idx_raw)
         if self.inference_framework not in {"onnx", "tflite"}:
             raise ValueError("WAKE_WORD_INFERENCE_FRAMEWORK must be 'onnx' or 'tflite'")
         self.chunk_size = 1280  # ~80ms at 16kHz
@@ -77,14 +81,44 @@ class WakeWordDetector:
             inference_framework=self.inference_framework,
         )
 
+    @staticmethod
+    def _pick_input_device(audio: pyaudio.PyAudio, requested_index: int | None) -> int | None:
+        if requested_index is not None:
+            return requested_index
+        try:
+            default_info = audio.get_default_input_device_info()
+            return int(default_info["index"])
+        except Exception:
+            pass
+        for i in range(audio.get_device_count()):
+            info = audio.get_device_info_by_index(i)
+            if int(info.get("maxInputChannels", 0)) > 0:
+                return i
+        return None
+
     def listen(self) -> None:
         """Block until wake word detected."""
         audio = pyaudio.PyAudio()
+        device_index = self._pick_input_device(audio, self.input_device_index)
+        if device_index is None:
+            devices = []
+            for i in range(audio.get_device_count()):
+                info = audio.get_device_info_by_index(i)
+                devices.append(
+                    f"{i}:{info.get('name', 'unknown')} (in={int(info.get('maxInputChannels', 0))})"
+                )
+            audio.terminate()
+            raise RuntimeError(
+                "No audio input device found for wake-word detection. "
+                "Attach a microphone and/or set WAKE_WORD_INPUT_DEVICE_INDEX.\n"
+                f"Detected devices: {', '.join(devices) if devices else 'none'}"
+            )
         stream = audio.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=self.rate,
             input=True,
+            input_device_index=device_index,
             frames_per_buffer=self.chunk_size,
         )
         try:

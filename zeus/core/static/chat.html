@@ -242,6 +242,37 @@
       display: none;
     }
     .toast.show { display: block; }
+    #mic-btn {
+      background: #1a2434;
+      border: 1px solid #2a3848;
+      border-radius: 4px;
+      color: var(--fg);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0.35rem 0.55rem;
+      line-height: 1;
+      flex-shrink: 0;
+      user-select: none;
+      touch-action: none;
+    }
+    #mic-btn:hover { border-color: var(--accent); }
+    #mic-btn.recording {
+      background: #3d1010;
+      border-color: #e05050;
+      color: #ff6b6b;
+      animation: mic-pulse 1s ease-in-out infinite;
+    }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(224,80,80,0.5); }
+      50%       { box-shadow: 0 0 0 5px rgba(224,80,80,0); }
+    }
+    #voice-status {
+      font-size: 0.72rem;
+      color: var(--muted);
+      min-height: 1rem;
+      margin-top: 0.25rem;
+      text-align: right;
+    }
   </style>
   <script type="importmap">
   {
@@ -288,8 +319,10 @@
           <div id="transcript"></div>
           <form class="composer" id="chat-form">
             <input type="text" id="msg-input" placeholder="Message Zeus…" autocomplete="off" />
+            <button type="button" id="mic-btn" title="Hold to talk">🎤</button>
             <button type="submit" id="send">Send</button>
           </form>
+          <div id="voice-status"></div>
         </div>
       </div>
     </main>
@@ -520,6 +553,141 @@
     });
 
     refreshSessionList();
+
+    // ── Browser voice capture (hold-to-talk → POST /voice/interact) ────────
+    const micBtn = document.getElementById('mic-btn');
+    const voiceStatusEl = document.getElementById('voice-status');
+    let voiceAudioCtx = null;
+    let voiceStream = null;
+    let voiceProcessor = null;
+    let voicePCMChunks = [];
+    let voiceRecording = false;
+
+    function setVoiceStatus(msg) { voiceStatusEl.textContent = msg; }
+
+    async function publishVoiceState(state, metadata = {}) {
+      try {
+        await fetch('/voice-state/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, metadata }),
+        });
+      } catch (_) {}
+    }
+
+    function pcmChunksToWav(chunks, sampleRate) {
+      const totalSamples = chunks.reduce((s, c) => s + c.length, 0);
+      const dataBytes = totalSamples * 2;
+      const buf = new ArrayBuffer(44 + dataBytes);
+      const v = new DataView(buf);
+      const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+      str(0, 'RIFF'); v.setUint32(4, 36 + dataBytes, true);
+      str(8, 'WAVE'); str(12, 'fmt ');
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      str(36, 'data'); v.setUint32(40, dataBytes, true);
+      let off = 44;
+      for (const chunk of chunks) {
+        for (let i = 0; i < chunk.length; i++) { v.setInt16(off, chunk[i], true); off += 2; }
+      }
+      return buf;
+    }
+
+    async function startVoiceCapture() {
+      if (voiceRecording) return;
+      try {
+        voiceStream = await navigator.mediaDevices.getUserMedia({
+          audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        });
+      } catch (err) {
+        showToast('Mic access denied: ' + err.message);
+        return;
+      }
+      const targetRate = 16000;
+      voiceAudioCtx = new AudioContext({ sampleRate: targetRate });
+      const source = voiceAudioCtx.createMediaStreamSource(voiceStream);
+      // ScriptProcessor is deprecated but has universal support for this use-case
+      voiceProcessor = voiceAudioCtx.createScriptProcessor(4096, 1, 1);
+      voicePCMChunks = [];
+      voiceRecording = true;
+      voiceProcessor.onaudioprocess = (e) => {
+        if (!voiceRecording) return;
+        const f32 = e.inputBuffer.getChannelData(0);
+        const i16 = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) {
+          i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32768)));
+        }
+        voicePCMChunks.push(i16);
+      };
+      source.connect(voiceProcessor);
+      voiceProcessor.connect(voiceAudioCtx.destination);
+      micBtn.classList.add('recording');
+      setVoiceStatus('Recording…');
+      publishVoiceState('listening');
+    }
+
+    async function stopVoiceCapture() {
+      if (!voiceRecording) return;
+      voiceRecording = false;
+      voiceProcessor?.disconnect();
+      voiceAudioCtx?.close();
+      voiceStream?.getTracks().forEach((t) => t.stop());
+      voiceAudioCtx = null; voiceStream = null; voiceProcessor = null;
+      micBtn.classList.remove('recording');
+
+      const chunks = voicePCMChunks;
+      voicePCMChunks = [];
+      const totalSamples = chunks.reduce((s, c) => s + c.length, 0);
+      if (totalSamples < 3200) { // < 0.2 s at 16kHz — ignore tap noise
+        setVoiceStatus('');
+        publishVoiceState('idle');
+        return;
+      }
+
+      setVoiceStatus('Processing…');
+      publishVoiceState('processing');
+      micBtn.disabled = true;
+      sendBtn.disabled = true;
+
+      try {
+        const wav = pcmChunksToWav(chunks, 16000);
+        const form = new FormData();
+        form.append('audio', new Blob([wav], { type: 'audio/wav' }), 'voice.wav');
+        if (sessionId) form.append('session_id', sessionId);
+
+        const r = await fetch('/voice/interact', { method: 'POST', body: form });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || `Error ${r.status}`);
+
+        if (data.session_id) {
+          sessionId = data.session_id;
+          sessionEl.textContent = sessionId.slice(0, 8) + '…';
+        }
+        appendMessage('You', data.transcript || '(no transcript)');
+        const meta = data.model_used && data.latency_ms != null
+          ? `${data.model_used} · ${data.latency_ms} ms`
+          : '';
+        appendMessage('Zeus', data.assistant_message || '', meta);
+        setVoiceStatus('');
+        await refreshSessionList();
+      } catch (err) {
+        showToast(String(err));
+        setVoiceStatus('Voice error — try again');
+      } finally {
+        micBtn.disabled = false;
+        sendBtn.disabled = false;
+        publishVoiceState('idle');
+      }
+    }
+
+    micBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startVoiceCapture(); });
+    micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startVoiceCapture(); }, { passive: false });
+    micBtn.addEventListener('mouseup', stopVoiceCapture);
+    micBtn.addEventListener('mouseleave', stopVoiceCapture);
+    micBtn.addEventListener('touchend', stopVoiceCapture);
+    micBtn.addEventListener('touchcancel', stopVoiceCapture);
+    // ── End voice capture ────────────────────────────────────────────────────
 
     fetch('/status')
       .then((r) => r.json())

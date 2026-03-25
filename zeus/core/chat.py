@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -110,13 +110,16 @@ async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessag
 async def voice_interact(
     request: Request,
     audio: UploadFile = File(...),
-    use_context: bool = True,
-    max_tokens: int = 256,
+    session_id: str | None = Form(default=None),
+    use_context: bool = Form(default=True),
+    max_tokens: int = Form(default=256),
 ) -> dict[str, Any]:
     """
     Non-wake-word voice interaction endpoint.
 
-    Accepts a WAV upload, runs STT -> QueryEngine -> returns transcript + text response.
+    Accepts a WAV upload + optional session_id, runs STT -> QueryEngine ->
+    returns transcript + text response. session_id is threaded through so
+    voice turns share history with the text chat session.
     TTS/audio return is intentionally deferred until Voicebox is standardized.
     """
     engine = _query_engine(request)
@@ -140,7 +143,7 @@ async def voice_interact(
 
     result = await engine.query(
         transcript,
-        session_id=None,
+        session_id=session_id,
         use_context=use_context,
         max_tokens=max_tokens,
         source="voice_interact",
@@ -148,6 +151,7 @@ async def voice_interact(
 
     return {
         "transcript": transcript,
+        "session_id": result.session_id,
         "assistant_message": result.assistant_message,
         "model_used": result.model_used,
         "latency_ms": result.latency_ms,
