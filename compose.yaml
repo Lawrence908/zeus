@@ -54,11 +54,12 @@ services:
       - WHISPER_DEVICE=cpu
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost',9090)); s.close()"]
+      test: ["CMD", "python3", "-c",
+        "import socket,sys; s=socket.socket(); s.settimeout(3); r=s.connect_ex(('localhost',9090)); s.close(); sys.exit(r)"]
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 60s
+      start_period: 30s
     networks:
       - web
 

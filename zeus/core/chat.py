@@ -134,7 +134,7 @@ async def voice_interact(
 
     transcript = ""
     try:
-        async for evt in stt.transcribe(audio_source=_one_chunk()):
+        async for evt in stt.transcribe(audio_source=_one_chunk(), is_wav=True):
             transcript = str(evt.get("text") or "").strip()
             if evt.get("is_final"):
                 break
