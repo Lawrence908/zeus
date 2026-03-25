@@ -21,6 +21,16 @@ ZEUS_DEV_MODEL = os.getenv("ZEUS_DEV_MODEL") or os.getenv(
 
 ZEUS_USER_ID = "chris"
 
+_TIMING_LOG_THRESHOLD_MS = int(os.getenv("ZEUS_TIMING_LOG_THRESHOLD_MS", "250"))
+
+
+def _log_timing(step: str, elapsed_ms: float) -> None:
+    if elapsed_ms < _TIMING_LOG_THRESHOLD_MS:
+        return
+    import logging
+
+    logging.getLogger("zeus.timing").warning(f"{step} took {elapsed_ms:.0f}ms")
+
 
 def _ollama_url() -> str:
     return os.getenv("OLLAMA_URL", "http://localhost:11435").rstrip("/")
@@ -206,15 +216,19 @@ class QueryEngine:
     ) -> QueryResult:
         _ = stream
         t0 = time.monotonic()
+        t = t0
         session = await self.sessions.get_or_create(
             session_id,
             metadata={"source": source},
         )
+        _log_timing("sessions.get_or_create", (time.monotonic() - t) * 1000)
+        t = time.monotonic()
         sid = session.id
 
         memory_section = ""
         sources: list[str] = []
         if use_context:
+            t_search = time.monotonic()
             results = search_memories(
                 memory=self.memory,
                 query=message,
@@ -222,33 +236,43 @@ class QueryEngine:
                 top_k=5,
                 namespaces=[],
             )
+            _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
             if results:
+                t_fmt = time.monotonic()
                 memory_section, _ = format_context_block(results, max_tokens=2048)
+                _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
                 for mem in results:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
 
+        t_prof = time.monotonic()
         facts = get_profile_facts(memory=self.memory, user_id=ZEUS_USER_ID, top_k=8)
+        _log_timing("get_profile_facts", (time.monotonic() - t_prof) * 1000)
         if facts:
             profile_section = "\n".join(f"- {f}" for f in facts[:5])
         else:
             profile_section = "No profile facts loaded yet. Run iris ingest if needed."
 
+        t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
             sid,
             max_turns=10,
             max_tokens=4096,
         )
+        _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
         system = _build_system_prompt(
             profile_section=profile_section,
             memory_section=memory_section,
             conversation_section=conversation_section,
         )
         user_prompt = f"User: {message}\nAssistant:"
+        t_llm = time.monotonic()
         reply = await _run_llm(system=system, user_prompt=user_prompt, max_tokens=max_tokens)
+        _log_timing("llm.call", (time.monotonic() - t_llm) * 1000)
         latency_ms = int((time.monotonic() - t0) * 1000)
         model_used = _active_model_name()
         token_estimate = max(len(reply) // 4, 0)
 
+        t_store = time.monotonic()
         turn = Turn(
             user=message,
             assistant=reply,
@@ -257,6 +281,7 @@ class QueryEngine:
             latency_ms=latency_ms,
         )
         await self.sessions.append_turn(sid, turn)
+        _log_timing("sessions.append_turn", (time.monotonic() - t_store) * 1000)
 
         return QueryResult(
             session_id=sid,
@@ -278,14 +303,17 @@ class QueryEngine:
     ) -> AsyncIterator[str]:
         _ = source
         t0 = time.monotonic()
+        t = t0
         session = await self.sessions.get(session_id)
         if session is None:
             raise KeyError(f"Unknown session: {session_id}")
+        _log_timing("sessions.get", (time.monotonic() - t) * 1000)
         sid = session.id
 
         memory_section = ""
         sources: list[str] = []
         if use_context:
+            t_search = time.monotonic()
             results = search_memories(
                 memory=self.memory,
                 query=message,
@@ -293,22 +321,29 @@ class QueryEngine:
                 top_k=5,
                 namespaces=[],
             )
+            _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
             if results:
+                t_fmt = time.monotonic()
                 memory_section, _ = format_context_block(results, max_tokens=2048)
+                _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
                 for mem in results:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
 
+        t_prof = time.monotonic()
         facts = get_profile_facts(memory=self.memory, user_id=ZEUS_USER_ID, top_k=8)
+        _log_timing("get_profile_facts", (time.monotonic() - t_prof) * 1000)
         if facts:
             profile_section = "\n".join(f"- {f}" for f in facts[:5])
         else:
             profile_section = "No profile facts loaded yet. Run iris ingest if needed."
 
+        t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
             sid,
             max_turns=10,
             max_tokens=4096,
         )
+        _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
         system = _build_system_prompt(
             profile_section=profile_section,
             memory_section=memory_section,
@@ -316,6 +351,7 @@ class QueryEngine:
         )
         user_prompt = f"User: {message}\nAssistant:"
 
+        t_llm = time.monotonic()
         parts: list[str] = []
         async for chunk in _run_llm_stream(
             system=system,
@@ -325,6 +361,7 @@ class QueryEngine:
             parts.append(chunk)
             yield chunk
 
+        _log_timing("llm.stream_total", (time.monotonic() - t_llm) * 1000)
         reply = "".join(parts)
         latency_ms = int((time.monotonic() - t0) * 1000)
         turn = Turn(

@@ -37,14 +37,43 @@ def search_memories(
 
 
 def format_context_block(memories: Iterable[dict], max_tokens: int = 2048) -> tuple[str, int]:
-    """Format memories as numbered lines suitable for prompt injection."""
-    lines: list[str] = []
-    for i, mem in enumerate(memories, 1):
-        text = str(mem.get("memory", "")).strip()
-        if text:
-            lines.append(f"{i}. {text}")
+    """Format memories as a compact, source-labeled block for prompt injection."""
 
-    context = "\n".join(lines)
+    def _label(mem: dict) -> str:
+        md = mem.get("metadata", {}) or {}
+        source = str(md.get("source", "")).strip() or "unknown"
+        kind = str(md.get("type", "")).strip()
+        file = str(md.get("file", "")).strip()
+        title = str(md.get("title", "")).strip()
+        score = mem.get("score", None)
+
+        parts: list[str] = []
+        if kind:
+            parts.append(kind)
+        if file:
+            parts.append(file)
+        elif title:
+            parts.append(title)
+        if not parts:
+            parts.append(source)
+
+        score_part = ""
+        try:
+            if score is not None:
+                score_part = f" score={float(score):.3f}"
+        except (TypeError, ValueError):
+            score_part = ""
+
+        return f"[{ ' | '.join(parts) }{score_part}]"
+
+    blocks: list[str] = []
+    for mem in memories:
+        text = str(mem.get("memory", "")).strip()
+        if not text:
+            continue
+        blocks.append(f"{_label(mem)}\n{text}")
+
+    context = "\n---\n".join(blocks)
     token_estimate = len(context) // 4
     if token_estimate > max_tokens:
         max_chars = max_tokens * 4

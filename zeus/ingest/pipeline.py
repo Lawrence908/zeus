@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator, Protocol
 
 from zeus.memory.config import get_memory_client
+from zeus.ingest.privacy import classify_chunk
 
 logger = logging.getLogger("iris")
 
@@ -82,10 +83,11 @@ async def run_ingest(
 
             chunk_t0 = time.monotonic()
             try:
+                privacy_level = classify_chunk(chunk)
                 mem0_result = memory.add(
                     messages=[{"role": "user", "content": chunk.text}],
                     user_id=chunk.user_id,
-                    metadata={**chunk.metadata, "source": chunk.source},
+                    metadata={**chunk.metadata, "source": chunk.source, "privacy_level": privacy_level.value},
                 )
                 _tally_mem0_result(mem0_result, ops)
                 stored += 1
