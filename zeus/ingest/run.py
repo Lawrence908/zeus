@@ -42,6 +42,7 @@ def build_sources(args) -> list:
     """Construct IngestSource instances from CLI args."""
     from zeus.ingest.sources.chatgpt import ChatGPTSource
     from zeus.ingest.sources.context_pack import ContextPackSource
+    from zeus.ingest.sources.email import EmailSource
     from zeus.ingest.sources.markdown import MarkdownSource
 
     sources = []
@@ -94,6 +95,24 @@ def build_sources(args) -> list:
             sources.append(
                 ChatGPTSource(
                     path=path,
+                    chunk_size=args.chunk_size,
+                    chunk_overlap=args.chunk_overlap,
+                    user_id=args.user_id,
+                )
+            )
+
+    if args.source in ("email", "all"):
+        try:
+            cfg = EmailSource.from_env(limit=args.email_limit)
+        except Exception as e:
+            if args.source == "email":
+                logger.error(f"email config invalid: {e}")
+                sys.exit(1)
+            logger.warning(f"skipping email — config invalid: {e}")
+        else:
+            sources.append(
+                EmailSource(
+                    config=cfg,
                     chunk_size=args.chunk_size,
                     chunk_overlap=args.chunk_overlap,
                     user_id=args.user_id,
@@ -223,7 +242,7 @@ Examples:
     )
     p.add_argument(
         "--source",
-        choices=["context_pack", "markdown", "chatgpt", "all"],
+        choices=["context_pack", "markdown", "chatgpt", "email", "all"],
         required=True,
         help="Which source type to ingest",
     )
@@ -267,6 +286,12 @@ Examples:
         "--user-id",
         default="chris",
         help="mem0 user ID to store memories under (default: chris)",
+    )
+    p.add_argument(
+        "--email-limit",
+        type=int,
+        default=200,
+        help="Max number of emails to ingest (default: 200; newest first)",
     )
     return p.parse_args()
 
