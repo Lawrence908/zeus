@@ -12,6 +12,7 @@ import wave
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import websockets
 
 
@@ -37,17 +38,56 @@ def wav_bytes_to_float32(wav_bytes: bytes) -> bytes:
     return float32_bytes
 
 
+async def transcribe_wav_rest(
+    wav_bytes: bytes,
+    *,
+    base_url: str,
+    language: str | None = None,
+    timeout: float = 120.0,
+) -> str:
+    """
+    OpenAI-compatible POST /v1/audio/transcriptions (WhisperLive with --enable_rest).
+
+    Uses vad_filter=False on the server, avoiding Silero stripping whole browser clips.
+    """
+    url = f"{base_url.rstrip('/')}/v1/audio/transcriptions"
+    lang = language if language is not None else os.getenv("WHISPER_LANGUAGE", "en") or None
+    data: dict[str, str] = {"model": "whisper-1", "response_format": "json"}
+    if lang:
+        data["language"] = lang
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(
+            url,
+            files={"file": ("voice.wav", wav_bytes, "audio/wav")},
+            data=data,
+        )
+    if r.status_code >= 400:
+        detail = (r.text or "")[:500]
+        raise RuntimeError(f"Whisper REST HTTP {r.status_code}: {detail}")
+    body = r.json()
+    return str(body.get("text") or "").strip()
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
 class WhisperSTT:
     def __init__(self, url: str | None = None) -> None:
         self.url = (url or os.getenv("WHISPER_URL", "ws://localhost:9090")).rstrip("/")
         self.model = os.getenv("WHISPER_MODEL", "small")
+        self.use_vad = _env_bool("WHISPER_USE_VAD", True)
+        self.recv_timeout = float(os.getenv("WHISPER_RECV_TIMEOUT_SEC", "90"))
 
     async def transcribe(
         self,
         *,
         audio_source: AsyncIterator[bytes],
         language: str = "en",
-        use_vad: bool = True,
+        use_vad: bool | None = None,
         is_wav: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         """
@@ -56,9 +96,8 @@ class WhisperSTT:
         Protocol:
           1. Send JSON config (with uid)
           2. Wait for SERVER_READY
-          3. Stream float32 audio chunks
-          4. Send END_OF_AUDIO string
-          5. Yield segment dicts until DISCONNECT or is_final
+          3. Stream float32 PCM chunks (16 kHz mono; see WhisperLive docs)
+          4. Yield segment dicts until DISCONNECT, is_final, timeout, or close
 
         Yields dicts like:
           {"text": "...", "is_final": bool, "raw": {...}}
@@ -71,6 +110,14 @@ class WhisperSTT:
                     converted to float32 before sending.
         """
         uid = uuid.uuid4().hex[:12]
+        # Full-file WAV uploads (e.g. chat hold-to-talk): server VAD often strips the
+        # entire clip as "non-speech" on short/noisy browser captures — disable by default.
+        if use_vad is not None:
+            vad = use_vad
+        elif is_wav:
+            vad = False
+        else:
+            vad = self.use_vad
 
         async with websockets.connect(self.url) as ws:
             await ws.send(json.dumps({
@@ -78,7 +125,7 @@ class WhisperSTT:
                 "language": language,
                 "task": "transcribe",
                 "model": self.model,
-                "use_vad": use_vad,
+                "use_vad": vad,
             }))
 
             # Wait for server handshake
@@ -129,7 +176,7 @@ class WhisperSTT:
             # or a per-recv timeout fires (server has received all audio and
             # will finalize when it runs out of new frames).
             last_text = ""
-            recv_timeout = 15.0
+            recv_timeout = max(5.0, self.recv_timeout)
             while True:
                 try:
                     message = await asyncio.wait_for(ws.recv(), timeout=recv_timeout)
@@ -144,14 +191,23 @@ class WhisperSTT:
                     break
 
                 segments = data.get("segments") or []
-                if not segments:
-                    continue
+                text = ""
+                if segments:
+                    text = " ".join(s.get("text", "").strip() for s in segments if s.get("text"))
+                elif isinstance(data.get("text"), str) and data["text"].strip():
+                    text = data["text"].strip()
 
-                text = " ".join(s.get("text", "").strip() for s in segments if s.get("text"))
                 if not text:
                     continue
 
-                is_final = all(s.get("completed", False) for s in segments)
+                is_final = True
+                if segments:
+                    is_final = all(s.get("completed", False) for s in segments)
+                elif str(data.get("status", "")).upper() == "FINAL":
+                    is_final = True
+                else:
+                    is_final = False
+
                 last_text = text
                 yield {"text": text, "is_final": is_final, "raw": data}
 

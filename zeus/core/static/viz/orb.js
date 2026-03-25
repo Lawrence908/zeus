@@ -96,6 +96,18 @@ export function createPhaosOrb(container) {
     0.1,
     100,
   );
+  /** Sphere + displacement stays inside frustum for tall/narrow or wide/short panels. */
+  const SPHERE_RADIUS = 1.7;
+
+  function fitCameraDistance(w, h) {
+    const aspect = w / Math.max(h, 1);
+    const vFovRad = (camera.fov * Math.PI) / 180;
+    const tanHalf = Math.tan(vFovRad / 2);
+    const dVert = SPHERE_RADIUS / tanHalf;
+    const dHoriz = SPHERE_RADIUS / (tanHalf * aspect);
+    return Math.max(3.2, dVert, dHoriz);
+  }
+
   camera.position.set(0, 0, 3.4);
 
   scene.add(new THREE.AmbientLight(0x334466, 0.4));
@@ -148,11 +160,15 @@ export function createPhaosOrb(container) {
     const w = container.clientWidth;
     const h = Math.max(container.clientHeight, 1);
     camera.aspect = w / h;
+    camera.position.z = fitCameraDistance(w, h);
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
   }
 
   window.addEventListener('resize', resize);
+  const ro = new ResizeObserver(() => resize());
+  ro.observe(container);
+  resize();
 
   function tick(dt) {
     mat.uniforms.uTime.value += dt;
@@ -162,6 +178,7 @@ export function createPhaosOrb(container) {
   }
 
   function dispose() {
+    ro.disconnect();
     window.removeEventListener('resize', resize);
     geo.dispose();
     mat.dispose();

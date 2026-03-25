@@ -9,6 +9,25 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic import BaseModel, Field
 
 
+def topic_from_first_message(message: str, max_len: int = 56) -> str:
+    """Short single-line label for session lists (first user message)."""
+    t = " ".join((message or "").split())
+    if not t:
+        return "New chat"
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1].rstrip() + "…"
+
+
+def effective_session_topic(session: Session) -> str | None:
+    """Stored topic, or a label derived from the first user turn (legacy sessions)."""
+    if session.topic and session.topic.strip():
+        return session.topic.strip()
+    if session.turns:
+        return topic_from_first_message(session.turns[0].user)
+    return None
+
+
 class Turn(BaseModel):
     user: str
     assistant: str
@@ -23,6 +42,10 @@ class Session(BaseModel):
     updated_at: float
     turns: list[Turn] = Field(default_factory=list)
     summary: str | None = None
+    topic: str | None = Field(
+        default=None,
+        description="Short label from the first user message for UI lists.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -121,6 +144,9 @@ class SessionManager:
         if session is None:
             raise KeyError(f"Unknown session: {session_id}")
         session.turns.append(turn)
+        if not (session.topic and session.topic.strip()):
+            first_user = session.turns[0].user if session.turns else ""
+            session.topic = topic_from_first_message(first_user)
         session.updated_at = time.time()
         await self._storage.save(session)
         if len(session.turns) > TURN_SUMMARY_THRESHOLD:
