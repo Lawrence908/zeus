@@ -24,6 +24,8 @@ This tree is **gitignored**. Do not commit exports, vault copies, or secrets her
 
 **Rule of thumb:** Curated facts → `context_pack.md`. Bulk notes → predictable subfolders under `zeus/data/raw/` so glob patterns stay stable.
 
+**Obsidian (Self-hosted LiveSync):** Keep a vault directory on disk (Obsidian app or [LiveSync CLI](https://github.com/vrtmrz/obsidian-livesync)), symlink it under `notes/`, then schedule markdown ingest. Full steps: [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md).
+
 ## Symlinks on this machine
 
 `zeus/data/raw/` is ignored by git, so symlinks are **local only**. After a fresh clone, recreate them (adjust paths if your home layout differs):
@@ -34,6 +36,7 @@ mkdir -p "$RAW/notes"
 ln -sfn /home/chris/services/context-pack/core       "$RAW/notes/context-pack-core"
 ln -sfn /home/chris/services/context-pack/writing    "$RAW/notes/context-pack-writing"
 ln -sfn /home/chris/apps/jobkit/archive/data         "$RAW/notes/jobkit-archive"
+ln -sfn /home/chris/obsidian-vault                   "$RAW/notes/obsidian-vault"
 ```
 
 | Link | Target |
@@ -41,6 +44,7 @@ ln -sfn /home/chris/apps/jobkit/archive/data         "$RAW/notes/jobkit-archive"
 | `notes/context-pack-core` | `/home/chris/services/context-pack/core` |
 | `notes/context-pack-writing` | `/home/chris/services/context-pack/writing` |
 | `notes/jobkit-archive` | `/home/chris/apps/jobkit/archive/data` (JobKit **archive** only — not `apps/jobkit/data/demo/`) |
+| `notes/obsidian-vault` | `/home/chris/obsidian-vault` (or your vault path; CouchDB sync via Obsidian or LiveSync CLI — see [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md)) |
 
 The JobKit link covers `resume_base.yml`, `profile.yml`, `projects/*.md`, and the rest of that archive tree in one place.
 
@@ -64,6 +68,27 @@ python3 -m zeus.ingest.run --source markdown \
 ```
 
 Remove `--dry-run` when the preview looks right.
+
+**Obsidian-linked vault** (after symlink above):
+
+```bash
+python3 -m zeus.ingest.run --source markdown \
+  --glob "notes/obsidian-vault/**/*.md" \
+  --base-dir zeus/data/raw \
+  --dry-run
+```
+
+## Scheduled ingest (cron)
+
+For sources that change on disk without you running the CLI (e.g. LiveSync updates), run the same ingest command on a timer. Example: every three hours, from repo root with venv and `.env` loaded — adapt paths to your machine:
+
+```cron
+10 */3 * * * cd /path/to/zeus-repo && . .venv/bin/activate && set -a && . ./.env && set +a && python3 -m zeus.ingest.run --source markdown --glob "notes/obsidian-vault/**/*.md" --base-dir zeus/data/raw
+```
+
+If you use the headless LiveSync CLI, run **sync then ingest** in order (one wrapper script or two cron entries). Details: [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md).
+
+**N.O.M.A.D.:** catalogs or exports under `zeus/data/raw/nomad/` (or symlinks) can use the same cron pattern with a different `--glob`. See [project-nomad-integration.md](project-nomad-integration.md).
 
 ## Markdown vs YAML under `notes/`
 

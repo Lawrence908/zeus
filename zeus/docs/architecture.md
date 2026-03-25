@@ -88,6 +88,13 @@ flowchart TD
 | Hardware | Apollo (RTX 5080) | Olympus (RTX 3080) |
 | Primary target | Fast iteration | Stable daily assistant |
 
+## External personal data (parallel integrations)
+
+Zeus ingests **local files** under `zeus/data/raw/` and can later call **local HTTP APIs** for live status. Documented integrations:
+
+- **[Obsidian Self-hosted LiveSync](obsidian-livesync-ingest.md)** — CouchDB ↔ local vault (Obsidian or official CLI) ↔ symlink under `zeus/data/raw/notes/` ↔ scheduled Iris markdown ingest.
+- **[Project N.O.M.A.D.](project-nomad-integration.md)** — Command Center at `/home/chris/apps/project-nomad`; hybrid of future live API calls and Iris ingest for catalogs/metadata (separate from NOMAD’s own Ollama/Qdrant stack).
+
 ## Immediate Architectural Priorities
 
 1. Complete Sprint 1-4 baseline path (memory loop, voice, safety, deploy)
