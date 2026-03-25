@@ -63,7 +63,7 @@ def get_memory_config() -> dict[str, Any]:
     )
     ollama_model = os.getenv(
         "ZEUS_OLLAMA_MODEL",
-        os.getenv("ZEUS_PROD_MODEL", "qwen2.5:7b-instruct-q4_K_M"),
+        os.getenv("ZEUS_PROD_MODEL", "qwen2.5:7b-instruct"),
     )
 
     if provider == "ollama":
