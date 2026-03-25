@@ -39,7 +39,9 @@ services:
       timeout: 5s
       retries: 3
     networks:
-      - web
+      web:
+        aliases:
+          - nomad_ollama  # Allows NOMAD to reach Zeus's Ollama as http://nomad_ollama:11434
 
   # --- Zeus Core: FastAPI API bus ---
   zeus-core:
