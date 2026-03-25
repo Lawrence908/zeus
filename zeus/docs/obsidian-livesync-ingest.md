@@ -12,11 +12,11 @@ Upstream: [vrtmrz/obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync
 
 ## 1. Local vault directory
 
-Pick a **fixed path** for the vault root on this machine, for example:
+Pick a **fixed path** for the vault root on this machine. On daedalus the headless mirror is:
 
-- `~/obsidian-vault`
+- `/home/chris/data/headless-obsidian-vault`
 
-That folder should look like an Obsidian vault (markdown notes, optional `.obsidian/` config). You may never open Obsidian there; it still works as the mirror target.
+That folder should look like an Obsidian vault (markdown notes, optional `.obsidian/` config, and `.livesync/settings.json` for the CLI). You may never open Obsidian there; it still works as the mirror target.
 
 ## 2. Keep it in sync with CouchDB
 
@@ -66,16 +66,84 @@ Remove `--dry-run` when the chunks look right.
 
 Typical pattern:
 
-1. **Sync** — Obsidian stays running, or CLI runs on a schedule to refresh the mirror.
-2. **Ingest** — Cron every hour or few hours calls the same `python3 -m zeus.ingest.run …` command after sync.
+1. **Sync** — CLI (or Obsidian) replicates CouchDB into the local DB.
+2. **Mirror** — CLI writes DB → files on disk.
+3. **Ingest** — Zeus indexes `.md` into mnemosyne.
 
-Example cron entry (runs ingest at minute 10 past every 3rd hour; edit paths and user):
+Use the wrapper **`scripts/replicate-obsidian-and-ingest.sh`** (sync + mirror + ingest). Cron setup is in [Cron: how to install the job](#cron-how-to-install-the-job) below.
 
-```cron
-10 */3 * * * cd /home/chris/zeus && . .venv/bin/activate && set -a && . ./.env && set +a && python3 -m zeus.ingest.run --source markdown --glob "notes/obsidian-vault/**/*.md" --base-dir zeus/data/raw
+## What you should see on disk
+
+- **Markdown and attachments** — After a successful **`mirror`**, notes appear as normal paths under your vault root, e.g. `…/headless-obsidian-vault/SomeNote.md`, `…/headless-obsidian-vault/ASTR311/…`, etc.
+- **Folder like `headless-obsidian-vault-fa1dd4bf-…-livesync-v2/`** — That is the CLI’s **local LevelDB / PouchDB** store (internal). It is **not** your notes tree. Ignore it for Zeus; ingest globs should target `**/*.md` alongside it, not inside it.
+
+## If `sync` fails (no `.md` files yet)
+
+`mirror` only materializes files after the local DB has been filled by replication. If the CLI prints `[Error] Command 'sync' failed`:
+
+1. **Capture the real reason** — Notices often go to stderr and are easy to miss. Run:
+   ```bash
+   LIVESYNC_DEBUG=1 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh 2>&1 | tee /tmp/livesync-sync.log
+   ```
+   Then search the log for `Notice`, `Failed`, `denied`, `corrupted`, `PBKDF2`, `VersionUpFlash`, `Pending`, `Locked`.
+2. **Use loopback CouchDB on daedalus** — In `.livesync/settings.json`, set `couchDB_URI` to `http://127.0.0.1:5984` (same DB as Docker on this host). Re-copy from Obsidian or edit the plaintext fields if you are not relying only on `encryptedCouchDBConnection`. Hairpin via Tailscale to yourself can be flaky.
+3. **Clear plugin “changelog / version” gate** — If Obsidian had `versionUpFlash` set, copy a fresh `data.json` from the PC or clear that field after plugin updates (see LiveSync docs).
+4. **Remote lock / fetch** — If the desktop app says the remote is locked or asks to **Fetch** again, resolve that in Obsidian first; then retry CLI sync.
+
+When `sync` succeeds, run `mirror` (or the wrapper script); you should then see real folders and `.md` files next to the `*-livesync-v2` directory.
+
+### Remote database locked (`NODE_LOCKED`) and `Method not implemented`
+
+If the log shows:
+
+`The remote database has been rebuilt or corrupted…` then `Error: Method not implemented` at `HeadlessConfirm.askSelectStringDialogue`, the CouchDB **milestone** is **locked** and this headless device’s node ID is not yet in `accepted_nodes`. Obsidian would show a three-button dialog; the CLI had no way to answer it until you set a non-interactive choice.
+
+**After rebuilding the LiveSync CLI** from a tree that includes the headless `askSelectStringDialogue` implementation, run **one** of:
+
+```bash
+# Prefer for a brand-new headless copy: reset local sync state and fetch from remote (button order: Fetch, Unlock, Dismiss)
+LIVESYNC_HEADLESS_DIALOG_INDEX=0 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
 ```
 
-If you use the CLI for sync, chain **sync then ingest** in one script or two cron lines in order.
+Or add this device without wiping local state (only if you understand the plugin warning—usually use Fetch for an empty headless vault):
+
+```bash
+LIVESYNC_HEADLESS_DIALOG_INDEX=1 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
+```
+
+Substring match (works across locales if the label contains the word):
+
+```bash
+LIVESYNC_HEADLESS_DIALOG_CHOICE=reset /home/chris/apps/obsidian-livesync/sync-headless-vault.sh   # Fetch / reset sync
+LIVESYNC_HEADLESS_DIALOG_CHOICE=unlock /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
+```
+
+**After a successful Unlock** you should see: `The remote database has been unlocked. Please retry the operation.` The process still exits with `[Error] Command 'sync' failed` — that only means “no replication ran *this* invocation.” **Run `sync` again immediately** (no `LIVESYNC_HEADLESS_*` needed unless the dialog appears again):
+
+```bash
+/home/chris/apps/obsidian-livesync/sync-headless-vault.sh
+```
+
+Then let **`mirror`** run (same script does both).
+
+**Fetch (dialog index 0) in headless mode:** Choosing “Reset Synchronisation…” schedules a fetch that normally opens another **Svelte wizard** in the app. In the CLI that path is **not** fully headless; you may get `flag_fetch.md` and a failed `sync` exit. For a dedicated headless replica, **Unlock (index 1)** once, then **retry `sync`**, is usually the right sequence. If you tried Fetch and have a stale flag file, remove it:
+
+`rm -f /home/chris/data/headless-obsidian-vault/flag_fetch.md /home/chris/data/headless-obsidian-vault/redflag3.md`
+
+**Alternative:** Resolve the lock entirely in **Obsidian** on a trusted device (same vault / CouchDB), then retry headless `sync`.
+
+## Cron: how to install the job
+
+1. On daedalus: `crontab -e`
+2. Add one line (adjust minute/path/log dir):
+
+   ```cron
+   12 * * * * /home/chris/zeus/scripts/replicate-obsidian-and-ingest.sh >> /home/chris/logs/zeus-obsidian-ingest.log 2>&1
+   ```
+
+3. Ensure the log directory exists: `mkdir -p /home/chris/logs`
+
+Cron uses **your user’s** environment; the script activates `/home/chris/zeus/.venv` and loads `/home/chris/zeus/.env` itself, so you do not need to duplicate that in the crontab.
 
 ## Large attachments and non-markdown files
 

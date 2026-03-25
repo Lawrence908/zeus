@@ -16,7 +16,7 @@ ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
 ZEUS_LLM = os.getenv("ZEUS_LLM", "").strip().lower()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ZEUS_DEV_MODEL = os.getenv("ZEUS_DEV_MODEL") or os.getenv(
-    "ZEUS_CLAUDE_MODEL", "claude-sonnet-4-6-20250514"
+    "ZEUS_CLAUDE_MODEL", "claude-sonnet-4-6"
 )
 
 ZEUS_USER_ID = "chris"

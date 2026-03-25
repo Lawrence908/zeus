@@ -20,7 +20,7 @@ This tree is **gitignored**. Do not commit exports, vault copies, or secrets her
 |------|---------|
 | `zeus/data/raw/context_pack.md` | Identity, homelab, projects, goals (hand-curated) |
 | `zeus/data/raw/notes/` | Symlinks or copies from other repos / vaults |
-| `zeus/data/raw/chatgpt_export.json` | ChatGPT export (if used) |
+| `zeus/data/raw/chat-history/` | ChatGPT export dir (conversations-NNN.json files) |
 
 **Rule of thumb:** Curated facts → `context_pack.md`. Bulk notes → predictable subfolders under `zeus/data/raw/` so glob patterns stay stable.
 
@@ -36,7 +36,7 @@ mkdir -p "$RAW/notes"
 ln -sfn /home/chris/services/context-pack/core       "$RAW/notes/context-pack-core"
 ln -sfn /home/chris/services/context-pack/writing    "$RAW/notes/context-pack-writing"
 ln -sfn /home/chris/apps/jobkit/archive/data         "$RAW/notes/jobkit-archive"
-ln -sfn /home/chris/obsidian-vault                   "$RAW/notes/obsidian-vault"
+ln -sfn /home/chris/data/headless-obsidian-vault     "$RAW/notes/obsidian-vault"
 ```
 
 | Link | Target |
@@ -44,7 +44,7 @@ ln -sfn /home/chris/obsidian-vault                   "$RAW/notes/obsidian-vault"
 | `notes/context-pack-core` | `/home/chris/services/context-pack/core` |
 | `notes/context-pack-writing` | `/home/chris/services/context-pack/writing` |
 | `notes/jobkit-archive` | `/home/chris/apps/jobkit/archive/data` (JobKit **archive** only — not `apps/jobkit/data/demo/`) |
-| `notes/obsidian-vault` | `/home/chris/obsidian-vault` (or your vault path; CouchDB sync via Obsidian or LiveSync CLI — see [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md)) |
+| `notes/obsidian-vault` | `/home/chris/data/headless-obsidian-vault` (LiveSync CLI mirror target on daedalus; see [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md)) |
 
 The JobKit link covers `resume_base.yml`, `profile.yml`, `projects/*.md`, and the rest of that archive tree in one place.
 
