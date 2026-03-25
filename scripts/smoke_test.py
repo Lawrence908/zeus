@@ -23,8 +23,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-ZEUS_CORE_URL = os.getenv("ZEUS_CORE_URL", "http://localhost:8000")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11435")
+ZEUS_CORE_PORT = os.getenv("ZEUS_CORE_PORT", "8203")
+ZEUS_CORE_URL = os.getenv("ZEUS_CORE_URL", f"http://localhost:{ZEUS_CORE_PORT}")
 EMBED_MODEL = os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text")
 
 GREEN = "\033[92m"
