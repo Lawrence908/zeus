@@ -43,6 +43,20 @@ services:
         aliases:
           - nomad_ollama  # Allows NOMAD to reach Zeus's Ollama as http://nomad_ollama:11434
 
+  # --- Orpheus STT: WhisperLiveKit (WebSocket) ---
+  whisper:
+    image: ghcr.io/collabora/whisperlive-cpu:latest
+    container_name: zeus-whisper
+    ports:
+      - "${WHISPER_PORT:-9090}:9090"
+    restart: unless-stopped
+    networks:
+      - web
+
+  # --- Orpheus TTS: Voicebox/LuxTTS ---
+  # Not defined here yet (no stable public image). Run Voicebox on the same host
+  # as Orpheus and point VOICEBOX_URL at it (see zeus/docs/orpheus-spec.md).
+
   # --- Zeus Core: FastAPI API bus ---
   zeus-core:
     build:

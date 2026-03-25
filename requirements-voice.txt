@@ -1,0 +1,8 @@
+## requirements-voice.txt — Host-native Orpheus dependencies (audio devices)
+#
+# These packages are NOT required for the zeus-core Docker image.
+# They often require system libraries (gcc/portaudio) on Linux.
+
+openwakeword>=0.6.0
+pyaudio>=0.2.14
+httpx>=0.27.2

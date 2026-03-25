@@ -92,14 +92,18 @@ Key changes from v1:
 
 ## Project 3 — Voice Loop
 
-**Status (25 Mar 2026):** Phaos “voice-state” plumbing + visualization assets exist, but the actual STT/wake/TTS components are not present in-repo yet.
+**Status (25 Mar 2026):** Phaos “voice-state” plumbing + visualization assets exist, and the Orpheus voice loop now has initial code checked in (STT client, wake word detector, TTS client, and an end-to-end host-native pipeline). WhisperLiveKit is added as a Docker service in `compose.yaml`; Voicebox remains host-managed (no compose image yet).
 
 - **Implemented (Phaos surface area)**:
   - Voice-state protocol + hub/emitter: `zeus/voice/state.py`
   - WebSocket + publish endpoint: `zeus/core/voice_ws.py`
   - Viz UI assets: `zeus/core/static/viz/` (served via `/viz` in `zeus/core/chat.py`)
-- **Not started (no code present yet)**:
-  - WhisperLiveKit STT, openWakeWord, Voicebox TTS, and the full Orpheus pipeline implementation.
+- **Implemented (Orpheus initial loop)**:
+  - WhisperLiveKit STT client (WebSocket): `zeus/voice/stt.py`
+  - openWakeWord detector (PyAudio 16kHz): `zeus/voice/wake.py`
+  - Voicebox REST TTS client (streaming sentences): `zeus/voice/tts.py`
+  - Orpheus orchestrator loop + Phaos emitter: `zeus/voice/pipeline.py`
+  - Non-wake-word test endpoint (WAV upload): `zeus/core/chat.py` (`POST /voice/interact`)
 
 | Parent | Title                           | Labels           | Subs |
 | ------ | ------------------------------- | ---------------- | ---- |
@@ -112,7 +116,7 @@ Key changes from v1:
 
 ## Project 4 — MCP Server
 
-**Status (25 Mar 2026):** No MCP server implementation appears to be checked in yet (no `zeus/mcp/` package found). Treat **LAB-104 / LAB-107 / LAB-108** as **not started** until code exists.
+**Status (25 Mar 2026):** MCP server implementation is now checked in under `zeus/mcp/` using the MCP Python SDK `FastMCP`. Tool calls proxy to Zeus Core HTTP endpoints. Automated integration tests are not present yet; smoke testing is supported via running the server and calling tools from an MCP client.
 
 | Parent  | Title                   | Labels          | Subs |
 | ------- | ----------------------- | --------------- | ---- |
