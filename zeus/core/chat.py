@@ -6,12 +6,13 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from zeus.core.query import QueryEngine, _active_model_name
 from zeus.core.sessions import Session, SessionManager
+from zeus.voice.stt import WhisperSTT
 
 router = APIRouter(tags=["chat"])
 
@@ -104,6 +105,66 @@ async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessag
         model_used=result.model_used,
         token_estimate=result.token_estimate,
     )
+
+@router.post("/voice/interact")
+async def voice_interact(
+    request: Request,
+    audio: UploadFile = File(...),
+    session_id: str | None = Form(default=None),
+    use_context: bool = Form(default=True),
+    max_tokens: int = Form(default=256),
+) -> dict[str, Any]:
+    """
+    Non-wake-word voice interaction endpoint.
+
+    Accepts a WAV upload + optional session_id, runs STT -> QueryEngine ->
+    returns transcript + text response. session_id is threaded through so
+    voice turns share history with the text chat session.
+    TTS/audio return is intentionally deferred until Voicebox is standardized.
+    """
+    engine = _query_engine(request)
+    stt = WhisperSTT()
+
+    wav_bytes = await audio.read()
+    if not wav_bytes:
+        raise HTTPException(status_code=400, detail="empty audio upload")
+
+    async def _one_chunk() -> AsyncIterator[bytes]:
+        yield wav_bytes
+
+    transcript = ""
+    try:
+        async for evt in stt.transcribe(audio_source=_one_chunk()):
+            transcript = str(evt.get("text") or "").strip()
+            if evt.get("is_final"):
+                break
+    except ConnectionRefusedError:
+        raise HTTPException(
+            status_code=503,
+            detail="WhisperLive STT service is not reachable. Start it with: docker compose up whisper -d",
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"STT connection failed: {exc}") from exc
+
+    if not transcript:
+        raise HTTPException(status_code=422, detail="no transcript produced — audio may be silent or too short")
+
+    result = await engine.query(
+        transcript,
+        session_id=session_id,
+        use_context=use_context,
+        max_tokens=max_tokens,
+        source="voice_interact",
+    )
+
+    return {
+        "transcript": transcript,
+        "session_id": result.session_id,
+        "assistant_message": result.assistant_message,
+        "model_used": result.model_used,
+        "latency_ms": result.latency_ms,
+        "context_sources": result.context_sources,
+    }
 
 
 def _sse_token_event(content: str) -> str:
