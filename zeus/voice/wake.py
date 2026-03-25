@@ -66,10 +66,16 @@ class WakeWordDetector:
     ) -> None:
         self.model_name = (model_name or os.getenv("WAKE_WORD_MODEL", "hey_jarvis")).strip()
         self.threshold = float(threshold if threshold is not None else os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
+        self.inference_framework = os.getenv("WAKE_WORD_INFERENCE_FRAMEWORK", "onnx").strip().lower()
+        if self.inference_framework not in {"onnx", "tflite"}:
+            raise ValueError("WAKE_WORD_INFERENCE_FRAMEWORK must be 'onnx' or 'tflite'")
         self.chunk_size = 1280  # ~80ms at 16kHz
         self.rate = 16000
         resolved_model = _ensure_openwakeword_models(self.model_name)
-        self._model = Model(wakeword_models=[resolved_model])
+        self._model = Model(
+            wakeword_models=[resolved_model],
+            inference_framework=self.inference_framework,
+        )
 
     def listen(self) -> None:
         """Block until wake word detected."""
