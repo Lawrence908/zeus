@@ -10,7 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from zeus.api.main import router as oracle_router
+from zeus.core.admin import admin_dashboard  # noqa: F401 — used via router
+from zeus.core.admin import init_query_log
+from zeus.core.admin import router as admin_router
 from zeus.core.chat import router as chat_router
+from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.query import QueryEngine, _run_llm
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
@@ -57,6 +61,7 @@ async def check_service(client: httpx.AsyncClient, name: str, url: str) -> Servi
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.boot_time = BOOT_TIME
     app.state.http_client = httpx.AsyncClient()
     app.state.memory = get_memory_client()
     app.state.voice_hub = VoiceStateHub()
@@ -76,7 +81,31 @@ async def lifespan(app: FastAPI):
     app.state.agent_runtime = runtime
     app.state.hook_registry = build_default_registry()
 
+    # Observability — query log ring buffer
+    init_query_log(app)
+
+    # Scheduled ingest (APScheduler)
+    # Sources are empty by default; populate via INGEST_* env vars or CLI.
+    # The scheduler still runs on schedule — it just skips if no sources are wired.
+    app.state.ingest_scheduler = None
+    try:
+        from zeus.ingest.pipeline import IngestPipeline
+        from zeus.ingest.scheduler import build_scheduler
+        from zeus.memory.consolidate import MemoryConsolidator
+
+        ingest_pipeline = IngestPipeline(sources=[])
+        consolidator = MemoryConsolidator(app.state.memory)
+        scheduler = build_scheduler(ingest_pipeline, consolidator)
+        scheduler.start()
+        app.state.ingest_scheduler = scheduler
+    except Exception as exc:
+        import logging
+        logging.getLogger("zeus").warning("scheduler not started: %s", exc)
+
     yield
+
+    if app.state.ingest_scheduler is not None:
+        app.state.ingest_scheduler.shutdown(wait=False)
     await app.state.http_client.aclose()
 
 
@@ -85,10 +114,14 @@ app = FastAPI(
     version=ZEUS_VERSION,
     lifespan=lifespan,
 )
+
+app.add_middleware(QueryLoggingMiddleware)
+
 app.include_router(oracle_router)
 app.include_router(voice_state_router)
 app.include_router(chat_router)
 app.include_router(orchestration_router)
+app.include_router(admin_router)
 
 _static_dir = Path(__file__).resolve().parent / "static"
 if _static_dir.is_dir():
