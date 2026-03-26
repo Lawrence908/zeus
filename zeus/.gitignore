@@ -9,3 +9,6 @@ data/*.csv
 *.egg-info/
 .mypy_cache/
 .ruff_cache/
+
+# Zeus — raw data exports (too large and potentially sensitive)
+zeus/data/

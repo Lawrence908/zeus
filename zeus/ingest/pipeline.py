@@ -3,21 +3,15 @@
 # Sources are pluggable — each implements the IngestSource protocol.
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Protocol
 
+from zeus.ingest.privacy import classify_chunk
+from zeus.ingest.types import Chunk
 from zeus.memory.config import get_memory_client
 
 logger = logging.getLogger("iris")
-
-
-@dataclass
-class Chunk:
-    """A single ingested chunk ready for embedding and storage."""
-    text: str
-    source: str                      # e.g. "markdown:notes/2024-01.md"
-    metadata: dict = field(default_factory=dict)
-    user_id: str = "chris"           # mem0 partitions by user_id
 
 
 class IngestSource(Protocol):
@@ -34,6 +28,18 @@ class IngestResult:
     chunks_processed: int
     chunks_stored: int
     errors: list[str] = field(default_factory=list)
+    elapsed_sec: float = 0.0
+    mem0_ops: dict[str, int] = field(default_factory=lambda: {
+        "ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0,
+    })
+
+
+def _tally_mem0_result(result: dict, ops: dict[str, int]) -> None:
+    """Count ADD/UPDATE/DELETE/NONE events from mem0.add() return value."""
+    for item in result.get("results", []):
+        event = item.get("event", "NONE").upper()
+        if event in ops:
+            ops[event] += 1
 
 
 async def run_ingest(
@@ -55,6 +61,8 @@ async def run_ingest(
         stored = 0
         errors: list[str] = []
         total = 0
+        ops: dict[str, int] = {"ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0}
+        t_start = time.monotonic()
 
         logger.info(f"iris: starting ingest from {source_name}")
 
@@ -65,29 +73,38 @@ async def run_ingest(
                 stored += 1
                 continue
 
+            chunk_t0 = time.monotonic()
             try:
-                # mem0.add() handles embedding + storage in one call.
-                # It wraps the text as a message so mem0 can extract facts.
-                memory.add(
+                privacy_level = classify_chunk(chunk)
+                mem0_result = memory.add(
                     messages=[{"role": "user", "content": chunk.text}],
                     user_id=chunk.user_id,
-                    metadata={**chunk.metadata, "source": chunk.source},
+                    metadata={**chunk.metadata, "source": chunk.source, "privacy_level": privacy_level.value},
                 )
+                _tally_mem0_result(mem0_result, ops)
                 stored += 1
+                chunk_dt = time.monotonic() - chunk_t0
+                logger.info(
+                    f"iris: [{total}] stored chunk in {chunk_dt:.1f}s — "
+                    f"{chunk.source}: {chunk.text[:60]!r}…"
+                )
             except Exception as e:
                 errors.append(f"{chunk.source}: {e}")
-                logger.warning(f"iris: failed to store chunk — {e}")
+                logger.warning(f"iris: [{total}] failed to store chunk — {e}")
 
+        elapsed = time.monotonic() - t_start
         result = IngestResult(
             source=source_name,
             chunks_processed=total,
             chunks_stored=stored,
             errors=errors,
+            elapsed_sec=elapsed,
+            mem0_ops=ops,
         )
         results.append(result)
         logger.info(
             f"iris: {source_name} complete — {stored}/{total} stored, "
-            f"{len(errors)} errors"
+            f"{len(errors)} errors, {elapsed:.1f}s"
         )
 
     return results

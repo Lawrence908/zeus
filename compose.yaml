@@ -39,7 +39,40 @@ services:
       timeout: 5s
       retries: 3
     networks:
+      web:
+        aliases:
+          - nomad_ollama  # Allows NOMAD to reach Zeus's Ollama as http://nomad_ollama:11434
+
+  # --- Orpheus STT: WhisperLiveKit (WebSocket) ---
+  whisper:
+    image: ghcr.io/collabora/whisperlive-cpu:latest
+    container_name: zeus-whisper
+    # REST API transcribes uploads with vad_filter=False; WebSocket path often runs Silero VAD
+    # and strips whole short clips. Zeus /voice/interact uses WHISPER_REST_URL when set.
+    command:
+      - python
+      - run_server.py
+      - --enable_rest
+      - --rest_port
+      - "8000"
+      - --port
+      - "9090"
+    ports:
+      - "${WHISPER_PORT:-9090}:9090"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WHISPER_DEVICE=cpu
+    restart: unless-stopped
+    # Raw TCP checks hit the WebSocket port without an Upgrade handshake; the server
+    # logs ERROR on every probe. Rely on restart policy instead of port health.
+    healthcheck:
+      disable: true
+    networks:
       - web
+
+  # --- Orpheus TTS: Voicebox/LuxTTS ---
+  # Not defined here yet (no stable public image). Run Voicebox on the same host
+  # as Orpheus and point VOICEBOX_URL at it (see zeus/docs/orpheus-spec.md).
 
   # --- Zeus Core: FastAPI API bus ---
   zeus-core:
@@ -54,6 +87,8 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
       - OLLAMA_URL=http://ollama:11434
+      - WHISPER_URL=ws://whisper:9090
+      - WHISPER_REST_URL=http://whisper:8000
     depends_on:
       qdrant:
         condition: service_started

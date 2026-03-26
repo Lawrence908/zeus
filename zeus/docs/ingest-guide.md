@@ -233,3 +233,24 @@ curl -s -X POST localhost:8001/context/query \
 ```
 
 Good results: relevant chunks with high scores, diverse sources. Bad results: irrelevant chunks, very low scores, all from the same source. If quality is poor, check your context pack first, then look at chunk sizes.
+
+---
+
+## Retrieval eval + tuning loop (Phase 2)
+
+To tune retrieval, use the eval harness:
+
+```bash
+python3 -m zeus.memory.eval --query-set zeus/data/eval/queries.json --top-k 10
+```
+
+Then iterate on:
+
+- **chunk_size / overlap**: re-run Iris ingest with different `--chunk-size` / `--chunk-overlap` values (try 256/64, 512/64, 1024/128).
+- **top_k**: re-run eval with `--top-k` (try 5 and 10).
+
+Record best-known settings here (update as you learn):
+
+- **current_best_chunk_size**: TBD
+- **current_best_chunk_overlap**: TBD
+- **current_best_top_k**: TBD

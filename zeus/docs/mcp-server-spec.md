@@ -95,3 +95,28 @@ Tool failures return MCP errors with:
 - Client can call `zeus_profile` and receive profile summary
 - `zeus_remember` obeys write policy toggle and logs writes
 - Invalid arguments return useful structured errors
+
+## Client configuration snippets
+
+### Claude Desktop / Cursor (stdio)
+
+Example configuration (adjust `cwd` to your Zeus repo path):
+
+```json
+{
+  "mcpServers": {
+    "zeus": {
+      "command": "python",
+      "args": ["-m", "zeus.mcp.server"],
+      "cwd": "/home/chris/zeus"
+    }
+  }
+}
+```
+
+### Environment variables
+
+Common settings:
+
+- `ZEUS_CORE_URL` (default in code: `http://127.0.0.1:8203`)
+- `ZEUS_MCP_ALLOW_WRITE=false` (default; set `true` to enable `zeus_remember`)

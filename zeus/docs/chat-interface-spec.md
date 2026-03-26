@@ -13,9 +13,16 @@ Provide a minimal local web chat interface for Zeus that shares the same context
 ## Routes
 
 - `GET /chat` -> serves `chat.html`
-- `POST /chat/message` -> request/response chat API
-- `GET /chat/stream` -> optional SSE streaming endpoint
-- `GET /chat/sessions/{session_id}` -> fetch session transcript
+- `GET /viz` -> standalone Phaos (voice-state orb) page; links to chat
+- `POST /chat/message` -> JSON chat API (non-streaming)
+- `POST /chat/stream` -> SSE streaming (`text/event-stream`; events: `token`, `done`, `phase`, `error`)
+- `GET /chat/sessions` -> list recent sessions (query `limit`)
+- `GET /chat/sessions/{session_id}` -> full session (turns, `topic`, …)
+- `DELETE /chat/sessions/{session_id}` -> delete session
+
+Static assets (Three.js import maps, `phaos.js`, `orb.js`, `chat-markdown.js`, …) are served from `GET /static/...` via FastAPI `StaticFiles` on `zeus/core/static/`.
+
+**UI roadmap:** [chat-ui-improvements.md](chat-ui-improvements.md) (markdown, copy, abort, token estimate, drafts, tabs, themes).
 
 ## Request / Response Models
 
@@ -32,6 +39,17 @@ Provide a minimal local web chat interface for Zeus that shares the same context
 - `assistant_message: str`
 - `context_sources: list[str]`
 - `latency_ms: int`
+- `model_used: str`
+- `token_estimate: int` (heuristic ~`len/4`)
+- `topic: str | None` (session label from first user message)
+
+### Chat session summary (list item)
+
+- `id`, `created_at`, `updated_at`, `turn_count`, `summary`, `topic`, `metadata`
+
+### SSE `done` event (streaming)
+
+- `session_id`, `latency_ms`, `model_used`, `topic`, `token_estimate`
 
 ## Processing Flow
 
@@ -53,6 +71,7 @@ flowchart TD
 - Input box + send button + enter-to-send
 - Session ID badge and "new session" action
 - Basic error toast for failed requests
+- **Phaos:** embedded voice-state visualization (Three.js orb) that subscribes to `WS /ws/voice-state`; optional WebXR VR entry button; mic level via Web Audio during `listening` (see [`phaos-voice-state-protocol.md`](phaos-voice-state-protocol.md))
 
 ## Non-Functional Targets
 
@@ -80,9 +99,10 @@ For each message:
 ## Implementation Notes
 
 - Place routes in `zeus/core/chat.py`
-- Serve static UI from `zeus/core/static/chat.html`
-- Reuse existing model routing from core/voice path where possible
-- Integrate with session module from `sessions-spec.md`
+- Serve static UI from `zeus/core/static/chat.html` and Phaos from `zeus/core/static/viz/`
+- Voice-state WebSocket and publish endpoint live in `zeus/core/voice_ws.py`; hub types in `zeus/voice/state.py`
+- Reuse existing model routing from core/voice path where possible (`ZEUS_LLM`, `ZEUS_ENV`, Ollama vs Claude)
+- Integrate with session module from `sessions-spec.md` (in-memory sessions are a temporary stand-in until Sprint 6)
 
 ## Acceptance Criteria
 
