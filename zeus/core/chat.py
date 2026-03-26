@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -11,8 +12,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from zeus.core.query import QueryEngine, _active_model_name
-from zeus.core.sessions import Session, SessionManager
-from zeus.voice.stt import WhisperSTT
+from zeus.core.sessions import Session, SessionManager, effective_session_topic
+import httpx
+
+from zeus.voice.stt import WhisperSTT, transcribe_wav_rest
 
 router = APIRouter(tags=["chat"])
 
@@ -33,6 +36,7 @@ class ChatMessageResponse(BaseModel):
     latency_ms: int
     model_used: str
     token_estimate: int
+    topic: str | None = None
 
 
 class ChatSessionSummary(BaseModel):
@@ -41,6 +45,7 @@ class ChatSessionSummary(BaseModel):
     updated_at: float
     turn_count: int
     summary: str | None = None
+    topic: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -104,6 +109,7 @@ async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessag
         latency_ms=result.latency_ms,
         model_used=result.model_used,
         token_estimate=result.token_estimate,
+        topic=result.topic,
     )
 
 @router.post("/voice/interact")
@@ -123,21 +129,31 @@ async def voice_interact(
     TTS/audio return is intentionally deferred until Voicebox is standardized.
     """
     engine = _query_engine(request)
-    stt = WhisperSTT()
 
     wav_bytes = await audio.read()
     if not wav_bytes:
         raise HTTPException(status_code=400, detail="empty audio upload")
 
-    async def _one_chunk() -> AsyncIterator[bytes]:
-        yield wav_bytes
-
+    rest_url = os.getenv("WHISPER_REST_URL", "").strip()
     transcript = ""
+    rest_err: str | None = None
     try:
-        async for evt in stt.transcribe(audio_source=_one_chunk()):
-            transcript = str(evt.get("text") or "").strip()
-            if evt.get("is_final"):
-                break
+        if rest_url:
+            try:
+                transcript = await transcribe_wav_rest(wav_bytes, base_url=rest_url)
+            except (httpx.HTTPError, RuntimeError) as exc:
+                rest_err = str(exc)
+
+        if not transcript:
+            stt = WhisperSTT()
+
+            async def _one_chunk() -> AsyncIterator[bytes]:
+                yield wav_bytes
+
+            async for evt in stt.transcribe(audio_source=_one_chunk(), is_wav=True):
+                transcript = str(evt.get("text") or "").strip()
+                if evt.get("is_final"):
+                    break
     except ConnectionRefusedError:
         raise HTTPException(
             status_code=503,
@@ -147,7 +163,14 @@ async def voice_interact(
         raise HTTPException(status_code=503, detail=f"STT connection failed: {exc}") from exc
 
     if not transcript:
-        raise HTTPException(status_code=422, detail="no transcript produced — audio may be silent or too short")
+        hint = (
+            "no transcript produced — audio may be silent, VAD-stripped, or STT unreachable. "
+            "Ensure whisper runs with --enable_rest and zeus-core has WHISPER_REST_URL; "
+            "or speak closer to the mic."
+        )
+        if rest_err:
+            hint = f"{hint} (REST error: {rest_err})"
+        raise HTTPException(status_code=422, detail=hint)
 
     result = await engine.query(
         transcript,
@@ -157,6 +180,9 @@ async def voice_interact(
         source="voice_interact",
     )
 
+    sess = await engine.sessions.get(result.session_id)
+    topic = effective_session_topic(sess) if sess else result.topic
+
     return {
         "transcript": transcript,
         "session_id": result.session_id,
@@ -164,6 +190,7 @@ async def voice_interact(
         "model_used": result.model_used,
         "latency_ms": result.latency_ms,
         "context_sources": result.context_sources,
+        "topic": topic,
     }
 
 
@@ -171,13 +198,33 @@ def _sse_token_event(content: str) -> str:
     return f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
 
-def _sse_done_event(*, session_id: str, latency_ms: int, model_used: str) -> str:
-    payload = {"type": "done", "session_id": session_id, "latency_ms": latency_ms, "model_used": model_used}
+def _sse_done_event(
+    *,
+    session_id: str,
+    latency_ms: int,
+    model_used: str,
+    topic: str | None = None,
+    token_estimate: int | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "type": "done",
+        "session_id": session_id,
+        "latency_ms": latency_ms,
+        "model_used": model_used,
+    }
+    if topic is not None:
+        payload["topic"] = topic
+    if token_estimate is not None:
+        payload["token_estimate"] = token_estimate
     return f"data: {json.dumps(payload)}\n\n"
 
 
 def _sse_error_event(detail: str) -> str:
     return f"data: {json.dumps({'type': 'error', 'detail': detail})}\n\n"
+
+
+def _sse_phase_event(detail: str) -> str:
+    return f"data: {json.dumps({'type': 'phase', 'detail': detail})}\n\n"
 
 
 @router.post("/chat/stream")
@@ -197,6 +244,11 @@ async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingRe
     async def event_iter() -> AsyncIterator[bytes]:
         t0 = time.monotonic()
         try:
+            # Immediate bytes keep reverse proxies (e.g. Cloudflare) from closing idle streams
+            # while mem0 / profile work runs before the first model token.
+            yield b": stream-open\n\n"
+            yield _sse_phase_event("context").encode("utf-8")
+            accumulated: list[str] = []
             async for chunk in engine.query_stream(
                 body.message,
                 session_id_out,
@@ -204,12 +256,19 @@ async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingRe
                 max_tokens=max_out,
                 source="chat",
             ):
+                accumulated.append(chunk)
                 yield _sse_token_event(chunk).encode("utf-8")
+            reply = "".join(accumulated)
+            token_estimate = max(len(reply) // 4, 0)
             latency_ms = int((time.monotonic() - t0) * 1000)
+            sess = await engine.sessions.get(session_id_out)
+            topic = effective_session_topic(sess) if sess else None
             yield _sse_done_event(
                 session_id=session_id_out,
                 latency_ms=latency_ms,
                 model_used=_active_model_name(),
+                topic=topic,
+                token_estimate=token_estimate,
             ).encode("utf-8")
         except Exception as e:
             yield _sse_error_event(str(e)).encode("utf-8")
@@ -239,6 +298,7 @@ async def list_chat_sessions(
             updated_at=s.updated_at,
             turn_count=len(s.turns),
             summary=s.summary,
+            topic=effective_session_topic(s),
             metadata=s.metadata,
         )
         for s in recent
@@ -252,6 +312,9 @@ async def get_chat_session(session_id: str, request: Request) -> Session:
     session = await sm.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    eff = effective_session_topic(session)
+    if eff is not None:
+        session = session.model_copy(update={"topic": eff})
     return session
 
 

@@ -1,6 +1,7 @@
 # zeus/core/query.py — Central query pipeline (memories + session + LLM)
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -19,7 +20,7 @@ ZEUS_DEV_MODEL = os.getenv("ZEUS_DEV_MODEL") or os.getenv(
     "ZEUS_CLAUDE_MODEL", "claude-sonnet-4-6"
 )
 
-ZEUS_USER_ID = "chris"
+ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "chris")
 
 _TIMING_LOG_THRESHOLD_MS = int(os.getenv("ZEUS_TIMING_LOG_THRESHOLD_MS", "250"))
 
@@ -59,6 +60,7 @@ class QueryResult(BaseModel):
     latency_ms: int
     model_used: str
     token_estimate: int
+    topic: str | None = None
 
 
 def _chat_use_claude() -> bool:
@@ -229,7 +231,8 @@ class QueryEngine:
         sources: list[str] = []
         if use_context:
             t_search = time.monotonic()
-            results = search_memories(
+            results = await asyncio.to_thread(
+                search_memories,
                 memory=self.memory,
                 query=message,
                 user_id=ZEUS_USER_ID,
@@ -245,7 +248,9 @@ class QueryEngine:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
 
         t_prof = time.monotonic()
-        facts = get_profile_facts(memory=self.memory, user_id=ZEUS_USER_ID, top_k=8)
+        facts = await asyncio.to_thread(
+            get_profile_facts, memory=self.memory, user_id=ZEUS_USER_ID, top_k=8
+        )
         _log_timing("get_profile_facts", (time.monotonic() - t_prof) * 1000)
         if facts:
             profile_section = "\n".join(f"- {f}" for f in facts[:5])
@@ -280,7 +285,7 @@ class QueryEngine:
             context_sources=sources,
             latency_ms=latency_ms,
         )
-        await self.sessions.append_turn(sid, turn)
+        session_after = await self.sessions.append_turn(sid, turn)
         _log_timing("sessions.append_turn", (time.monotonic() - t_store) * 1000)
 
         return QueryResult(
@@ -290,6 +295,7 @@ class QueryEngine:
             latency_ms=latency_ms,
             model_used=model_used,
             token_estimate=token_estimate,
+            topic=session_after.topic,
         )
 
     async def query_stream(
@@ -314,7 +320,8 @@ class QueryEngine:
         sources: list[str] = []
         if use_context:
             t_search = time.monotonic()
-            results = search_memories(
+            results = await asyncio.to_thread(
+                search_memories,
                 memory=self.memory,
                 query=message,
                 user_id=ZEUS_USER_ID,
@@ -330,7 +337,9 @@ class QueryEngine:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
 
         t_prof = time.monotonic()
-        facts = get_profile_facts(memory=self.memory, user_id=ZEUS_USER_ID, top_k=8)
+        facts = await asyncio.to_thread(
+            get_profile_facts, memory=self.memory, user_id=ZEUS_USER_ID, top_k=8
+        )
         _log_timing("get_profile_facts", (time.monotonic() - t_prof) * 1000)
         if facts:
             profile_section = "\n".join(f"- {f}" for f in facts[:5])

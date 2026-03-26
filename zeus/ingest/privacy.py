@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 
-from zeus.ingest.pipeline import Chunk
+from zeus.ingest.types import Chunk
 
 
 class PrivacyLevel(str, Enum):

@@ -7,19 +7,11 @@ import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Protocol
 
-from zeus.memory.config import get_memory_client
 from zeus.ingest.privacy import classify_chunk
+from zeus.ingest.types import Chunk
+from zeus.memory.config import get_memory_client
 
 logger = logging.getLogger("iris")
-
-
-@dataclass
-class Chunk:
-    """A single ingested chunk ready for embedding and storage."""
-    text: str
-    source: str                      # e.g. "markdown:notes/2024-01.md"
-    metadata: dict = field(default_factory=dict)
-    user_id: str = "chris"           # mem0 partitions by user_id
 
 
 class IngestSource(Protocol):

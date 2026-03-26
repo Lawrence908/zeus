@@ -86,8 +86,8 @@ Speaker
 #### Phase 3a: STT Integration (LAB-51)
 
 **WhisperLiveKit Setup**
-- Container in docker-compose: Whisper server on port 9000
-- Async audio streaming client in `zeus/voice/stt.py`
+- Container in docker-compose: WhisperLiveKit server (collabora/whisperlive) on port 9090
+- WebSocket streaming client in `zeus/voice/stt.py` (not REST)
 - Confidence threshold + language detection
 - Returns `(transcript, confidence, language)`
 
@@ -363,12 +363,12 @@ zeus/
 # compose.yaml additions
 
 services:
-  # STT: WhisperLiveKit
+  # STT: WhisperLiveKit (WebSocket streaming STT)
   whisper:
-    image: onerahmet/openai-whisper-api:latest
+    image: collabora/whisperlive:latest
     container_name: zeus-whisper
     ports:
-      - "${WHISPER_PORT:-9000}:9000"
+      - "${WHISPER_PORT:-9090}:9090"
     environment:
       - WHISPER_MODEL=base  # or tiny, small, medium, large
     restart: unless-stopped
@@ -413,7 +413,7 @@ Add to `.env`:
 
 ```env
 # Phase 3: Voice
-WHISPER_PORT=9000
+WHISPER_PORT=9090
 WHISPER_MODEL=base  # tiny, small, medium, large
 VOICEBOX_PORT=8080
 VOICE_CLONING=true
@@ -447,10 +447,9 @@ MCP_PORT=5005
 # Start all services
 docker compose up -d
 
-# Test STT
-curl -X POST http://localhost:9000/asr \
-  -H "Content-Type: audio/wav" \
-  --data-binary @test.wav
+# Test STT (WhisperLiveKit WebSocket)
+# Use websocat or wscat: wscat -c ws://localhost:9090
+# Or implement streaming client in zeus/voice/stt.py
 
 # Test TTS
 curl -X POST http://localhost:8080/speak \
@@ -508,11 +507,13 @@ print(result)
 
 ### Phase 3 Architecture Decisions
 
-**Why WhisperLiveKit over other STT?**
-- Real-time streaming (lower latency)
+**Why WhisperLiveKit (collabora/whisperlive) over other STT?**
+- Real-time WebSocket streaming (lower latency, ~200ms chunks)
+- Not REST batch API — designed for conversational use
 - Runs locally or on-prem
 - Handles multiple languages
 - Good accuracy for personal use
+- Port 9090, WebSocket protocol (not port 9000 REST)
 
 **Why Voicebox?**
 - 150x realtime speed (conversational TTS latency)

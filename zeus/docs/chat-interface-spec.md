@@ -14,11 +14,15 @@ Provide a minimal local web chat interface for Zeus that shares the same context
 
 - `GET /chat` -> serves `chat.html`
 - `GET /viz` -> standalone Phaos (voice-state orb) page; links to chat
-- `POST /chat/message` -> request/response chat API
-- `GET /chat/stream` -> optional SSE streaming endpoint
-- `GET /chat/sessions/{session_id}` -> fetch session transcript
+- `POST /chat/message` -> JSON chat API (non-streaming)
+- `POST /chat/stream` -> SSE streaming (`text/event-stream`; events: `token`, `done`, `phase`, `error`)
+- `GET /chat/sessions` -> list recent sessions (query `limit`)
+- `GET /chat/sessions/{session_id}` -> full session (turns, `topic`, …)
+- `DELETE /chat/sessions/{session_id}` -> delete session
 
-Static assets (Three.js import maps, `phaos.js`, `orb.js`, …) are served from `GET /static/...` via FastAPI `StaticFiles` on `zeus/core/static/`.
+Static assets (Three.js import maps, `phaos.js`, `orb.js`, `chat-markdown.js`, …) are served from `GET /static/...` via FastAPI `StaticFiles` on `zeus/core/static/`.
+
+**UI roadmap:** [chat-ui-improvements.md](chat-ui-improvements.md) (markdown, copy, abort, token estimate, drafts, tabs, themes).
 
 ## Request / Response Models
 
@@ -35,6 +39,17 @@ Static assets (Three.js import maps, `phaos.js`, `orb.js`, …) are served from 
 - `assistant_message: str`
 - `context_sources: list[str]`
 - `latency_ms: int`
+- `model_used: str`
+- `token_estimate: int` (heuristic ~`len/4`)
+- `topic: str | None` (session label from first user message)
+
+### Chat session summary (list item)
+
+- `id`, `created_at`, `updated_at`, `turn_count`, `summary`, `topic`, `metadata`
+
+### SSE `done` event (streaming)
+
+- `session_id`, `latency_ms`, `model_used`, `topic`, `token_estimate`
 
 ## Processing Flow
 
