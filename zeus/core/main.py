@@ -15,6 +15,9 @@ from zeus.core.query import QueryEngine, _run_llm
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
 from zeus.memory.config import get_memory_client
+from zeus.orchestration.bus import router as orchestration_router
+from zeus.orchestration.hooks import build_default_registry
+from zeus.orchestration.runtime import AgentRuntime
 from zeus.voice.state import VoiceStateHub
 
 ZEUS_VERSION = "0.1.0"
@@ -23,6 +26,9 @@ BOOT_TIME = time.time()
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11435")
+ZEUS_BUS_URL = os.getenv("ZEUS_CORE_URL", "http://localhost:8000")
+
+_RUFLO_CONFIG = Path(__file__).resolve().parent.parent / "orchestration" / "ruflo.yaml"
 
 
 class ServiceHealth(BaseModel):
@@ -61,6 +67,15 @@ async def lifespan(app: FastAPI):
         memory=app.state.memory,
         session_manager=session_manager,
     )
+
+    # Agent runtime — load YAML definitions, start auto_start agents
+    app.state.zeus_bus_url = ZEUS_BUS_URL
+    runtime = AgentRuntime(_RUFLO_CONFIG)
+    runtime.load()
+    await runtime.start_all_auto()
+    app.state.agent_runtime = runtime
+    app.state.hook_registry = build_default_registry()
+
     yield
     await app.state.http_client.aclose()
 
@@ -73,6 +88,7 @@ app = FastAPI(
 app.include_router(oracle_router)
 app.include_router(voice_state_router)
 app.include_router(chat_router)
+app.include_router(orchestration_router)
 
 _static_dir = Path(__file__).resolve().parent / "static"
 if _static_dir.is_dir():
