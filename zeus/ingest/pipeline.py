@@ -110,6 +110,26 @@ async def run_ingest(
     return results
 
 
+class IngestPipeline:
+    """
+    Thin wrapper around run_ingest for use by the scheduler.
+
+    Pass a pre-configured list of IngestSource instances at construction time.
+    The scheduler calls run_all_sources() on the configured interval.
+    """
+
+    def __init__(self, sources: list[IngestSource], chunk_size: int = 512, dry_run: bool = False) -> None:
+        self._sources = list(sources)
+        self._chunk_size = chunk_size
+        self._dry_run = dry_run
+
+    async def run_all_sources(self, incremental: bool = True) -> list["IngestResult"]:
+        if not self._sources:
+            logger.info("IngestPipeline: no sources configured — skipping")
+            return []
+        return await run_ingest(self._sources, chunk_size=self._chunk_size, dry_run=self._dry_run)
+
+
 def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]:
     """
     Split text into overlapping chunks by word count.

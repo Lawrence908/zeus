@@ -40,10 +40,14 @@ def _fmt_duration(seconds: float) -> str:
 
 def build_sources(args) -> list:
     """Construct IngestSource instances from CLI args."""
+    from zeus.ingest.sources.bookmarks import BookmarksSource
     from zeus.ingest.sources.chatgpt import ChatGPTSource
     from zeus.ingest.sources.context_pack import ContextPackSource
     from zeus.ingest.sources.email import EmailSource
+    from zeus.ingest.sources.gcal import GoogleCalendarSource
+    from zeus.ingest.sources.git import GitSource
     from zeus.ingest.sources.markdown import MarkdownSource
+    from zeus.ingest.sources.obsidian import ObsidianSource
 
     sources = []
 
@@ -115,6 +119,70 @@ def build_sources(args) -> list:
                     config=cfg,
                     chunk_size=args.chunk_size,
                     chunk_overlap=args.chunk_overlap,
+                    user_id=args.user_id,
+                )
+            )
+
+    if args.source in ("obsidian", "all"):
+        vault_path = args.path or os.getenv("OBSIDIAN_VAULT_PATH", "")
+        if not vault_path or not Path(vault_path).is_dir():
+            if args.source == "obsidian":
+                logger.error("obsidian vault not found — set OBSIDIAN_VAULT_PATH or use --path")
+                sys.exit(1)
+            if vault_path:
+                logger.warning("skipping obsidian — vault not found: %s", vault_path)
+        else:
+            sources.append(
+                ObsidianSource(
+                    vault_path=vault_path,
+                    chunk_size=args.chunk_size,
+                    chunk_overlap=args.chunk_overlap,
+                    user_id=args.user_id,
+                )
+            )
+
+    if args.source in ("git", "all"):
+        repo_path = args.path or os.getenv("ZEUS_REPO_PATH", ".")
+        if not Path(repo_path, ".git").is_dir():
+            if args.source == "git":
+                logger.error("git repo not found at %s — use --path or set ZEUS_REPO_PATH", repo_path)
+                sys.exit(1)
+            logger.warning("skipping git — no .git directory at %s", repo_path)
+        else:
+            sources.append(
+                GitSource(
+                    repo_path=repo_path,
+                    max_commits=args.git_max_commits,
+                    user_id=args.user_id,
+                )
+            )
+
+    if args.source in ("gcal", "all"):
+        try:
+            sources.append(
+                GoogleCalendarSource(
+                    days_back=args.gcal_days_back,
+                    days_forward=args.gcal_days_forward,
+                    user_id=args.user_id,
+                )
+            )
+        except Exception as exc:
+            if args.source == "gcal":
+                logger.error("gcal config invalid: %s", exc)
+                sys.exit(1)
+            logger.warning("skipping gcal — %s", exc)
+
+    if args.source in ("bookmarks", "all"):
+        export_path = args.path or os.getenv("BOOKMARKS_EXPORT_PATH", "zeus/data/raw/bookmarks.html")
+        if not Path(export_path).exists():
+            if args.source == "bookmarks":
+                logger.error("bookmarks export not found: %s", export_path)
+                sys.exit(1)
+            logger.warning("skipping bookmarks — export not found: %s", export_path)
+        else:
+            sources.append(
+                BookmarksSource(
+                    export_path=export_path,
                     user_id=args.user_id,
                 )
             )
@@ -242,7 +310,8 @@ Examples:
     )
     p.add_argument(
         "--source",
-        choices=["context_pack", "markdown", "chatgpt", "email", "all"],
+        choices=["context_pack", "markdown", "chatgpt", "email",
+                 "obsidian", "git", "gcal", "bookmarks", "all"],
         required=True,
         help="Which source type to ingest",
     )
@@ -292,6 +361,24 @@ Examples:
         type=int,
         default=200,
         help="Max number of emails to ingest (default: 200; newest first)",
+    )
+    p.add_argument(
+        "--git-max-commits",
+        type=int,
+        default=500,
+        help="Max git commits to ingest (default: 500)",
+    )
+    p.add_argument(
+        "--gcal-days-back",
+        type=int,
+        default=90,
+        help="Days back to fetch Google Calendar events (default: 90)",
+    )
+    p.add_argument(
+        "--gcal-days-forward",
+        type=int,
+        default=30,
+        help="Days forward to fetch Google Calendar events (default: 30)",
     )
     return p.parse_args()
 
