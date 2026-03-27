@@ -1,6 +1,9 @@
 # zeus/compose.yaml — Zeus service stack
 # Usage: docker compose up -d
-# This base file is CPU-safe. For GPU passthrough, include compose.gpu.yaml.
+#
+# Ollama is configured for one NVIDIA GPU via deploy.resources (requires
+# nvidia-container-toolkit on the host). For a CPU-only host, remove the
+# `deploy:` block under `ollama` or use a machine without the NVIDIA stack.
 
 services:
   # --- Mnemosyne: Vector DB ---
@@ -32,6 +35,13 @@ services:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ollama", "list"]
