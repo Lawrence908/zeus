@@ -692,7 +692,9 @@
       input.disabled = busy;
       sendBtn.disabled = busy;
       micBtn.disabled = busy;
-      stopBtn.hidden = !busy;
+      // Only show Stop when busy *and* a streaming AbortController is active.
+      // Non-streaming fetches have no abort signal, so the button would be a no-op.
+      stopBtn.hidden = !busy || !streamAbortController;
       stopBtn.disabled = false;
     }
 

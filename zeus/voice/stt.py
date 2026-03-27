@@ -18,15 +18,24 @@ import websockets
 
 def wav_bytes_to_float32(wav_bytes: bytes) -> bytes:
     """
-    Convert a WAV file (PCM int16, any sample rate) to raw float32 LE bytes
+    Convert a WAV file (16-bit PCM, 16 kHz mono) to raw float32 LE bytes
     in the range [-1, 1] that WhisperLive expects.
 
-    Mono is assumed; stereo input is downmixed to mono by taking the left channel.
+    Raises ValueError if the WAV is not 16-bit PCM (WhisperLive requires it).
+    Stereo input is downmixed to mono by taking the left channel.
+    Sample rate is not resampled — caller must ensure 16 kHz input.
     """
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
         n_channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
         n_frames = wf.getnframes()
         raw = wf.readframes(n_frames)
+
+    if sampwidth != 2:
+        raise ValueError(
+            f"wav_bytes_to_float32 requires 16-bit PCM WAV (got {sampwidth * 8}-bit); "
+            "re-encode or resample before passing to WhisperLive."
+        )
 
     n_samples = len(raw) // 2
     samples = struct.unpack_from(f"<{n_samples}h", raw)
@@ -36,6 +45,13 @@ def wav_bytes_to_float32(wav_bytes: bytes) -> bytes:
 
     float32_bytes = struct.pack(f"<{len(samples)}f", *(s / 32768.0 for s in samples))
     return float32_bytes
+
+
+async def _stream_audio_chunks(ws: Any, source: AsyncIterator[bytes]) -> None:
+    """Send raw audio chunks over an open WebSocket. Used as a background task."""
+    async for chunk in source:
+        if chunk:
+            await ws.send(chunk)
 
 
 async def transcribe_wav_rest(
@@ -129,9 +145,10 @@ class WhisperSTT:
             }))
 
             # Wait for server handshake
-            deadline = asyncio.get_event_loop().time() + 30
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 30
             while True:
-                remaining = deadline - asyncio.get_event_loop().time()
+                remaining = deadline - loop.time()
                 if remaining <= 0:
                     raise TimeoutError("WhisperLive: timed out waiting for SERVER_READY")
                 try:
@@ -152,8 +169,9 @@ class WhisperSTT:
                     raise RuntimeError("WhisperLive: server disconnected during handshake")
 
             # Stream audio
+            send_task: asyncio.Task[None] | None = None
             if is_wav:
-                # Collect full WAV then convert once
+                # Collect full WAV then convert once; sequential send is fine for finite files.
                 wav_chunks: list[bytes] = []
                 async for chunk in audio_source:
                     if chunk:
@@ -166,9 +184,9 @@ class WhisperSTT:
                         await ws.send(float32_bytes[i : i + chunk_bytes])
                         await asyncio.sleep(0)
             else:
-                async for chunk in audio_source:
-                    if chunk:
-                        await ws.send(chunk)
+                # Live mic stream: send concurrently with recv so partial transcripts
+                # can flow back while audio is still being captured.
+                send_task = asyncio.create_task(_stream_audio_chunks(ws, audio_source))
 
             # Do NOT send "END_OF_AUDIO" — older WhisperLive builds pass all
             # messages to numpy before type-checking, crashing on a string.
@@ -176,6 +194,7 @@ class WhisperSTT:
             # or a per-recv timeout fires (server has received all audio and
             # will finalize when it runs out of new frames).
             last_text = ""
+            final_emitted = False
             recv_timeout = max(5.0, self.recv_timeout)
             while True:
                 try:
@@ -212,9 +231,19 @@ class WhisperSTT:
                 yield {"text": text, "is_final": is_final, "raw": data}
 
                 if is_final:
+                    final_emitted = True
                     break
+
+            # Clean up background sender if it's still running (e.g. recv loop
+            # exited early on timeout/close before the audio source was exhausted).
+            if send_task is not None and not send_task.done():
+                send_task.cancel()
+                try:
+                    await send_task
+                except asyncio.CancelledError:
+                    pass
 
             # If the loop exited on timeout/close with accumulated text but no
             # final segment, emit one last event so the caller always gets output.
-            if last_text:
+            if last_text and not final_emitted:
                 yield {"text": last_text, "is_final": True, "raw": {}}
