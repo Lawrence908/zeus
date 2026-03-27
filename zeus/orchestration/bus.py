@@ -69,12 +69,15 @@ async def agent_action(
 ) -> dict:
     """Start or stop a named agent."""
     rt = _runtime(request)
-    if body.action == "start":
-        await rt.start_agent(agent_name)
-    elif body.action == "stop":
-        await rt.stop_agent(agent_name)
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown action: {body.action!r}")
+    try:
+        if body.action == "start":
+            await rt.start_agent(agent_name)
+        elif body.action == "stop":
+            await rt.stop_agent(agent_name)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown action: {body.action!r}")
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_name!r}")
     return {"agent": agent_name, "action": body.action, "ok": True}
 
 
