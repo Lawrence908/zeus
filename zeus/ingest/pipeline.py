@@ -127,6 +127,9 @@ class IngestPipeline:
         if not self._sources:
             logger.info("IngestPipeline: no sources configured — skipping")
             return []
+        if incremental:
+            # incremental mode is not yet implemented — full ingest runs regardless
+            logger.debug("IngestPipeline: incremental mode requested (currently a no-op)")
         return await run_ingest(self._sources, chunk_size=self._chunk_size, dry_run=self._dry_run)
 
 

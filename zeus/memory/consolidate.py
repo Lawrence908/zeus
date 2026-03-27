@@ -158,7 +158,10 @@ class MemoryConsolidator:
             if len(group) > 1:
                 # Merge all group members into one chunk
                 texts = [p["payload"].get("data", p["payload"].get("text", "")) for p in group]
-                merged_text = _merge_texts([t for t in texts if t])
+                non_empty_texts = [t for t in texts if t]
+                if not non_empty_texts:
+                    continue
+                merged_text = _merge_texts(non_empty_texts)
                 if not merged_text:
                     continue
 

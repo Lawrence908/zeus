@@ -1,12 +1,13 @@
 # zeus/core/middleware.py — Query logging middleware (Sprint 9a / LAB-147)
 # Records request_id, path, latency_ms, and status for every query through
 # the chat and oracle endpoints. Attaches X-Request-Id header to responses.
-import hashlib
 import logging
 import time
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from zeus.core.admin import record_query
 
 logger = logging.getLogger("zeus.query")
 
@@ -26,14 +27,13 @@ class QueryLoggingMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         latency_ms = round((time.monotonic() - start) * 1000, 1)
-        logger.info(
-            "query",
-            extra={
-                "request_id": request_id,
-                "path": request.url.path,
-                "latency_ms": latency_ms,
-                "status": response.status_code,
-            },
-        )
+        entry = {
+            "request_id": request_id,
+            "path": request.url.path,
+            "latency_ms": latency_ms,
+            "status": response.status_code,
+        }
+        logger.info("query", extra=entry)
+        record_query(request.app, entry)
         response.headers["X-Request-Id"] = request_id
         return response
