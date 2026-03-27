@@ -20,7 +20,6 @@ from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
 from zeus.memory.config import get_memory_client
 from zeus.orchestration.bus import router as orchestration_router
-from zeus.orchestration.hooks import build_default_registry
 from zeus.orchestration.runtime import AgentRuntime
 from zeus.voice.state import VoiceStateHub
 
@@ -79,7 +78,6 @@ async def lifespan(app: FastAPI):
     runtime.load()
     await runtime.start_all_auto()
     app.state.agent_runtime = runtime
-    app.state.hook_registry = build_default_registry()
 
     # Observability — query log ring buffer
     init_query_log(app)
