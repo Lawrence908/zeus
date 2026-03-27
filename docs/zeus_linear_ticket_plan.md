@@ -88,6 +88,35 @@ Key changes from v1:
 | LAB-61 | mem0 Integration & Retrieval Quality | Feature, mnemosyne | 6    |
 | LAB-56 | Privacy & Data Governance            | Feature, aegis     | 5    |
 | LAB-64 | Phase 2 Data Sources — Email Ingest  | Feature, iris      | 4    |
+| LAB-152 | Obsidian frontmatter full YAML support | Feature, iris    | 2    |
+| LAB-153 | IngestPipeline memory client injection | Feature, iris    | 3    |
+
+### LAB-152 — Obsidian frontmatter full YAML support
+**File:** `zeus/ingest/sources/obsidian.py`, `_parse_frontmatter()` · **Priority:** Low · **Status:** Deferred
+
+Current parser is a hand-rolled `key: value` line splitter — won't handle lists, quoted strings with colons, multiline values, or nested objects. The misleading "YAML" comment has been fixed to say "simple key:value frontmatter". Only matters if the vault uses complex frontmatter.
+
+**Fix:** Replace with PyYAML:
+```python
+import yaml
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        return {}, text
+    try:
+        meta = yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        meta = {}
+    return meta, text[match.end():].strip()
+```
+Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault frontmatter.
+
+### LAB-153 — IngestPipeline memory client injection
+**File:** `zeus/ingest/pipeline.py`, `run_ingest()` · **Priority:** Medium · **Status:** Deferred (pre-Olympus always-on)
+
+`run_ingest()` calls `get_memory_client()` internally on every scheduled run, creating a fresh mem0/Qdrant client each time instead of reusing `app.state.memory`. Adds connection overhead and complicates clean shutdown.
+
+**Fix:** Add optional `memory` param to `IngestPipeline.__init__` and thread it through to `run_ingest`. In `main.py` lifespan, pass `memory=app.state.memory` when constructing the pipeline. Gate on **Project 6**.
 
 
 ## Project 3 — Voice Loop
@@ -162,12 +191,50 @@ Key changes from v1:
 
 ## Project 8 — Observability + Admin
 
+**Status (27 Mar 2026):** Sprint 9/10 PR merged. Middleware ring-buffer wiring, consolidate empty-payload guard, and pipeline incremental no-op log are fixed. Two security hardening tickets (LAB-150, LAB-151) deferred until Olympus deployment — VPN boundary covers them during dev.
 
-| Parent  | Title              | Labels          | Subs |
-| ------- | ------------------ | --------------- | ---- |
-| LAB-147 | Metrics Collection | Feature, oracle | 4    |
-| LAB-148 | Admin API Routes   | Feature, oracle | 4    |
-| LAB-149 | Admin Dashboard    | Feature, oracle | 4    |
+| Parent  | Title                          | Labels                | Subs |
+| ------- | ------------------------------ | --------------------- | ---- |
+| LAB-147 | Metrics Collection             | Feature, oracle       | 4    |
+| LAB-148 | Admin API Routes               | Feature, oracle       | 4    |
+| LAB-149 | Admin Dashboard                | Feature, oracle       | 4    |
+| LAB-150 | Admin endpoint auth hardening  | Feature, aegis        | 3    |
+| LAB-151 | Admin dashboard XSS hardening  | Feature, aegis        | 2    |
+
+### LAB-150 — Admin endpoint auth hardening
+**File:** `zeus/core/admin.py` · **Priority:** Medium · **Status:** Deferred (pre-Olympus)
+
+`/admin/*` exposes agent status, Qdrant counts, and recent query metadata with no access control. Fine while bound to localhost/VPN; must be gated before any external exposure.
+
+**Fix:** Add a `Depends` bearer token check on the `APIRouter`:
+```python
+import os
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+_bearer = HTTPBearer()
+
+def require_admin(credentials: HTTPAuthorizationCredentials = Security(_bearer)):
+    token = os.getenv("ZEUS_ADMIN_TOKEN", "")
+    if not token or credentials.credentials != token:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+```
+Wire `ZEUS_ADMIN_TOKEN` into `.env` and `compose.yaml`. Gate on **Project 6 (Deploy to Olympus)**.
+
+### LAB-151 — Admin dashboard XSS hardening
+**File:** `zeus/core/static/admin.html` · **Priority:** Low · **Status:** Deferred (internal tool, same boundary as LAB-150)
+
+`renderAgents()` and related render functions use `innerHTML` template literals with API-provided values (agent description, path, request ID). Any field containing `<`/`>` creates an XSS vector.
+
+**Fix:** Add an escape helper and use it for all interpolated values:
+```js
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str ?? '';
+  return d.innerHTML;
+}
+```
+Do alongside LAB-150 — both are the same admin surface hardening pass.
 
 
 ## Backlog

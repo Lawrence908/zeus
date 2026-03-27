@@ -76,7 +76,7 @@ async def metrics(request: Request) -> dict[str, Any]:
 
 @router.get("/ingest/stats")
 async def ingest_stats(request: Request) -> dict[str, Any]:
-    """Return Qdrant collection info and per-source chunk counts."""
+    """Return Qdrant collection statistics for all collections."""
     memory = getattr(request.app.state, "memory", None)
     if memory is None:
         return {"error": "memory client not initialised"}

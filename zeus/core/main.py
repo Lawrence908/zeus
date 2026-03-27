@@ -10,7 +10,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from zeus.api.main import router as oracle_router
-from zeus.core.admin import admin_dashboard  # noqa: F401 — used via router
 from zeus.core.admin import init_query_log
 from zeus.core.admin import router as admin_router
 from zeus.core.chat import router as chat_router
@@ -102,55 +101,4 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    if app.state.ingest_scheduler is not None:
-        app.state.ingest_scheduler.shutdown(wait=False)
-    await app.state.http_client.aclose()
-
-
-app = FastAPI(
-    title="Zeus Core",
-    version=ZEUS_VERSION,
-    lifespan=lifespan,
-)
-
-app.add_middleware(QueryLoggingMiddleware)
-
-app.include_router(oracle_router)
-app.include_router(voice_state_router)
-app.include_router(chat_router)
-app.include_router(orchestration_router)
-app.include_router(admin_router)
-
-_static_dir = Path(__file__).resolve().parent / "static"
-if _static_dir.is_dir():
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
-
-
-@app.get("/status", response_model=StatusResponse)
-async def status():
-    """Health check: reports version, uptime, and reachability of all services."""
-    client = app.state.http_client
-
-    services = await check_service(client, "qdrant", f"{QDRANT_URL}/healthz")
-    ollama = await check_service(client, "ollama", f"{OLLAMA_URL}/api/tags")
-
-    return StatusResponse(
-        version=ZEUS_VERSION,
-        environment=ZEUS_ENV,
-        uptime_seconds=round(time.time() - BOOT_TIME, 1),
-        services=[services, ollama],
-    )
-
-
-@app.get("/")
-async def root():
-    return {
-        "name": "zeus",
-        "version": ZEUS_VERSION,
-        "env": ZEUS_ENV,
-        "ui": {
-            "chat": "/chat",
-            "phaos_viz": "/viz",
-            "voice_state_ws": "/ws/voice-state",
-        },
-    }
+    if app.s
