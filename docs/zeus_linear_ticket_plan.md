@@ -38,7 +38,7 @@ Key changes from v1:
 
 ## Project 0 — Foundation (Mostly Complete)
 
-**Status (25 Mar 2026):** Core service skeleton is in place (FastAPI bus, env wiring, Qdrant/Ollama health check). Ruflo config + agent YAMLs exist, but the **Ruflo validation spike (LAB-121)** still looks **unverified** in-repo (no safety policy dir present at `safety/policies/`, no runnable Ruflo integration code checked in).
+**Status (28 Mar 2026):** Core service skeleton is in place (FastAPI bus, env wiring, Qdrant/Ollama health check). Ruflo config + agent YAMLs exist; **Aegis policy files** now live under `zeus/safety/policies/` (see Project 5 / LAB-119). The **Ruflo validation spike (LAB-121)** remains **partially unverified** relative to full swarm behavior—bus + `AgentRuntime` are wired, but deep Ruflo-native validation is still open.
 
 
 | Parent  | Title                              | Labels             | Subs |
@@ -63,7 +63,7 @@ Key changes from v1:
 
 ## Project 2 — Data Brain
 
-**Status (25 Mar 2026):**
+**Status (28 Mar 2026):**
 
 - **Implemented**:
   - **LAB-45 (ChatGPT Export Parser)**: `zeus/ingest/sources/chatgpt.py`
@@ -74,8 +74,8 @@ Key changes from v1:
   - **LAB-49 (Zeus Query Engine)**: `zeus/core/query.py` (used by chat routes)
 - **Partially implemented / needs validation**:
   - **LAB-61 (mem0 Integration & Retrieval Quality)**: mem0 client + retrieval helpers exist (`zeus/memory/config.py`, `zeus/memory/search.py`), but quality eval harness / tuning loop isn’t represented as a dedicated suite yet.
+  - **LAB-56 (Privacy & Data Governance / Aegis)**: **in-process Aegis** is present (`zeus/safety/policy_engine.py`, YAML under `zeus/safety/policies/`, optional `ZEUS_AEGIS_ENABLED` / `ZEUS_AEGIS_POLICY` / `NEMOCLAW_POLICY` per `.env.example`). Chat, streaming chat, voice text responses, and `/orchestration/call` outputs can be filtered by policy. **Still open** on this ticket: privacy level tagging, PII scanning across ingest, deduplication strategy, collection versioning—see ticket scope.
 - **Not started (no code present yet)**:
-  - **LAB-56 (Privacy & Data Governance / Aegis)**: no `zeus/safety/` or `safety/policies/` directory present; policy enforcement layer isn’t wired beyond config references.
   - **LAB-64 (Email Ingest)**: no email source/parser found under `zeus/ingest/sources/`.
 
 | Parent | Title                                | Labels             | Subs |
@@ -133,6 +133,7 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
   - Voicebox REST TTS client (streaming sentences): `zeus/voice/tts.py`
   - Orpheus orchestrator loop + Phaos emitter: `zeus/voice/pipeline.py`
   - Non-wake-word test endpoint (WAV upload): `zeus/core/chat.py` (`POST /voice/interact`)
+- **Gap (future):** `llm_stream()` in `zeus/voice/pipeline.py` always streams from Ollama, while text chat can use Claude in dev via `zeus/core/query.py` (`_chat_use_claude()`). Closing the gap means Anthropic streaming + the same env switches (`ZEUS_ENV`, `ZEUS_LLM`, `ANTHROPIC_API_KEY`). Tracked in Backlog as **Orpheus voice LLM env parity**.
 
 | Parent | Title                           | Labels           | Subs |
 | ------ | ------------------------------- | ---------------- | ---- |
@@ -156,7 +157,7 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 
 ## Project 5 — Ruflo Agents
 
-**Status (25 Mar 2026):** Ruflo config and agent definition YAMLs exist (`zeus/orchestration/ruflo.yaml`, `zeus/orchestration/agents/*.yaml`). However, the referenced safety policy directory (`safety/policies`) is missing, and there’s no in-repo “Ruflo runtime” code to mark the spike as validated yet.
+**Status (28 Mar 2026):** Ruflo config and agent YAMLs exist (`zeus/orchestration/ruflo.yaml`, `zeus/orchestration/agents/*.yaml`). **`zeus/safety/policies/`** is populated and wired: per-agent `safety.policy` values (`standard`, `ingest`, `voice`, `memory`, etc.) map to YAML files; `/orchestration/call` runs an Aegis post-hook when `ZEUS_AEGIS_ENABLED=1`. **LAB-119** is **partially done** in-repo (policy engine + integration); **host install** of NVIDIA NemoClaw + OpenShell (OpenClaw sandboxes) remains a separate step—documented in `compose.yaml` and `.env.example`, not as a Zeus compose service. Full Ruflo spike validation (LAB-121) is still broader than policy files alone.
 
 | Parent  | Title                          | Labels             | Subs |
 | ------- | ------------------------------ | ------------------ | ---- |
@@ -167,8 +168,19 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 | LAB-119 | NemoClaw Safety Layer (Aegis)  | Feature, aegis     | 5    |
 | LAB-120 | Multi-Agent Orchestration Test | Feature, olympians | 4    |
 
+### LAB-119 — NemoClaw Safety Layer (Aegis)
+**Files:** `zeus/safety/policy_engine.py`, `zeus/safety/integration.py`, `zeus/safety/policies/*.yaml` · **`compose.yaml`** (Aegis comment block) · **`.env.example`** (Aegis env vars) · **`zeus/core/query.py`** (chat + stream) · **`zeus/orchestration/bus.py`** (bus post-hook) · **`zeus/core/main.py`** (`orchestration_hooks`)
+
+**Done in repo (Mar 2026):** YAML rule packs; `AegisPolicyEngine`; optional enforcement on Core query paths and orchestration bus responses; policy names aligned with agent YAML + Phase 5e examples (`personal`, `code_execution`, `citation_required`, etc.).
+
+**Still out of repo / manual:** NVIDIA NemoClaw installer, OpenShell on host, OpenClaw inside sandboxes per [NemoClaw quickstart](https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html). Optional future: `NEMOCLAW_RUNTIME_URL` if a stable HTTP sidecar appears.
+
 
 ## Project 6 — Deploy to Olympus
+
+**Compose / network (dev tower):** `compose.yaml` declares `homelab-web` as an **external** Docker network so Zeus can sit alongside other homelab stacks. On a fresh machine that network must exist (`docker network create homelab-web`) or you need a compose override that replaces it with an internal network for isolated local testing. Tracked in Backlog as **Compose dev ergonomics**.
+
+**Aegis / NemoClaw:** Compose file includes a comment block clarifying that the full NemoClaw + OpenShell stack is **not** a Zeus service image—host or separate homelab stack—while Zeus applies in-process policies when enabled.
 
 
 | Parent  | Title                           | Labels           | Subs |
@@ -242,6 +254,8 @@ Do alongside LAB-150 — both are the same admin surface hardening pass.
 
 | Title                                        | Labels             |
 | -------------------------------------------- | ------------------ |
+| Orpheus voice LLM env parity (Claude vs Ollama) | Feature, orpheus |
+| Compose dev ergonomics: `homelab-web` vs internal network | Feature, oracle |
 | VR Prototype — Zeus voice + avatar in Oculus | Feature, orpheus   |
 | Meta AR Glasses Integration                  | Feature, orpheus   |
 | Watch Vitals Integration                     | Feature, iris      |
