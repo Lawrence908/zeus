@@ -128,11 +128,26 @@ async def bus_call(body: BusCallRequest, request: Request) -> BusCallResponse:
             raise HTTPException(400, detail=f"Unsupported method: {body.method!r}")
 
         resp.raise_for_status()
+        data: dict[str, Any] = resp.json()
+        hooks = getattr(request.app.state, "orchestration_hooks", None)
+        if hooks is not None:
+            ctx = await hooks.run_post(
+                {
+                    "source": "orchestration_bus",
+                    "target": body.target_agent,
+                    "target_agent": body.target_agent,
+                    "endpoint": body.endpoint,
+                    "response_data": data,
+                    "safety_policy": target.definition.safety_policy,
+                    "response_status": resp.status_code,
+                }
+            )
+            data = ctx.get("response_data", data)
         return BusCallResponse(
             agent=body.target_agent,
             endpoint=body.endpoint,
             status="ok",
-            data=resp.json(),
+            data=data,
         )
     except httpx.HTTPStatusError as exc:
         logger.error("Bus call %s%s failed: %s", body.target_agent, body.endpoint, exc)

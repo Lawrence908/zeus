@@ -84,20 +84,18 @@ def format_context_block(memories: Iterable[dict], max_tokens: int = 2048) -> tu
 
 
 def get_profile_facts(memory, user_id: str, top_k: int = 8) -> list[str]:
-    """Retrieve stable user profile facts with priority for context_pack memories."""
-    preferred = search_memories(
-        memory=memory,
-        query="stable profile facts identity goals preferences current projects",
-        user_id=user_id,
-        top_k=max(top_k * 2, 8),
-        namespaces=["context_pack"],
-    )
-    fallback = search_memories(
-        memory=memory,
-        query="stable profile facts identity goals preferences current projects",
-        user_id=user_id,
-        top_k=max(top_k * 2, 8),
-    )
+    """Retrieve stable user profile facts with priority for context_pack memories.
+
+    One vector search + in-process split avoids a duplicate Ollama embed of the same
+    query (mem0 embeds per search; Zeus alternates embed/chat models on the GPU).
+    """
+    q = "stable profile facts identity goals preferences current projects"
+    fetch_n = max(top_k * 2, 8)
+    raw = memory.search(query=q, user_id=user_id, limit=fetch_n)
+    if not isinstance(raw, list):
+        raw = []
+    preferred = [m for m in raw if _matches_namespaces(m, ["context_pack"])]
+    fallback = [m for m in raw if not _matches_namespaces(m, ["context_pack"])]
 
     # Keep order stable while de-duplicating by text.
     seen: set[str] = set()

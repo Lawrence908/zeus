@@ -1,11 +1,14 @@
 # zeus/memory/consolidate.py — Memory consolidation job (Sprint 9e)
 # Periodically deduplicates near-duplicate chunks in Qdrant to keep
 # mnemosyne lean. Similarity threshold is controlled by env var.
+import asyncio
 import logging
 import math
 import os
 from dataclasses import dataclass, field
 from typing import Any
+
+from qdrant_client import models as qdrant_models
 
 logger = logging.getLogger("mnemosyne.consolidate")
 
@@ -66,12 +69,18 @@ class MemoryConsolidator:
         """
         Find near-duplicate chunks, merge, delete originals.
 
+        Runs the blocking Qdrant + mem0 work in a thread pool so scheduled
+        consolidation does not stall the FastAPI event loop.
+
         Steps:
           1. Scroll all chunks from Qdrant with vectors
           2. Find pairs with cosine similarity > threshold
           3. Merge text, keep highest-quality source metadata
           4. Delete originals, write merged chunk via mem0
         """
+        return await asyncio.to_thread(self._run_sync)
+
+    def _run_sync(self) -> dict[str, int]:
         result = ConsolidationResult()
         qdrant = self._get_qdrant()
 
@@ -79,7 +88,6 @@ class MemoryConsolidator:
             logger.warning("consolidate: qdrant client not accessible — skipping")
             return {"scanned": 0, "merged": 0, "deleted": 0}
 
-        # Discover collection names
         try:
             collections = [c.name for c in qdrant.get_collections().collections]
         except Exception as exc:
@@ -87,7 +95,7 @@ class MemoryConsolidator:
             return {"scanned": 0, "merged": 0, "deleted": 0}
 
         for collection in collections:
-            await self._consolidate_collection(qdrant, collection, result)
+            self._consolidate_collection(qdrant, collection, result)
 
         logger.info(
             "consolidate: done — scanned=%d pairs=%d merged=%d deleted=%d errors=%d",
@@ -102,7 +110,7 @@ class MemoryConsolidator:
             "errors": result.errors,
         }
 
-    async def _consolidate_collection(self, qdrant, collection: str, result: ConsolidationResult) -> None:
+    def _consolidate_collection(self, qdrant, collection: str, result: ConsolidationResult) -> None:
         """Process one Qdrant collection."""
         points: list[dict] = []
 
@@ -139,7 +147,7 @@ class MemoryConsolidator:
             return
 
         # Find near-duplicate pairs (O(n²) — acceptable for personal-scale collections)
-        to_delete: set[str] = set()
+        to_delete: set[Any] = set()
         merged_chunks: list[dict] = []
 
         for i in range(len(points)):
@@ -179,7 +187,7 @@ class MemoryConsolidator:
             try:
                 qdrant.delete(
                     collection_name=collection,
-                    points_selector=list(to_delete),
+                    points_selector=qdrant_models.PointIdsList(points=list(to_delete)),
                 )
                 result.deleted += len(to_delete)
             except Exception as exc:
