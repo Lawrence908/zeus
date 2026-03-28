@@ -1,11 +1,12 @@
 # zeus/core/main.py — Zeus Core API bus and health endpoint
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -19,7 +20,9 @@ from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
 from zeus.memory.config import get_memory_client
 from zeus.orchestration.bus import router as orchestration_router
+from zeus.orchestration.hooks import build_default_registry
 from zeus.orchestration.runtime import AgentRuntime
+from zeus.safety.integration import register_aegis_bus_post_hook
 from zeus.voice.state import VoiceStateHub
 
 ZEUS_VERSION = "0.1.0"
@@ -78,6 +81,10 @@ async def lifespan(app: FastAPI):
     await runtime.start_all_auto()
     app.state.agent_runtime = runtime
 
+    orch_hooks = build_default_registry()
+    register_aegis_bus_post_hook(orch_hooks)
+    app.state.orchestration_hooks = orch_hooks
+
     # Observability — query log ring buffer
     init_query_log(app)
 
@@ -101,4 +108,50 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    if app.s
+    ingest_scheduler = getattr(app.state, "ingest_scheduler", None)
+    if ingest_scheduler is not None:
+        ingest_scheduler.shutdown()
+
+    await app.state.http_client.aclose()
+
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+app = FastAPI(title="Zeus Core", version=ZEUS_VERSION, lifespan=lifespan)
+app.add_middleware(QueryLoggingMiddleware)
+
+app.include_router(oracle_router)
+app.include_router(admin_router)
+app.include_router(chat_router)
+app.include_router(voice_state_router)
+app.include_router(orchestration_router)
+
+app.mount(
+    "/static",
+    StaticFiles(directory=str(_STATIC_DIR)),
+    name="static",
+)
+
+
+@app.get("/health", include_in_schema=False)
+async def health() -> dict[str, str]:
+    """Liveness only — for Docker/orchestrator probes. Does not call Qdrant or Ollama."""
+    return {"status": "ok"}
+
+
+@app.get("/status", response_model=StatusResponse)
+async def status(request: Request) -> StatusResponse:
+    client: httpx.AsyncClient = request.app.state.http_client
+    qdrant_url = f"{QDRANT_URL.rstrip('/')}/readyz"
+    ollama_url = f"{OLLAMA_URL.rstrip('/')}/api/tags"
+    qdrant, ollama = await asyncio.gather(
+        check_service(client, "qdrant", qdrant_url),
+        check_service(client, "ollama", ollama_url),
+    )
+    boot = getattr(request.app.state, "boot_time", BOOT_TIME)
+    return StatusResponse(
+        version=ZEUS_VERSION,
+        environment=ZEUS_ENV,
+        uptime_seconds=round(time.time() - boot, 1),
+        services=[qdrant, ollama],
+    )

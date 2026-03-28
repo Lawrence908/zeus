@@ -37,6 +37,7 @@ class ChatMessageResponse(BaseModel):
     model_used: str
     token_estimate: int
     topic: str | None = None
+    aegis_flags: list[str] = Field(default_factory=list)
 
 
 class ChatSessionSummary(BaseModel):
@@ -110,6 +111,7 @@ async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessag
         model_used=result.model_used,
         token_estimate=result.token_estimate,
         topic=result.topic,
+        aegis_flags=result.aegis_flags,
     )
 
 @router.post("/voice/interact")
@@ -191,6 +193,7 @@ async def voice_interact(
         "latency_ms": result.latency_ms,
         "context_sources": result.context_sources,
         "topic": topic,
+        "aegis_flags": result.aegis_flags,
     }
 
 

@@ -8,10 +8,11 @@ import time
 from collections.abc import AsyncIterator
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from zeus.core.sessions import SessionManager, Turn
 from zeus.memory.search import format_context_block, get_profile_facts, search_memories
+from zeus.safety.policy_engine import aegis_enabled, evaluate_text
 
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
 ZEUS_LLM = os.getenv("ZEUS_LLM", "").strip().lower()
@@ -61,6 +62,7 @@ class QueryResult(BaseModel):
     model_used: str
     token_estimate: int
     topic: str | None = None
+    aegis_flags: list[str] = Field(default_factory=list)
 
 
 def _chat_use_claude() -> bool:
@@ -273,6 +275,14 @@ class QueryEngine:
         t_llm = time.monotonic()
         reply = await _run_llm(system=system, user_prompt=user_prompt, max_tokens=max_tokens)
         _log_timing("llm.call", (time.monotonic() - t_llm) * 1000)
+        aegis_flags: list[str] = []
+        if aegis_enabled():
+            outcome = evaluate_text(reply, policy_name=None)
+            aegis_flags = list(outcome.flags)
+            if outcome.status == "rejected":
+                reply = outcome.message or "This response was blocked by safety policy."
+            else:
+                reply = outcome.text
         latency_ms = int((time.monotonic() - t0) * 1000)
         model_used = _active_model_name()
         token_estimate = max(len(reply) // 4, 0)
@@ -296,6 +306,7 @@ class QueryEngine:
             model_used=model_used,
             token_estimate=token_estimate,
             topic=session_after.topic,
+            aegis_flags=aegis_flags,
         )
 
     async def query_stream(
@@ -368,10 +379,18 @@ class QueryEngine:
             max_tokens=max_tokens,
         ):
             parts.append(chunk)
-            yield chunk
+            if not aegis_enabled():
+                yield chunk
 
         _log_timing("llm.stream_total", (time.monotonic() - t_llm) * 1000)
         reply = "".join(parts)
+        if aegis_enabled():
+            outcome = evaluate_text(reply, policy_name=None)
+            if outcome.status == "rejected":
+                reply = outcome.message or "This response was blocked by safety policy."
+            else:
+                reply = outcome.text
+            yield reply
         latency_ms = int((time.monotonic() - t0) * 1000)
         turn = Turn(
             user=message,
