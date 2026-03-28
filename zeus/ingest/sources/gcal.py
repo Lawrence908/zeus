@@ -33,7 +33,17 @@ def _load_credentials(credentials_path: str, token_path: str):
     token_file = Path(token_path)
 
     if token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), _SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(str(token_file), _SCOPES)
+        except (ValueError, KeyError) as exc:
+            # Common mistake: copying gcal_credentials.json to gcal_token.json
+            logger.warning(
+                "gcal: token file %s is not a valid authorized-user token (%s). "
+                "Remove it and run --auth again.",
+                token_path,
+                exc,
+            )
+            creds = None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -114,9 +124,12 @@ class GoogleCalendarSource:
         try:
             from googleapiclient.discovery import build as gapi_build
         except ImportError as exc:
-            raise ImportError(
-                "Google Calendar support requires: pip install google-api-python-client google-auth-oauthlib"
-            ) from exc
+            logger.warning(
+                "gcal: skipping — optional deps missing "
+                "(pip install google-api-python-client google-auth-oauthlib): %s",
+                exc,
+            )
+            return
 
         try:
             creds = _load_credentials(self.credentials_path, self.token_path)

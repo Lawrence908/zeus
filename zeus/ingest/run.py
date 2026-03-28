@@ -1,11 +1,26 @@
 # zeus/ingest/run.py — Iris ingest CLI
-# Usage:
-#   python -m zeus.ingest.run --source markdown --glob "data/raw/**/*.md" --dry-run
-#   python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chat-history
-#   python -m zeus.ingest.run --source chatgpt --llm claude   # fast cloud extraction
-#   python -m zeus.ingest.run --source all  # runs all configured sources from iris.yaml defaults
 #
-# Always run --dry-run first to preview chunk output before writing to mnemosyne.
+# Local raw context (paths relative to Zeus repo root, e.g. /home/chris/zeus):
+#   zeus/data/raw/chat-history/       — ChatGPT exports (conversations-*.json)
+#   zeus/data/raw/context-pack-core/ — curated markdown pack (directory of .md files)
+#   zeus/data/raw/jobkit-archive/    — JobKit archive (.md ingested; .yml not handled by markdown source)
+#   zeus/data/raw/notes/             — symlinks / vault mirrors (use **/*.md under this tree)
+#
+# Usage (run from repo root; always --dry-run first):
+#   python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chat-history --dry-run
+#   python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chat-history --llm claude
+#
+#   python -m zeus.ingest.run --source markdown --base-dir zeus/data/raw/context-pack-core --dry-run
+#   python -m zeus.ingest.run --source markdown --base-dir zeus/data/raw/jobkit-archive --dry-run
+#   python -m zeus.ingest.run --source markdown --base-dir zeus/data/raw/notes --dry-run
+#
+# Curated baseline (same file as in default --source all; use alone to skip other sources):
+#   python -m zeus.ingest.run --source context_pack --path zeus/data/raw/context_pack.md --dry-run
+#
+#   python -m zeus.ingest.run --dry-run              # default --source all (see below)
+#
+# Default ingest (--source all): context_pack.md + markdown under raw/{context-pack-core,jobkit-archive,notes},
+# plus chatgpt, email, obsidian, git, gcal, bookmarks when configured / paths exist. Omit --source to use all.
 import argparse
 import asyncio
 import logging
@@ -14,17 +29,107 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
-    datefmt="%H:%M:%S",
-)
 logger = logging.getLogger("iris")
+
+_NOISY_LOGGERS = (
+    "httpx",
+    "httpcore",
+    "httpcore.http11",
+    "httpcore.connection",
+    "mem0",
+    "mem0.memory",
+    "mem0.vector_stores",
+    "mem0.vector_stores.qdrant",
+    "qdrant_client",
+    "openai",
+    "anthropic",
+)
+
+
+def configure_ingest_logging(
+    *,
+    plain: bool,
+    verbose: bool,
+    log_console: object | None = None,
+) -> None:
+    """Console logging for Iris CLI: readable by default; --verbose enables firehose."""
+    root = logging.getLogger()
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+
+    level = logging.DEBUG if verbose else logging.INFO
+    root.setLevel(level)
+
+    if plain:
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+            datefmt="%H:%M:%S",
+            force=True,
+        )
+    else:
+        try:
+            from rich.console import Console
+            from rich.logging import RichHandler
+
+            rc = log_console if log_console is not None else Console(stderr=True)
+            logging.basicConfig(
+                level=level,
+                format="%(message)s",
+                datefmt="%H:%M:%S",
+                handlers=[
+                    RichHandler(
+                        console=rc,
+                        rich_tracebacks=True,
+                        show_path=False,
+                        markup=False,
+                    )
+                ],
+                force=True,
+            )
+        except ImportError:
+            logging.basicConfig(
+                level=level,
+                format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+                datefmt="%H:%M:%S",
+                force=True,
+            )
+
+    logging.getLogger("iris").setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    if not verbose:
+        for name in _NOISY_LOGGERS:
+            logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def _ingest_ui_from_args(args: argparse.Namespace) -> Literal["auto", "rich", "plain"]:
+    if getattr(args, "plain", False):
+        return "plain"
+    if getattr(args, "rich", False):
+        return "rich"
+    return "auto"
+
+
+def _use_rich_output(args: argparse.Namespace) -> bool:
+    """Rich tables / colors for summary when not --plain."""
+    return not getattr(args, "plain", False)
+
+# Single curated file (ContextPackSource — high-priority metadata). Always this path for --source all
+# so --path can target chatgpt/obsidian/etc. without breaking the context pack.
+DEFAULT_CONTEXT_PACK_PATH = "zeus/data/raw/context_pack.md"
+
+# Markdown globs under zeus/data/raw for --source all (context_pack.md is ingested separately above).
+_RAW_MARKDOWN_GLOBS_FOR_ALL = [
+    "context-pack-core/**/*.md",
+    "jobkit-archive/**/*.md",
+    "notes/**/*.md",
+]
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -52,7 +157,10 @@ def build_sources(args) -> list:
     sources = []
 
     if args.source in ("context_pack", "all"):
-        context_pack_path = args.path or "zeus/data/raw/context_pack.md"
+        if args.source == "context_pack":
+            context_pack_path = args.path or DEFAULT_CONTEXT_PACK_PATH
+        else:
+            context_pack_path = DEFAULT_CONTEXT_PACK_PATH
         if not Path(context_pack_path).exists():
             if args.source == "context_pack":
                 logger.error(f"context pack not found: {context_pack_path}")
@@ -69,8 +177,12 @@ def build_sources(args) -> list:
             )
 
     if args.source in ("markdown", "all"):
-        globs = args.glob if args.glob else ["**/*.md"]
-        base = Path(args.base_dir) if args.base_dir else Path(".")
+        if args.source == "all" and args.glob is None and args.base_dir is None:
+            globs = _RAW_MARKDOWN_GLOBS_FOR_ALL
+            base = Path("zeus/data/raw")
+        else:
+            globs = args.glob if args.glob else ["**/*.md"]
+            base = Path(args.base_dir) if args.base_dir else Path(".")
         sources.append(
             MarkdownSource(
                 globs=globs,
@@ -194,19 +306,24 @@ def build_sources(args) -> list:
     return sources
 
 
-async def main(args) -> None:
+async def main(args, *, log_console: object | None = None) -> None:
     from zeus.ingest.pipeline import run_ingest
     from zeus.memory.config import get_token_usage, reset_token_usage
 
     if args.llm:
         os.environ["ZEUS_LLM"] = args.llm
-        logger.info(f"iris: LLM override → {args.llm}")
+        logger.info("iris: LLM override → %s", args.llm)
 
     sources = build_sources(args)
 
     mode = "DRY RUN" if args.dry_run else "LIVE"
     llm_label = args.llm or os.getenv("ZEUS_LLM", "auto")
-    logger.info(f"iris: starting {mode} ingest — {len(sources)} source(s), llm={llm_label}")
+    logger.info(
+        "iris: starting %s ingest — %s source(s), llm=%s",
+        mode,
+        len(sources),
+        llm_label,
+    )
 
     reset_token_usage()
     wall_start = time.monotonic()
@@ -216,16 +333,50 @@ async def main(args) -> None:
         sources=sources,
         chunk_size=args.chunk_size,
         dry_run=args.dry_run,
+        ingest_ui=_ingest_ui_from_args(args),
+        console=log_console,
     )
 
     wall_elapsed = time.monotonic() - wall_start
     tokens = get_token_usage()
 
-    _print_summary(results, args, llm_label, wall_elapsed, start_ts, tokens)
+    _print_summary(
+        results,
+        args,
+        llm_label,
+        wall_elapsed,
+        start_ts,
+        tokens,
+        use_rich=_use_rich_output(args),
+    )
 
 
-def _print_summary(results, args, llm_label, wall_elapsed, start_ts, tokens):
+def _print_summary(
+    results,
+    args,
+    llm_label,
+    wall_elapsed,
+    start_ts,
+    tokens,
+    *,
+    use_rich: bool = False,
+):
     """Print a detailed ingest summary to stdout."""
+    if use_rich:
+        try:
+            _print_summary_rich(
+                results, args, llm_label, wall_elapsed, start_ts, tokens
+            )
+            return
+        except ImportError:
+            pass
+
+    _print_summary_plain(
+        results, args, llm_label, wall_elapsed, start_ts, tokens
+    )
+
+
+def _print_summary_plain(results, args, llm_label, wall_elapsed, start_ts, tokens):
     total_processed = total_stored = total_errors = 0
     total_ops: dict[str, int] = {"ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0}
 
@@ -289,35 +440,129 @@ def _print_summary(results, args, llm_label, wall_elapsed, start_ts, tokens):
     print()
 
 
+def _print_summary_rich(results, args, llm_label, wall_elapsed, start_ts, tokens):
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.table import Table
+
+    total_processed = total_stored = total_errors = 0
+    total_ops: dict[str, int] = {"ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0}
+
+    console = Console(highlight=False)
+    table = Table(show_header=True, header_style="bold cyan", expand=True)
+    table.add_column("Source", style="bold", ratio=1)
+    table.add_column("Result", justify="center")
+    table.add_column("Chunks", justify="right")
+    table.add_column("Time", justify="right")
+    table.add_column("Rate", justify="right")
+    table.add_column("Memory ops", ratio=1)
+
+    for r in results:
+        status = "ok" if not r.errors else "warnings"
+        status_style = "green" if not r.errors else "yellow"
+        rate = r.chunks_stored / r.elapsed_sec if r.elapsed_sec > 0 else 0
+        ops_parts = []
+        for op in ("ADD", "UPDATE", "DELETE", "NONE"):
+            count = r.mem0_ops.get(op, 0)
+            if count > 0:
+                ops_parts.append(f"{count} {op}")
+            total_ops[op] += count
+        ops_str = ", ".join(ops_parts) if ops_parts else "—"
+        table.add_row(
+            r.source,
+            f"[{status_style}]{status}[/{status_style}]",
+            f"{r.chunks_stored}/{r.chunks_processed}",
+            _fmt_duration(r.elapsed_sec),
+            f"{rate:.2f}/s",
+            ops_str,
+        )
+        total_processed += r.chunks_processed
+        total_stored += r.chunks_stored
+        total_errors += len(r.errors)
+
+    overall_rate = total_stored / wall_elapsed if wall_elapsed > 0 else 0
+    mode = "DRY RUN" if args.dry_run else "LIVE"
+    ops_line = ", ".join(f"{v} {k}" for k, v in total_ops.items() if v > 0)
+
+    lines = [
+        f"**Mode:** {mode} · **LLM:** {llm_label}",
+        "",
+        f"- **Chunks:** {total_stored}/{total_processed} stored, "
+        f"{total_errors} errors",
+        f"- **Wall time:** {_fmt_duration(wall_elapsed)} "
+        f"({overall_rate:.2f} chunks/s)",
+        f"- **Started:** {start_ts.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+    ]
+    if ops_line:
+        lines.append(f"- **Memory ops:** {ops_line}")
+    if tokens.llm_calls > 0:
+        lines.append(
+            f"- **LLM calls:** {tokens.llm_calls} · "
+            f"**Tokens:** {tokens.input_tokens:,} in + "
+            f"{tokens.output_tokens:,} out = {tokens.total_tokens:,} total"
+        )
+    if args.dry_run:
+        lines.append("- *Nothing written to mnemosyne (dry-run)*")
+
+    md = Markdown("\n".join(lines))
+
+    console.print()
+    console.print(
+        Panel(
+            table,
+            title="[bold]Iris ingest — per source[/bold]",
+            border_style="cyan",
+        )
+    )
+    console.print(Panel(md, title="[bold]Summary[/bold]", border_style="dim"))
+    console.print()
+
+    for r in results:
+        if not r.errors:
+            continue
+        console.print(f"[yellow]Errors — {r.source}[/yellow]")
+        for err in r.errors[:5]:
+            console.print(f"  • {err[:120]}")
+        if len(r.errors) > 5:
+            console.print(f"  … and {len(r.errors) - 5} more")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Iris — Zeus ingest pipeline CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Preview markdown chunking without writing anything
-  python -m zeus.ingest.run --source markdown --glob "zeus/data/raw/**/*.md" --dry-run
+  # Raw layout: zeus/data/raw/{chat-history,context-pack-core,jobkit-archive,notes}/
 
-  # Ingest ChatGPT export using Claude for fast extraction
-  python -m zeus.ingest.run --source chatgpt --llm claude
+  python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chat-history --dry-run
+  python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chat-history --llm claude
 
-  # Ingest with local Ollama (slow but free)
+  python -m zeus.ingest.run --source markdown --base-dir zeus/data/raw/context-pack-core --dry-run
+  python -m zeus.ingest.run --source markdown --base-dir zeus/data/raw/jobkit-archive --dry-run
+  python -m zeus.ingest.run --source markdown --base-dir zeus/data/raw/notes --dry-run
+
+  python -m zeus.ingest.run --source context_pack --path zeus/data/raw/context_pack.md --dry-run
+
   python -m zeus.ingest.run --source chatgpt --llm ollama
+  python -m zeus.ingest.run --chunk-size 256 --dry-run   # default --source all
 
-  # Run all sources with custom chunk size
-  python -m zeus.ingest.run --source all --chunk-size 256 --dry-run
+  # all = context_pack.md + raw markdown globs + other sources (see build_sources)
         """,
     )
     p.add_argument(
         "--source",
         choices=["context_pack", "markdown", "chatgpt", "email",
                  "obsidian", "git", "gcal", "bookmarks", "all"],
-        required=True,
-        help="Which source type to ingest",
+        default="all",
+        help="Which source type to ingest (default: all — includes zeus/data/raw/context_pack.md)",
     )
     p.add_argument(
         "--path",
-        help="Path to a file or directory (chatgpt: dir with conversations-NNN.json)",
+        help="Override path for a single source (e.g. chatgpt dir). "
+             "Not applied to context_pack when --source all (uses "
+             f"{DEFAULT_CONTEXT_PACK_PATH}).",
     )
     p.add_argument(
         "--glob",
@@ -380,9 +625,38 @@ Examples:
         default=30,
         help="Days forward to fetch Google Calendar events (default: 30)",
     )
+    p.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="DEBUG logging and noisy HTTP/mem0 loggers (default is quiet INFO)",
+    )
+    p.add_argument(
+        "--plain",
+        action="store_true",
+        help="Plain text logs and ASCII summary (no Rich spinner or tables)",
+    )
+    p.add_argument(
+        "--rich",
+        action="store_true",
+        help="Force Rich progress on stderr even when not a TTY",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    asyncio.run(main(args))
+    _log_console = None
+    if not args.plain:
+        try:
+            from rich.console import Console
+
+            _log_console = Console(stderr=True)
+        except ImportError:
+            pass
+    configure_ingest_logging(
+        plain=args.plain,
+        verbose=args.verbose,
+        log_console=_log_console,
+    )
+    asyncio.run(main(args, log_console=_log_console))
