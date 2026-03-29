@@ -352,6 +352,20 @@ If `node` or `nemoclaw-start` triggers the request, it's denied. Known issue:
 
 ---
 
+## Phase 5 Validation Outcome
+
+Fill in after running the steps above. Use `docker network inspect bridge` to find bridge IP.
+
+- Docker bridge IP on daedalus: **`<fill in>`** (expected: `172.17.0.1`)
+- Policy file written to: `~/.nemoclaw/policy-zeus.yaml`
+- Applied with: `openshell policy set my-assistant --policy ~/.nemoclaw/policy-zeus.yaml --wait`
+- `nemoclaw my-assistant policy-list` shows `allow_zeus_ollama` and `allow_zeus_core`: ✅ / ❌
+- `curl http://host.openshell.internal:11435/v1/models` from sandbox returns 200: ✅ / ❌
+- `curl http://host.openshell.internal:8203/health` from sandbox returns 200: ✅ / ❌
+- No 403 entries in `nemo-logs` after apply: ✅ / ❌
+
+---
+
 ## Phase 6: Comprehensive Backup
 
 Use the `nemo-backup` function defined in the aliases section above.
@@ -368,6 +382,21 @@ cat "$src" | docker exec -i openshell-cluster-nemoclaw \
   kubectl exec -i -n openshell my-assistant -- \
   su -s /bin/bash sandbox -c "cat > ${dst}"
 ```
+
+### Phase 6 Backup — First Run Notes
+
+Fill in after running `nemo-backup`. Non-fatal failures (empty dirs) are expected on first run.
+
+| File / Dir | Status |
+|---|---|
+| `openclaw.json` | ✅ / ❌ |
+| `workspace/` | ✅ / ❌ (or: SSH tar 255 → used kubectl pipe) |
+| `memory/main.sqlite` | ✅ / ❌ (missing if no memory yet — non-fatal) |
+| `credentials/` | ✅ / ❌ (empty — non-fatal) |
+| `devices/` | ✅ / ❌ (empty if no paired devices — non-fatal) |
+| `policy_active.yaml` | ✅ / ❌ (fallback: `nemoclaw my-assistant policy-list > policy_active.yaml`) |
+
+Backup location: `~/.nemoclaw/backups/<timestamp>/`
 
 ---
 
@@ -393,6 +422,13 @@ Recommendations:
 - Avoid `--light-context` on cron jobs that need tool/skill access.
 - Complex multi-skill cron jobs may not work reliably at 7B model size.
 - Consider upgrading to a 14B+ model if sandbox agent tasks grow in complexity.
+  On a 3080 (10GB), `qwen2.5:14b-instruct-q4_k_m` requires unloading `nomic-embed-text` first
+  (`OLLAMA_MAX_LOADED_MODELS=1`). Try this before expanding SOUL/IDENTITY/AGENTS.
+
+Slim templates for SOUL.md, IDENTITY.md, and AGENTS.md are in `zeus/safety/workspace-templates/`
+(~350 tokens total vs ~16K default). Upload with `openshell sandbox upload` or the kubectl pipe
+workaround (see Phase 6 above). After upload, restart the OpenClaw gateway inside the sandbox and
+run a quick chat test ("what model are you?") to confirm context reduction is working.
 
 ---
 
