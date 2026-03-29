@@ -385,16 +385,34 @@ cat "$src" | docker exec -i openshell-cluster-nemoclaw \
 
 ### Phase 6 Backup — First Run Notes
 
-Fill in after running `nemo-backup`. Non-fatal failures (empty dirs) are expected on first run.
+First backup completed **2026-03-29 03:37:00** to `~/.nemoclaw/backups/20260329_033700/`.
 
-| File / Dir | Status |
-|---|---|
-| `openclaw.json` | ✅ / ❌ |
-| `workspace/` | ✅ / ❌ (or: SSH tar 255 → used kubectl pipe) |
-| `memory/main.sqlite` | ✅ / ❌ (missing if no memory yet — non-fatal) |
-| `credentials/` | ✅ / ❌ (empty — non-fatal) |
-| `devices/` | ✅ / ❌ (empty if no paired devices — non-fatal) |
-| `policy_active.yaml` | ✅ / ❌ (fallback: `nemoclaw my-assistant policy-list > policy_active.yaml`) |
+Note: `nemo-backup` shell function was not in `~/.bashrc`. Used inline script instead (see below).
+
+| File / Dir | Status | Notes |
+|---|---|---|
+| `openclaw.json` | ✅ | `kubectl exec cat` via docker exec |
+| `SOUL.md` / `IDENTITY.md` / `AGENTS.md` | ✅ | workspace files backed up individually |
+| `policy_active.yaml` | ✅ | `openshell policy get my-assistant --full` |
+| `sandboxes.json` | ✅ | from `~/.nemoclaw/sandboxes.json` on host |
+| `memory/main.sqlite` | — | not applicable (no mem0 memory yet) |
+| `credentials/` | — | empty, non-fatal |
+| `devices/` | — | no paired devices, non-fatal |
+| full `workspace/` tar | — | `openshell sandbox upload` has SSH tar 255 bug; files backed individually |
+
+**Backup script** (add to `~/.bashrc` as `nemo-backup` or run inline):
+```bash
+STAMP=$(date +%Y%m%d_%H%M%S); DEST=~/.nemoclaw/backups/$STAMP; mkdir -p $DEST
+cat ~/.nemoclaw/sandboxes.json > $DEST/sandboxes.json
+openshell policy get my-assistant --full > $DEST/policy_active.yaml
+for f in SOUL IDENTITY AGENTS; do
+  docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant -- \
+    cat /sandbox/.openclaw/workspace/${f}.md > $DEST/${f}.md
+done
+docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant -- \
+  cat /sandbox/.openclaw/openclaw.json > $DEST/openclaw.json
+echo "Backup: $DEST"; ls -la $DEST/
+```
 
 Backup location: `~/.nemoclaw/backups/<timestamp>/`
 
@@ -429,6 +447,13 @@ Slim templates for SOUL.md, IDENTITY.md, and AGENTS.md are in `zeus/safety/works
 (~350 tokens total vs ~16K default). Upload with `openshell sandbox upload` or the kubectl pipe
 workaround (see Phase 6 above). After upload, restart the OpenClaw gateway inside the sandbox and
 run a quick chat test ("what model are you?") to confirm context reduction is working.
+
+**Workspace file limits (confirmed, NVIDIA forums thread 364781):** Workspace markdown has limited
+direct impact on model tool-dispatch. OpenClaw has no documented system prompt override — behavior
+control relies on session context and reasoning flags, not workspace files. Built-in tools
+(Memory Search) fire below the workspace layer and cannot be suppressed via AGENTS.md. Practical
+fix for tool-heavy loops is a model upgrade to 14B+. qwen2.5:7b measured at **53 tok/s** on the
+3080; concurrent request timeouts occur when iris embed + OpenClaw chat overlap.
 
 ---
 
