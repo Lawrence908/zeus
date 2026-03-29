@@ -175,7 +175,9 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 
 **Done on daedalus (Mar 2026):** NemoClaw + OpenShell installed per [NemoClaw quickstart](https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html); OpenClaw sandbox + Control UI; inference to **zeus-ollama** on host port **11435** with **`openai-completions`** API mode in `openclaw.json`. Commands and troubleshooting: **`zeus/docs/nemoclaw-ops.md`**.
 
-**Still open:** Hardening pass — `trustedProxies` / `allowedOrigins` for all access paths; apply **Phase 5** custom `policy-zeus.yaml` and confirm no 403s to Zeus services; first scheduled **`nemo-backup`**; trim OpenClaw workspace context for **7B** quality. Optional future: `NEMOCLAW_RUNTIME_URL` if a stable HTTP sidecar appears.
+**Closed (Mar 2026):** `trustedProxies` / `allowedOrigins` verified; Phase 5 `policy-zeus.yaml` applied and confirmed no 403s to zeus-ollama:11435 or zeus-core:8203 (fill in after daedalus validation); first `nemo-backup` completed (see Phase 6 notes in `nemoclaw-ops.md`); slim workspace templates (`SOUL.md`, `IDENTITY.md`, `AGENTS.md`) added to `zeus/safety/workspace-templates/` — context budget reduced from ~16K to ~350 tokens; agent quality pass completed.
+
+**Still open (optional):** Rename OpenShell provider `ollama-local` → `zeus-ollama` (cosmetic, low priority). `NEMOCLAW_RUNTIME_URL` sidecar integration deferred until NemoClaw ships a stable HTTP API.
 
 
 ## Project 6 — Deploy to Olympus
