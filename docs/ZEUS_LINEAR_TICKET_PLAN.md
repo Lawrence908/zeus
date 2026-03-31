@@ -253,6 +253,98 @@ function escapeHtml(str) {
 Do alongside LAB-150 — both are the same admin surface hardening pass.
 
 
+## Project 9 — React Frontend + Integrations
+
+**Status (31 Mar 2026):** Planned. Replaces the monolithic `chat.html` + `viz/viz.html` with a Vite + React + TypeScript SPA at `zeus/frontend/`. Multi-page routing, Phaos orb ported to `@react-three/fiber`, Telegram bot integration, OpenClaw agent orchestration panel.
+
+**Tech:** Vite 5, React 19, TypeScript strict, React Router v6, Tailwind CSS v3, Zustand, `@react-three/fiber`, `python-telegram-bot`
+
+**Repo layout (new):**
+```
+zeus/
+  frontend/           # Vite + React app (build → zeus/core/static/app/)
+    src/
+      components/     # PhaosOrb, MessageList, SessionsSidebar, AgentCard, SourceBadge, …
+      pages/          # ChatPage, AgentsPage, SettingsPage, VizPage
+      hooks/          # useStreamingChat, useVoiceState
+      store/          # chatStore, voiceStore, settingsStore (Zustand)
+  integrations/
+    telegram/         # bot.py — python-telegram-bot async bot
+```
+
+**Routes:** `/` (Chat + Orb), `/agents` (OpenClaw panel), `/settings` (Telegram, model, policy), `/viz` (Phaos orb fullscreen)
+
+| Parent  | Title                            | Labels             | Subs |
+| ------- | -------------------------------- | ------------------ | ---- |
+| LAB-286 | React App Scaffold               | Feature, oracle    | 5    |
+| LAB-287 | React Chat + Sessions View       | Feature, oracle    | 5    |
+| LAB-288 | Phaos Orb React Component        | Feature, phaos     | 4    |
+| LAB-289 | Agent Orchestration Panel        | Feature, olympians | 3    |
+| LAB-290 | FastAPI SPA Serve                | Feature, oracle    | 4    |
+| LAB-291 | Telegram Bot Backend             | Feature, iris      | 5    |
+| LAB-292 | Telegram Frontend Integration    | Feature, oracle    | 3    |
+| LAB-293 | React Settings Page              | Feature, oracle    | 3    |
+
+### LAB-286 — React App Scaffold
+**Files:** `zeus/frontend/` (new) · **Priority:** High · **Blocks:** LAB-287, LAB-288, LAB-290, LAB-293
+
+Vite 5 + React 19 + TypeScript project with React Router v6 routes (`/`, `/agents`, `/settings`, `/viz`), Tailwind CSS v3 theme tokens mirroring existing Zeus CSS vars, Zustand stores (`chatStore`, `voiceStore`, `settingsStore`), Vite dev proxy to FastAPI :8000, and `App.tsx` shell with header nav + theme toggle.
+
+**Sub-issues:** LAB-294 (project init), LAB-295 (router + stubs), LAB-296 (Tailwind theme), LAB-297 (Zustand stores), LAB-298 (App shell + proxy)
+
+### LAB-287 — React Chat + Sessions View
+**Files:** `zeus/frontend/src/pages/ChatPage.tsx`, `src/components/chat/` · **Priority:** High · **Blocks:** LAB-290
+
+Port `chat.html` to React components: `SessionsSidebar` (GET /chat/sessions), `MessageList` + `ChatBubble`, `MarkdownMessage` (port `chat-markdown.js` via react-markdown), `ChatInput` (Enter/Shift+Enter), `useStreamingChat` SSE hook (POST /chat/stream).
+
+**Sub-issues:** LAB-299 (SessionsSidebar), LAB-300 (MessageList + ChatBubble), LAB-301 (MarkdownMessage), LAB-302 (ChatInput), LAB-303 (StreamingChat SSE hook)
+
+### LAB-288 — Phaos Orb React Component
+**Files:** `zeus/frontend/src/components/orb/PhaosOrb.tsx`, `src/hooks/useVoiceState.ts` · **Priority:** High
+
+Port `orb.js` Three.js orb to `@react-three/fiber` `<Canvas>` preserving GLSL shaders verbatim. `useVoiceState` hook subscribes to `WS /ws/voice-state` → Zustand `voiceStore`. Compact sidebar panel mode on `/` + fullscreen `/viz` route (replaces `viz/viz.html`).
+
+**Sub-issues:** LAB-304 (R3F Canvas + GLSL), LAB-305 (useVoiceState hook), LAB-306 (uniforms + state machine), LAB-307 (responsive + /viz route)
+
+### LAB-289 — Agent Orchestration Panel
+**Files:** `zeus/frontend/src/pages/AgentsPage.tsx`, `src/components/agents/` · **Priority:** Normal · **Blocks:** LAB-290 (FastAPI SPA)
+
+`/agents` page: `AgentCard` (name, model, aegis policy badge, status) from `GET /admin/agents`; `AgentInvokePanel` (task input → `POST /orchestration/call`, SSE stream); `ToolCallFeed` (collapsible per-tool log); `AegisPolicyBadge` colour-coded per policy.
+
+**Sub-issues:** LAB-308 (AgentCard + list), LAB-309 (AgentInvokePanel), LAB-310 (ToolCallFeed + AegisPolicyBadge)
+
+### LAB-290 — FastAPI SPA Serve
+**Files:** `zeus/core/main.py`, `zeus/core/chat.py`, `vite.config.ts`, `zeus/docs/deployment.md` · **Priority:** High · **Blocks:** LAB-289
+
+Vite `outDir → zeus/core/static/app/`. `main.py`: mount `/assets`, add SPA catch-all `GET /{path:path}` returning `index.html` (registered last). `chat.py`: remove `GET /chat` HTML route, keep all API routes, add redirects for `/chat` → `/` and `/viz` → `/#/viz`.
+
+**Sub-issues:** LAB-311 (Vite outDir + asset mount), LAB-312 (SPA catch-all), LAB-313 (API preservation + redirects), LAB-314 (deployment docs)
+
+### LAB-291 — Telegram Bot Backend
+**Files:** `zeus/integrations/telegram/` (new), `zeus/core/main.py` (lifespan), `.env.example` · **Priority:** Normal · **Blocks:** LAB-292
+
+`python-telegram-bot` async bot in `zeus/integrations/telegram/bot.py`. Each Telegram `chat_id` → persistent Zeus session keyed `telegram:{chat_id}` with `metadata.source = "telegram"`. Allowed-list guard (`TELEGRAM_ALLOWED_CHAT_IDS`). All outgoing responses pass through `AegisPolicyEngine`. Bot starts/stops in FastAPI lifespan. New endpoint: `GET /integrations/telegram/status`.
+
+**Env vars:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS`, `TELEGRAM_ENABLED`
+
+**Sub-issues:** LAB-315 (module scaffold), LAB-316 (bot.py + allowed-list), LAB-317 (session mapping), LAB-318 (lifespan + env vars), LAB-319 (Aegis safety hook)
+
+### LAB-292 — Telegram Frontend Integration
+**Files:** `zeus/frontend/src/components/SourceBadge.tsx`, `src/components/TelegramStatus.tsx` · **Priority:** Normal
+
+`SourceBadge` on messages + session entries (telegram/web/voice icons). `TelegramStatus` dot in App header (polls `/integrations/telegram/status` every 30s). Settings page Telegram section (token, chat IDs, enable toggle, test button).
+
+**Sub-issues:** LAB-320 (SourceBadge), LAB-321 (TelegramStatus + endpoint), LAB-322 (Settings Telegram section)
+
+### LAB-293 — React Settings Page
+**Files:** `zeus/frontend/src/pages/SettingsPage.tsx` · **Priority:** Normal
+
+`/settings` two-column layout (nav sidebar + content pane). Sections: Model (dev/prod toggle), Aegis (policy selector from `GET /safety/policies`), Telegram (see LAB-292), Sessions (auto-summarize, window size), Appearance (theme, orb size). New `PATCH /settings` FastAPI endpoint for runtime state overrides; UI prefs to `localStorage`.
+
+**Sub-issues:** LAB-323 (layout + scaffold), LAB-324 (Model + Aegis sections), LAB-325 (Sessions prefs + PATCH /settings)
+
+---
+
 ## Backlog
 
 
@@ -263,14 +355,13 @@ Do alongside LAB-150 — both are the same admin surface hardening pass.
 | VR Prototype — Zeus voice + avatar in Oculus | Feature, orpheus   |
 | Meta AR Glasses Integration                  | Feature, orpheus   |
 | Watch Vitals Integration                     | Feature, iris      |
-| Web Dashboard                                | Feature, oracle    |
 | Business Productization                      | Feature            |
 | Model Fine-Tuning                            | Feature, mnemosyne |
 | Graph Memory (mem0g)                         | Feature, mnemosyne |
 | Memory Decay Policy                          | Feature, mnemosyne |
 
 
-**Note:** Some Project 7/8 sub-issues and all Backlog items hit the Linear workspace issue limit. These need to be created after upgrading or archiving old issues.
+**Note:** Some Project 7/8 sub-issues and all Backlog items may hit the Linear workspace issue limit. Archive completed issues before creating new ones.
 
 ---
 
@@ -280,4 +371,7 @@ Do alongside LAB-150 — both are the same admin surface hardening pass.
 - **LAB-184 (Session Layer)** blocks chat interface + voice pipeline
 - **LAB-49 (Query Engine)** blocks voice pipeline + agents
 - **LAB-121 (Ruflo Spike)** blocks Project 5 architecture
+- **LAB-286 (React Scaffold)** blocks LAB-287, LAB-288, LAB-290, LAB-293
+- **LAB-290 (FastAPI SPA Serve)** blocks LAB-289 (Agent Panel)
+- **LAB-291 (Telegram Backend)** blocks LAB-292 (Telegram Frontend)
 
