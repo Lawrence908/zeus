@@ -2,6 +2,8 @@
 
 Zeus is a self-hosted, voice-first, privacy-preserving AI assistant built from proven open-source components. It runs on a Proxmox homelab: production on an RTX 3080 server (Olympus), dev/test on an RTX 5080 tower.
 
+**This file (`CLAUDE.md` at repo root)** is the primary project brief for humans and for AI assistants (Claude Code, Cursor, etc.): stack, naming, layout, and conventions. Prefer updating it when assumptions change rather than scattering one-off context in chats.
+
 ## Stack
 
 | Layer | Component | Notes |
@@ -37,10 +39,14 @@ All subsystems use Greek mythology names. Agents and humans working in this repo
 
 ## Repo Structure
 
+Repository root (this folder is the git checkout; `CLAUDE.md` lives here):
+
 ```
-zeus/
+docs/             # Repo-level docs: Linear plan, phase/cursor prompts, ops runbooks (e.g. NemoClaw on hosts)
+compose.yaml      # Docker Compose for core services
+zeus/             # Python application package
   core/           # FastAPI bus, main router, health checks
-  orchestration/  # Ruflo config, CLAUDE.md, agent definitions
+  orchestration/  # Ruflo config, agent definitions (see orchestration/CLAUDE.md if present)
   memory/         # mem0 setup, Qdrant config, embed utils
   ingest/         # Iris data ingestion pipeline
   ingest/sources/ # Source-specific parsers (chatgpt.py, markdown.py, etc.)
@@ -53,8 +59,17 @@ zeus/
   core/sessions.py # Session lifecycle and continuity logic
   models/         # Ollama configs, prompt templates
   data/           # Raw exports (gitignored), processed chunks
-  docs/           # Architecture docs
+  docs/           # Specs & architecture: MCP, Orpheus, ingest, deployment, sessions, roadmap
 ```
+
+### Documentation layout (two `docs/` trees — do not conflate)
+
+| Path | Use for |
+|------|--------|
+| **`docs/`** (repo root) | Planning and tracking (`zeus_linear_ticket_plan.md`), phase/cursor prompt artifacts, **host and ops runbooks** (e.g. `nemoclaw-ops.md`). Paths in prose are **`docs/<file>.md`** — not `zeus/docs/`. |
+| **`zeus/docs/`** | **Product and subsystem design**: architecture, deployment, MCP/chat/orpheus/sessions specs, ingest guides, roadmap. Paths are **`zeus/docs/<file>.md`**. |
+
+When adding a doc, pick the tree by audience: **ops / Linear / phases** → root `docs/`; **how Zeus is built and behaves** → `zeus/docs/`. When you link from either place, use the **path from repo root** so links stay unambiguous.
 
 ## Agent Orchestration Guidelines
 
