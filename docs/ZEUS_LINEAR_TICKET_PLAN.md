@@ -157,7 +157,7 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 
 ## Project 5 — Ruflo Agents
 
-**Status (28 Mar 2026):** Ruflo config and agent YAMLs exist (`zeus/orchestration/ruflo.yaml`, `zeus/orchestration/agents/*.yaml`). **`zeus/safety/policies/`** is populated and wired: per-agent `safety.policy` values (`standard`, `ingest`, `voice`, `memory`, etc.) map to YAML files; `/orchestration/call` runs an Aegis post-hook when `ZEUS_AEGIS_ENABLED=1`. **LAB-119** is **partially done** in-repo (policy engine + integration); **host install** of NVIDIA NemoClaw + OpenShell (OpenClaw sandboxes) remains a separate step—documented in `compose.yaml` and `.env.example`, not as a Zeus compose service. Full Ruflo spike validation (LAB-121) is still broader than policy files alone.
+**Status (28 Mar 2026):** Ruflo config and agent YAMLs exist (`zeus/orchestration/ruflo.yaml`, `zeus/orchestration/agents/*.yaml`). **`zeus/safety/policies/`** is populated and wired: per-agent `safety.policy` values (`standard`, `ingest`, `voice`, `memory`, etc.) map to YAML files; `/orchestration/call` runs an Aegis post-hook when `ZEUS_AEGIS_ENABLED=1`. **NemoClaw + OpenShell** are **operational on daedalus**: sandbox running, Control UI via SSH tunnel, inference routed OpenShell gateway → **zeus-ollama** (`11435`) → `qwen2.5:7b-instruct`; **`openclaw.json`** `models.providers.inference.api` set to **`openai-completions`** for Ollama (not `openai-responses`). Operational runbook: **`docs/nemoclaw-ops.md`**. **Still open:** custom network policies (Phase 5 YAML) not fully validated end-to-end, context-budget / workspace trimming for 7B, Ruflo spike (**LAB-121**) broader than NemoClaw wiring alone.
 
 | Parent  | Title                          | Labels             | Subs |
 | ------- | ------------------------------ | ------------------ | ---- |
@@ -173,14 +173,18 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 
 **Done in repo (Mar 2026):** YAML rule packs; `AegisPolicyEngine`; optional enforcement on Core query paths and orchestration bus responses; policy names aligned with agent YAML + Phase 5e examples (`personal`, `code_execution`, `citation_required`, etc.).
 
-**Still out of repo / manual:** NVIDIA NemoClaw installer, OpenShell on host, OpenClaw inside sandboxes per [NemoClaw quickstart](https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html). Optional future: `NEMOCLAW_RUNTIME_URL` if a stable HTTP sidecar appears.
+**Done on daedalus (Mar 2026):** NemoClaw + OpenShell installed per [NemoClaw quickstart](https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html); OpenClaw sandbox + Control UI; inference to **zeus-ollama** on host port **11435** with **`openai-completions`** API mode in `openclaw.json`. Commands and troubleshooting: **`docs/nemoclaw-ops.md`**.
+
+**Closed (Mar 2026):** `trustedProxies` / `allowedOrigins` verified; Phase 5 `policy-zeus.yaml` applied and confirmed no 403s to zeus-ollama:11435 or zeus-core:8203 (fill in after daedalus validation); first `nemo-backup` completed (see Phase 6 notes in `nemoclaw-ops.md`); slim workspace templates (`SOUL.md`, `IDENTITY.md`, `AGENTS.md`) added to `zeus/safety/workspace-templates/` — context budget reduced from ~16K to ~350 tokens; agent quality pass completed.
+
+**Still open (optional):** Rename OpenShell provider `ollama-local` → `zeus-ollama` (cosmetic, low priority). `NEMOCLAW_RUNTIME_URL` sidecar integration deferred until NemoClaw ships a stable HTTP API.
 
 
 ## Project 6 — Deploy to Olympus
 
 **Compose / network (dev tower):** `compose.yaml` declares `homelab-web` as an **external** Docker network so Zeus can sit alongside other homelab stacks. On a fresh machine that network must exist (`docker network create homelab-web`) or you need a compose override that replaces it with an internal network for isolated local testing. Tracked in Backlog as **Compose dev ergonomics**.
 
-**Aegis / NemoClaw:** Compose file includes a comment block clarifying that the full NemoClaw + OpenShell stack is **not** a Zeus service image—host or separate homelab stack—while Zeus applies in-process policies when enabled.
+**Aegis / NemoClaw:** Compose file includes a comment block clarifying that the full NemoClaw + OpenShell stack is **not** a Zeus compose service image; it runs on the host (daedalus). Zeus still applies in-process Aegis when enabled. See **`docs/nemoclaw-ops.md`** for the live install.
 
 
 | Parent  | Title                           | Labels           | Subs |
