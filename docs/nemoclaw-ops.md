@@ -1,7 +1,6 @@
-# zeus/docs/nemoclaw-ops.md — NemoClaw + OpenClaw Operational Runbook
-#
-# For Zeus homelab on daedalus (Ubuntu 24.04, RTX 3080).
-# Access from Apollo via SSH tunnel. NemoClaw alpha (0.0.16+), Mar 2026.
+# docs/nemoclaw-ops.md — NemoClaw + OpenClaw Operational Runbook
+
+For Zeus homelab on daedalus (Ubuntu 24.04, RTX 3080). Access from Apollo via SSH tunnel. NemoClaw alpha (0.0.16+), Mar 2026.
 
 ## Architecture Overview
 
@@ -532,7 +531,7 @@ Use this to resume NemoClaw / OpenClaw work in a new chat. Repo: **zeus** on dae
 ```
 You are helping me continue Zeus + NemoClaw/OpenClaw on daedalus (RTX 3080).
 
-Context already done (see zeus/docs/nemoclaw-ops.md):
+Context already done (see docs/nemoclaw-ops.md):
 - Single Ollama: zeus-ollama on host port 11435; OpenShell provider (e.g. ollama-local) uses LAN IP + --no-verify where needed.
 - openclaw.json models.providers.inference.api set to openai-completions (not openai-responses) for Ollama.
 - allowedOrigins for Control UI; SSH tunnel from Apollo (18789, 18080).
