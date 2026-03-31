@@ -66,7 +66,7 @@ zeus/             # Python application package
 
 | Path | Use for |
 |------|--------|
-| **`docs/`** (repo root) | Planning and tracking (`zeus_linear_ticket_plan.md`), phase/cursor prompt artifacts, **host and ops runbooks** (e.g. `nemoclaw-ops.md`). Paths in prose are **`docs/<file>.md`** — not `zeus/docs/`. |
+| **`docs/`** (repo root) | Planning and tracking (`ZEUS_LINEAR_TICKET_PLAN.md`), phase/cursor prompt artifacts, **host and ops runbooks** (e.g. `nemoclaw-ops.md`). Paths in prose are **`docs/<file>.md`** — not `zeus/docs/`. |
 | **`zeus/docs/`** | **Product and subsystem design**: architecture, deployment, MCP/chat/orpheus/sessions specs, ingest guides, roadmap. Paths are **`zeus/docs/<file>.md`**. |
 
 When adding a doc, pick the tree by audience: **ops / Linear / phases** → root `docs/`; **how Zeus is built and behaves** → `zeus/docs/`. When you link from either place, use the **path from repo root** so links stay unambiguous.
