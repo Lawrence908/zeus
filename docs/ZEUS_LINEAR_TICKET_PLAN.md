@@ -79,7 +79,7 @@ Closing this spike should establish whether **Ruflo owns** multi-step swarm sema
   - **LAB-49 (Zeus Query Engine)**: `zeus/core/query.py` (used by chat routes)
 - **Partially implemented / needs validation**:
   - **LAB-61 (mem0 Integration & Retrieval Quality)**: mem0 client + retrieval helpers exist (`zeus/memory/config.py`, `zeus/memory/search.py`), but quality eval harness / tuning loop isn’t represented as a dedicated suite yet. **Orchestration alignment:** add sub-scope or child work for **retrieval after summarization** and **execution-log / task summaries** in memory (short-term session vs long-term vector vs structured execution trail). Cross-link: **Backlog** *Mnemosyne: task execution log + rolling summaries*; **Project 7** LAB-144.
-  - **LAB-56 (Privacy & Data Governance / Aegis)**: **in-process Aegis** is present (`zeus/safety/policy_engine.py`, YAML under `zeus/safety/policies/`, optional `ZEUS_AEGIS_ENABLED` / `ZEUS_AEGIS_POLICY` / `NEMOCLAW_POLICY` per `.env.example`). Chat, streaming chat, voice text responses, and `/orchestration/call` outputs can be filtered by policy. **Still open** on this ticket: privacy level tagging, PII scanning across ingest, deduplication strategy, collection versioning—see ticket scope. **Orchestration alignment:** **input validation**, **tool argument checks**, and **defensive execution** (no blind tool runs). Cross-link: **Backlog** *Aegis: tool argument verification + execution guardrails*; **Project 7** LAB-145–146.
+  - **LAB-56 (Privacy & Data Governance / Aegis)**: **in-process Aegis** is present (`zeus/safety/policy_engine.py`, YAML under `zeus/safety/policies/`, optional `ZEUS_AEGIS_ENABLED` / `ZEUS_AEGIS_POLICY` / `NEMOCLAW_POLICY` per `.env.example`). Chat, streaming chat, voice text responses, and `/orchestration/call` outputs can be filtered by policy. **Still open** on this ticket: privacy level tagging, PII scanning across ingest, deduplication strategy, collection versioning—see ticket scope. **Orchestration alignment:** **input validation**, **tool argument checks**, and **defensive execution** (no blind tool runs). Cross-link: **Backlog** *Aegis: tool argument verification + execution guardrails*; **Project 7** LAB-145–146; **Project 10** LAB-326 (bus pre-hook + `evaluate_payload`).
 - **Not started (no code present yet)**:
   - **LAB-64 (Email Ingest)**: no email source/parser found under `zeus/ingest/sources/`.
 
@@ -225,10 +225,10 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 
 | Sub | Title | Notes |
 |-----|-------|-------|
-| LAB-326 | AgentStep + TaskRecord models | Add to `runtime.py`; parse `steps:` block from agent YAML |
-| LAB-327 | TaskRunner inner class | Iterates steps, collects StepResult, ring buffer |
-| LAB-328 | `POST /orchestration/tasks` route | `bus.py`; returns task_id, poll endpoint |
-| LAB-329 | TaskRunner integration tests | Smoke test with oracle agent's `/context/query` step |
+| LAB-331 | AgentStep + TaskRecord models | Add to `runtime.py`; parse `steps:` block from agent YAML |
+| LAB-332 | TaskRunner inner class | Iterates steps, collects StepResult, ring buffer |
+| LAB-333 | `POST /orchestration/tasks` route | `bus.py`; returns task_id, poll endpoint |
+| LAB-334 | TaskRunner integration tests | Smoke test with oracle agent's `/context/query` step |
 
 ### LAB-145 — Agent Communication Bus
 **Files:** `zeus/orchestration/bus.py`
@@ -243,9 +243,9 @@ Validated tool outputs feed the next hop and **LAB-146** (retry/refine). Aligns 
 
 | Sub | Title | Notes |
 |-----|-------|-------|
-| LAB-330 | Correlation IDs on BusCallRequest/Response | Generate uuid4 if absent; echo in response |
-| LAB-331 | Per-agent timeout from config YAML | Read `config.timeout_seconds`; pass to httpx |
-| LAB-332 | Idempotency flag + retry contract docs | `BusCallRequest.idempotent`; docstring update |
+| LAB-335 | Correlation IDs on BusCallRequest/Response | Generate uuid4 if absent; echo in response |
+| LAB-336 | Per-agent timeout from config YAML | Read `config.timeout_seconds`; pass to httpx |
+| LAB-337 | Idempotency flag + retry contract docs | `BusCallRequest.idempotent`; docstring update |
 
 ### LAB-146 — Orchestration Hooks
 **Files:** `zeus/orchestration/hooks.py`, `zeus/orchestration/bus.py`, `zeus/safety/integration.py`
@@ -260,9 +260,9 @@ Hooks do not replace Aegis policy — they add orchestration-level validate → 
 
 | Sub | Title | Notes |
 |-----|-------|-------|
-| LAB-333 | Retry-with-backoff post-hook | Max 3 attempts, exponential backoff, `should_retry` flag |
-| LAB-334 | Bus metrics post-hook | `app.state.bus_metrics`; surfaces to `/admin` |
-| LAB-335 | Pre-hook context contract + validator | `validate_context_keys()`; enforced in `ZEUS_ENV=dev` |
+| LAB-338 | Retry-with-backoff post-hook | Max 3 attempts, exponential backoff, `should_retry` flag |
+| LAB-339 | Bus metrics post-hook | `app.state.bus_metrics`; surfaces to `/admin` |
+| LAB-340 | Pre-hook context contract + validator | `validate_context_keys()`; enforced in `ZEUS_ENV=dev` |
 
 
 ## Project 8 — Observability + Admin
@@ -411,14 +411,14 @@ Vite `outDir → zeus/core/static/app/`. `main.py`: mount `/assets`, add SPA cat
 
 | Parent | Title | Labels | Subs |
 |--------|-------|--------|------|
-| LAB-336 | Aegis Pre-Hook (tool argument validation) | Feature, aegis, olympians | 3 |
-| LAB-337 | QueryEngine Reflection Loop | Feature, oracle | 3 |
-| LAB-338 | Olympian Tool Pack Expansion | Feature, olympians, aegis | 4 |
-| LAB-339 | Session Persistence Backend | Feature, oracle, mnemosyne | 3 |
-| LAB-340 | KAIROS Background Agent Daemon | Feature, olympians | 4 |
+| LAB-326 | Aegis Pre-Hook (tool argument validation) | Feature, aegis, olympians | 3 |
+| LAB-327 | QueryEngine Reflection Loop | Feature, oracle | 3 |
+| LAB-328 | Olympian Tool Pack Expansion | Feature, olympians, aegis | 4 |
+| LAB-329 | Session Persistence Backend | Feature, oracle, mnemosyne | 3 |
+| LAB-330 | KAIROS Background Agent Daemon | Feature, olympians | 4 |
 
-### LAB-336 — Aegis Pre-Hook (Tool Argument Validation)
-**Files:** `zeus/orchestration/hooks.py`, `zeus/safety/integration.py`, `zeus/safety/policy_engine.py` · **Priority:** High · **Blocks:** LAB-340 (KAIROS safety gates)
+### LAB-326 — Aegis Pre-Hook (Tool Argument Validation)
+**Files:** `zeus/orchestration/hooks.py`, `zeus/safety/integration.py`, `zeus/safety/policy_engine.py` · **Priority:** High · **Blocks:** LAB-330 (KAIROS safety gates)
 
 `aegis_bus_post_hook` in `integration.py` filters output. The `HookRegistry.register_pre()` slot in `main.py` is **empty** — only `register_aegis_bus_post_hook` is called in the lifespan. This ticket closes that gap.
 
@@ -432,9 +432,9 @@ Vite `outDir → zeus/core/static/app/`. `main.py`: mount `/assets`, add SPA cat
 | LAB-342 | Prompt injection YAML rule | `policies/standard.yaml`; pattern `(?i)(ignore previous instructions\|disregard your system prompt\|act as .{0,40} without restrictions)`; action `reject` |
 | LAB-343 | `AegisPolicyEngine.evaluate_payload()` | Field-by-field dict evaluation; used by pre-hook and KAIROS |
 
-**Cross-links:** LAB-146 (hook context contract — LAB-335), LAB-56 (defensive execution)
+**Cross-links:** LAB-146 (hook context contract — LAB-340), LAB-56 (defensive execution)
 
-### LAB-337 — QueryEngine Reflection Loop
+### LAB-327 — QueryEngine Reflection Loop
 **Files:** `zeus/core/query.py` · **Priority:** High
 
 `QueryEngine.query()` calls `_run_llm()` exactly once; any failure or empty reply propagates immediately. The ingest pipeline (`ingest/pipeline.py`) already demonstrates the canonical Zeus retry pattern (attempt counter, exponential backoff, `_is_transient_error()` classifier) — replicate it here.
@@ -452,8 +452,8 @@ Vite `outDir → zeus/core/static/app/`. `main.py`: mount `/assets`, add SPA cat
 
 **Cross-links:** LAB-144 (TaskRunner uses same pattern), LAB-61 (retrieval alignment after reflection)
 
-### LAB-338 — Olympian Tool Pack Expansion
-**Files:** new `zeus/mcp/olympian_tools.py`, `zeus/mcp/server.py` · **Priority:** Medium · **Blocks:** LAB-340 (KAIROS)
+### LAB-328 — Olympian Tool Pack Expansion
+**Files:** new `zeus/mcp/olympian_tools.py`, `zeus/mcp/server.py` · **Priority:** Medium · **Blocks:** LAB-330 (KAIROS)
 
 Current MCP tools (`zeus_query`, `zeus_profile`, `zeus_remember`) are memory read/write only. Agent YAMLs list `file_read`, `bus_call` — none exist as callable tools. All new tools follow the `olympian_` prefix and the existing `zeus_` pattern (httpx call to `_core_url()`).
 
@@ -473,10 +473,10 @@ All four tools registered in `server.py` via `@mcp.tool()`. Shell tool env-gated
 | LAB-349 | `olympian_shell` + allowlist guard | Gated by `ZEUS_SHELL_ENABLED`; Aegis post-filter |
 | LAB-350 | `olympian_memory_search` + server registration | Namespace-aware; register all 4 tools in `server.py` |
 
-**Cross-links:** LAB-336 (pre-hook validates tool args before shell runs), LAB-56
+**Cross-links:** LAB-326 (pre-hook validates tool args before shell runs), LAB-56
 
-### LAB-339 — Session Persistence Backend
-**Files:** new `zeus/core/session_storage.py`, `zeus/core/main.py` · **Priority:** Medium · **Blocks:** LAB-291 (Telegram sessions), LAB-340 (KAIROS memory continuity)
+### LAB-329 — Session Persistence Backend
+**Files:** new `zeus/core/session_storage.py`, `zeus/core/main.py` · **Priority:** Medium · **Blocks:** LAB-291 (Telegram sessions), LAB-330 (KAIROS memory continuity)
 
 `SessionManager` accepts any `SessionStorage` Protocol (`sessions.py` lines 67-75) — `InMemoryStorage` is the only implementation. Sessions are **lost on every server restart**. The Protocol is the seam: no changes needed to `SessionManager` or `QueryEngine`.
 
@@ -492,10 +492,10 @@ All four tools registered in `server.py` via `@mcp.tool()`. Shell tool env-gated
 
 **Cross-links:** LAB-153 (IngestPipeline memory client injection — same swap pattern), LAB-291
 
-### LAB-340 — KAIROS Background Agent Daemon
-**Files:** new `zeus/orchestration/daemon.py`, `zeus/core/main.py` · **Priority:** Low · **Requires:** LAB-326 (TaskRunner), LAB-338 (tool pack), LAB-339 (session persistence)
+### LAB-330 — KAIROS Background Agent Daemon
+**Files:** new `zeus/orchestration/daemon.py`, `zeus/core/main.py` · **Priority:** Low · **Requires:** LAB-332 (TaskRunner), LAB-328 (tool pack), LAB-329 (session persistence)
 
-**Naming:** `kairos` — Greek personification of the opportune moment. Generalises `OrpheusPipeline.run_forever()` (observe→decide→act loop) without audio hardware dependency. Reuses `TaskRunner` (LAB-327) for step execution.
+**Naming:** `kairos` — Greek personification of the opportune moment. Generalises `OrpheusPipeline.run_forever()` (observe→decide→act loop) without audio hardware dependency. Reuses `TaskRunner` (LAB-332) for step execution.
 
 1. **`ObservationSource` Protocol + `MemoryDriftObserver`** — `async def observe() -> Observation | None`; `MemoryDriftObserver` calls `search_memories("what changed recently", limit=1)` and compares timestamps with last-cycle watermark; returns `None` on idle cycle.
 2. **`KairosAgent` class** — `observe() / decide(obs) / act(plan) / update_memory(result)`; `decide()` is an LLM call returning `CognitivePlan(steps: list[ToolCall])`; `act()` iterates steps via `olympian_*` tools using `TaskRunner`; `update_memory()` calls `zeus_remember(text=summary, namespace="execution_log")`.
@@ -509,14 +509,14 @@ All four tools registered in `server.py` via `@mcp.tool()`. Shell tool env-gated
 | LAB-356 | `KairosDaemon` wrapper + lifespan wiring | `asyncio.Event` stop; `ZEUS_KAIROS_ENABLED` gate |
 | LAB-357 | KAIROS safety gates + `/orchestration/kairos/status` | Tool allowlist; status endpoint |
 
-**Cross-links:** LAB-337 (reflection loop for KAIROS decide step), LAB-144 (TaskRunner reuse)
+**Cross-links:** LAB-327 (reflection loop for KAIROS decide step), LAB-144 (TaskRunner reuse)
 
 
 ---
 
 ## Backlog
 
-Themes below that mirror **task loops, tool-first design, structured memory, and defensive execution** are tracked in detail under **Project 7 (LAB-144–146)** and **Project 10 (LAB-336–357)**. The six agentic-resilience rows now have concrete "How:" implementation paths — create them as parent issues + subs in Linear when the budget allows.
+Themes below that mirror **task loops, tool-first design, structured memory, and defensive execution** are tracked under **Project 7 (LAB-144–146)** and **Project 10 (LAB-326–357)**. **Linear (Apr 2026):** Project 10 **parents** are filed as **LAB-326–330**; Project 7 **subs** LAB-331–340 are doc IDs only until you create child issues under LAB-144–146. Subs under LAB-326–330 (LAB-341+) remain to be filed when the workspace limit allows.
 
 | Title                                        | Labels             |
 | -------------------------------------------- | ------------------ |
@@ -542,19 +542,19 @@ Themes below that mirror **task loops, tool-first design, structured memory, and
 How: append `StepResult` objects to `Session.metadata["execution_log"]` (`metadata` is a freeform dict already present in `sessions.py`); KAIROS `update_memory()` (LAB-355) writes a summarised task record via `zeus_remember(namespace="execution_log")` so it survives session expiry. No schema migration needed.
 
 **Olympians: planner–executor–reflector pipeline**
-How: planner = LLM call in `POST /orchestration/tasks` (LAB-328) converting `task_description: str` into an ordered `list[AgentStep]` (Pydantic-validated); executor = `TaskRunner` (LAB-327); reflector = `_is_empty_or_failed_reply` (LAB-344) applied to each step's output before proceeding to the next step.
+How: planner = LLM call in `POST /orchestration/tasks` (LAB-333) converting `task_description: str` into an ordered `list[AgentStep]` (Pydantic-validated); executor = `TaskRunner` (LAB-332); reflector = `_is_empty_or_failed_reply` (LAB-344) applied to each step's output before proceeding to the next step.
 
 **Olympians: tool/LLM retry + validation policy**
-How: bus-level retries via `retry_on_error_post_hook` (LAB-333); LLM-level via reflection loop (LAB-345). Extract `_is_transient_ingest_error` from `zeus/ingest/pipeline.py` into `zeus/core/retry.py` and import it from both retry sites. `MAX_RETRIES` configurable via `ZEUS_MAX_RETRIES` env var (default 3).
+How: bus-level retries via `retry_on_error_post_hook` (LAB-338); LLM-level via reflection loop (LAB-345). Extract `_is_transient_ingest_error` from `zeus/ingest/pipeline.py` into `zeus/core/retry.py` and import it from both retry sites. `MAX_RETRIES` configurable via `ZEUS_MAX_RETRIES` env var (default 3).
 
 **Olympians: core tool pack + sandbox contract**
-How: LAB-338 is the full implementation. Sandbox contract: all path-accepting tools validate against `ZEUS_FILE_READ_ROOTS`; shell gated by `ZEUS_SHELL_ENABLED`; contract documented in `zeus/mcp/olympian_tools.py` module docstring and `CLAUDE.md` Agentic Safety Contract section.
+How: LAB-328 is the full implementation. Sandbox contract: all path-accepting tools validate against `ZEUS_FILE_READ_ROOTS`; shell gated by `ZEUS_SHELL_ENABLED`; contract documented in `zeus/mcp/olympian_tools.py` module docstring and `CLAUDE.md` Agentic Safety Contract section.
 
 **Aegis: tool argument verification + execution guardrails**
-How: LAB-336 (pre-hook + `evaluate_payload()`). For direct tool calls that bypass the bus (KAIROS, TaskRunner), each tool function also validates path allowlist internally — defence in depth. Pre-hook fires first; tool-level check is the backstop.
+How: LAB-326 (pre-hook + `evaluate_payload()`). For direct tool calls that bypass the bus (KAIROS, TaskRunner), each tool function also validates path allowlist internally — defence in depth. Pre-hook fires first; tool-level check is the backstop.
 
 **Background agent loop (observe–decide–act) — design + safety + resource gates**
-How: LAB-340 KAIROS is the implementation. Resource gates: `KAIROS_MAX_ACTIONS_PER_CYCLE` (default 5) limits tool calls per cycle; `KAIROS_INTERVAL_MINUTES` (default 60) prevents runaway loops; CPU/memory bounded by existing Docker resource limits in `compose.yaml` (KAIROS runs in-process with Core).
+How: LAB-330 KAIROS is the implementation. Resource gates: `KAIROS_MAX_ACTIONS_PER_CYCLE` (default 5) limits tool calls per cycle; `KAIROS_INTERVAL_MINUTES` (default 60) prevents runaway loops; CPU/memory bounded by existing Docker resource limits in `compose.yaml` (KAIROS runs in-process with Core).
 
 **Note:** Some Project 7/8 sub-issues and all Backlog items may hit the Linear workspace issue limit. Archive completed issues before creating new ones.
 
@@ -570,10 +570,10 @@ How: LAB-340 KAIROS is the implementation. Resource gates: `KAIROS_MAX_ACTIONS_P
 - **LAB-286 (React Scaffold)** blocks LAB-287, LAB-288, LAB-290, LAB-293
 - **LAB-290 (FastAPI SPA Serve)** blocks LAB-289 (Agent Panel)
 - **LAB-291 (Telegram Backend)** blocks LAB-292 (Telegram Frontend)
-- **LAB-330–332 (Bus hardening)** are prerequisites for LAB-333–335 (hook policies) and LAB-340 (KAIROS reliable cycles)
-- **LAB-336 (Aegis Pre-Hook)** — self-contained; plugs into existing `HookRegistry.register_pre()` slot in `main.py`; no other new LABs required first
-- **LAB-337 (Reflection Loop)** — self-contained in `query.py`; benefits from LAB-335 (pre-hook context contract) being done first
-- **LAB-338 (Tool Pack)** blocks LAB-340 (KAIROS needs tools to act with)
-- **LAB-339 (Session Persistence)** blocks LAB-291 (Telegram sessions need persistence) and LAB-340 (KAIROS memory continuity across restarts)
-- **LAB-340 (KAIROS)** depends on LAB-326 (TaskRunner), LAB-338 (tool pack), LAB-339 (session persistence)
+- **LAB-335–337 (Bus hardening)** are prerequisites for **LAB-338–340 (hook policies)** and **LAB-330 (KAIROS reliable cycles)**
+- **LAB-326 (Aegis Pre-Hook)** — self-contained; plugs into existing `HookRegistry.register_pre()` slot in `main.py`; no other new LABs required first
+- **LAB-327 (Reflection Loop)** — self-contained in `query.py`; benefits from LAB-340 (pre-hook context contract) being done first
+- **LAB-328 (Tool Pack)** blocks LAB-330 (KAIROS needs tools to act with)
+- **LAB-329 (Session Persistence)** blocks LAB-291 (Telegram sessions need persistence) and LAB-330 (KAIROS memory continuity across restarts)
+- **LAB-330 (KAIROS)** depends on LAB-332 (TaskRunner), LAB-328 (tool pack), LAB-329 (session persistence)
 
