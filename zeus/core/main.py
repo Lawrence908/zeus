@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -116,6 +117,8 @@ async def lifespan(app: FastAPI):
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+_SPA_DIR = _STATIC_DIR / "app"
+_SPA_INDEX = _SPA_DIR / "index.html"
 
 app = FastAPI(title="Zeus Core", version=ZEUS_VERSION, lifespan=lifespan)
 app.add_middleware(QueryLoggingMiddleware)
@@ -131,6 +134,14 @@ app.mount(
     StaticFiles(directory=str(_STATIC_DIR)),
     name="static",
 )
+
+# Serve React SPA assets (built by zeus/frontend via `npm run build`)
+if (_SPA_DIR / "assets").is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_SPA_DIR / "assets")),
+        name="spa-assets",
+    )
 
 
 @app.get("/health", include_in_schema=False)
@@ -155,3 +166,12 @@ async def status(request: Request) -> StatusResponse:
         uptime_seconds=round(time.time() - boot, 1),
         services=[qdrant, ollama],
     )
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def spa_fallback(path: str) -> FileResponse:
+    """Serve React SPA for all non-API routes. Registered last so it never shadows API routes."""
+    if _SPA_INDEX.is_file():
+        return FileResponse(str(_SPA_INDEX), media_type="text/html")
+    from fastapi import HTTPException
+    raise HTTPException(status_code=503, detail="Frontend not built. Run `npm run build` in zeus/frontend/.")

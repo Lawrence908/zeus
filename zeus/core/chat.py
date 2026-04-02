@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from zeus.core.query import QueryEngine, _active_model_name
@@ -68,20 +68,16 @@ def _query_engine(request: Request) -> QueryEngine:
     return qe
 
 
-@router.get("/chat")
-async def chat_page() -> FileResponse:
-    path = _STATIC / "chat.html"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="chat.html not found")
-    return FileResponse(path, media_type="text/html")
+@router.get("/chat", include_in_schema=False)
+async def chat_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/", status_code=301)
 
 
-@router.get("/viz")
-async def viz_page() -> FileResponse:
-    path = _STATIC / "viz" / "viz.html"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="viz.html not found")
-    return FileResponse(path, media_type="text/html")
+@router.get("/viz", include_in_schema=False)
+async def viz_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/viz", status_code=301)
 
 
 @router.post("/chat/message", response_model=ChatMessageResponse)
