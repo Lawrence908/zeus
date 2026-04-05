@@ -12,6 +12,7 @@ export default defineConfig({
       '/static': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/status': 'http://localhost:8000',
+      '/ingest/trigger': 'http://localhost:8000',
       '/admin': 'http://localhost:8000',
       '/orchestration': 'http://localhost:8000',
       '/oracle': 'http://localhost:8000',

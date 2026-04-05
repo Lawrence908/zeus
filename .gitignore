@@ -209,6 +209,9 @@ __marimo__/
 # Node (e.g. mistaken `npm install` in repo root)
 node_modules/
 
+# Zeus — cron ingest flock (runtime; empty lock file)
+.ingest-cron.lock
+
 # Zeus — raw data exports (too large and potentially sensitive)
 zeus/data/raw/
 zeus/data/*.json
