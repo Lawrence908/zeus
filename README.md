@@ -143,7 +143,7 @@ Start with the **architecture overview**:
 - [`docs/zeus_linear_ticket_plan.md`](docs/zeus_linear_ticket_plan.md) — Feature roadmap and status by project
 
 Quick orientation by subsystem:
-- **Session continuity:** `zeus/core/sessions.py` (multi-turn state management)
+- **Session continuity:** `zeus/core/sessions.py` (multi-turn state; tune with `ZEUS_CONTEXT_MAX_TOKENS` / `ZEUS_SESSION_*` — see `CLAUDE.md`)
 - **Query engine:** `zeus/core/query.py` (search + LLM orchestration)
 - **Data ingestion:** `zeus/ingest/sources/` (source adapters)
 - **Memory layer:** `zeus/memory/config.py` and `memory/search.py`
@@ -201,7 +201,7 @@ Switch via `.env` file. All services detect and configure themselves.
 
 ### Session Continuity
 
-Sessions persist multi-turn state with rolling summaries. Each message is append-only. On server restart, sessions reload from disk. See `zeus/core/sessions.py` for implementation.
+Sessions persist multi-turn state with rolling summaries. Each message is append-only. By default the process uses in-memory session storage (sessions are lost on restart); swap in a durable `SessionStorage` when ready. Context size is tuned with `ZEUS_CONTEXT_MAX_TOKENS` and related `ZEUS_SESSION_*` variables (see `.env.example`). See `zeus/core/sessions.py` and `CLAUDE.md`.
 
 ### Data Ingestion Flow
 
