@@ -143,8 +143,19 @@ def _fmt_duration(seconds: float) -> str:
     return f"{minutes}m {secs}s"
 
 
-def build_sources(args) -> list:
-    """Construct IngestSource instances from CLI args."""
+def build_sources(args, *, cli_mode: bool = True) -> list:
+    """Construct IngestSource instances from CLI args.
+
+    When cli_mode is False (HTTP trigger), missing required sources raise ValueError
+    instead of sys.exit so FastAPI can return 4xx.
+    """
+
+    def fail_hard(msg: str) -> None:
+        logger.error(msg)
+        if cli_mode:
+            sys.exit(1)
+        raise ValueError(msg)
+
     from zeus.ingest.sources.bookmarks import BookmarksSource
     from zeus.ingest.sources.chatgpt import ChatGPTSource
     from zeus.ingest.sources.context_pack import ContextPackSource
@@ -163,8 +174,7 @@ def build_sources(args) -> list:
             context_pack_path = DEFAULT_CONTEXT_PACK_PATH
         if not Path(context_pack_path).exists():
             if args.source == "context_pack":
-                logger.error(f"context pack not found: {context_pack_path}")
-                sys.exit(1)
+                fail_hard(f"context pack not found: {context_pack_path}")
             logger.warning(f"skipping context_pack — file not found: {context_pack_path}")
         else:
             sources.append(
@@ -201,8 +211,7 @@ def build_sources(args) -> list:
             if legacy.exists():
                 path = str(legacy)
             elif args.source == "chatgpt":
-                logger.error(f"chatgpt export not found: {path}")
-                sys.exit(1)
+                fail_hard(f"chatgpt export not found: {path}")
             else:
                 logger.warning(f"skipping chatgpt — not found: {path}")
                 path = None
@@ -222,8 +231,7 @@ def build_sources(args) -> list:
             cfg = EmailSource.from_env(limit=args.email_limit)
         except Exception as e:
             if args.source == "email":
-                logger.error(f"email config invalid: {e}")
-                sys.exit(1)
+                fail_hard(f"email config invalid: {e}")
             logger.warning(f"skipping email — config invalid: {e}")
         else:
             sources.append(
@@ -239,8 +247,7 @@ def build_sources(args) -> list:
         vault_path = args.path or os.getenv("OBSIDIAN_VAULT_PATH", "")
         if not vault_path or not Path(vault_path).is_dir():
             if args.source == "obsidian":
-                logger.error("obsidian vault not found — set OBSIDIAN_VAULT_PATH or use --path")
-                sys.exit(1)
+                fail_hard("obsidian vault not found — set OBSIDIAN_VAULT_PATH or use --path")
             if vault_path:
                 logger.warning("skipping obsidian — vault not found: %s", vault_path)
         else:
@@ -257,8 +264,7 @@ def build_sources(args) -> list:
         repo_path = args.path or os.getenv("ZEUS_REPO_PATH", ".")
         if not Path(repo_path, ".git").is_dir():
             if args.source == "git":
-                logger.error("git repo not found at %s — use --path or set ZEUS_REPO_PATH", repo_path)
-                sys.exit(1)
+                fail_hard(f"git repo not found at {repo_path} — use --path or set ZEUS_REPO_PATH")
             logger.warning("skipping git — no .git directory at %s", repo_path)
         else:
             sources.append(
@@ -280,16 +286,14 @@ def build_sources(args) -> list:
             )
         except Exception as exc:
             if args.source == "gcal":
-                logger.error("gcal config invalid: %s", exc)
-                sys.exit(1)
+                fail_hard(f"gcal config invalid: {exc}")
             logger.warning("skipping gcal — %s", exc)
 
     if args.source in ("bookmarks", "all"):
         export_path = args.path or os.getenv("BOOKMARKS_EXPORT_PATH", "zeus/data/raw/bookmarks.html")
         if not Path(export_path).exists():
             if args.source == "bookmarks":
-                logger.error("bookmarks export not found: %s", export_path)
-                sys.exit(1)
+                fail_hard(f"bookmarks export not found: {export_path}")
             logger.warning("skipping bookmarks — export not found: %s", export_path)
         else:
             sources.append(
@@ -300,10 +304,35 @@ def build_sources(args) -> list:
             )
 
     if not sources:
-        logger.error(f"no sources configured for --source={args.source!r}")
-        sys.exit(1)
+        fail_hard(f"no sources configured for --source={args.source!r}")
 
     return sources
+
+
+def build_sources_for_trigger(
+    source: str,
+    *,
+    user_id: str = "chris",
+    chunk_size: int = 512,
+    chunk_overlap: int = 64,
+) -> list:
+    """Build ingest sources for a named trigger (MCP / HTTP). Raises ValueError on failure."""
+    from types import SimpleNamespace
+
+    args = SimpleNamespace(
+        source=source,
+        path=None,
+        glob=None,
+        base_dir=None,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        user_id=user_id,
+        email_limit=200,
+        git_max_commits=500,
+        gcal_days_back=90,
+        gcal_days_forward=30,
+    )
+    return build_sources(args, cli_mode=False)
 
 
 async def main(args, *, log_console: object | None = None) -> None:

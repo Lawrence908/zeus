@@ -1,6 +1,10 @@
 """zeus/memory/search.py — Mnemosyne search helpers."""
 
+import os
 from collections.abc import Iterable
+
+# Tunable via env (LAB-126); clamped to mem0 practical range.
+MEMORY_SEARCH_TOP_K = max(1, min(20, int(os.getenv("ZEUS_MEMORY_SEARCH_TOP_K", "8"))))
 
 
 def _matches_namespaces(memory_item: dict, namespaces: list[str]) -> bool:
@@ -23,17 +27,18 @@ def search_memories(
     memory,
     query: str,
     user_id: str,
-    top_k: int = 5,
+    top_k: int | None = None,
     namespaces: list[str] | None = None,
 ) -> list[dict]:
     """Search mem0 and apply lightweight namespace filtering."""
-    results = memory.search(query=query, user_id=user_id, limit=top_k)
+    k = MEMORY_SEARCH_TOP_K if top_k is None else top_k
+    results = memory.search(query=query, user_id=user_id, limit=k)
     if not isinstance(results, list):
         return []
 
     namespace_filters = namespaces or []
     filtered = [item for item in results if _matches_namespaces(item, namespace_filters)]
-    return filtered[:top_k]
+    return filtered[:k]
 
 
 def format_context_block(memories: Iterable[dict], max_tokens: int = 2048) -> tuple[str, int]:
