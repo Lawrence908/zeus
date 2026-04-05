@@ -70,7 +70,24 @@ export function useStreamingChat() {
               }
               if (data) {
                 try {
-                  const parsed = JSON.parse(data) as { token?: string; content?: string }
+                  const parsed = JSON.parse(data) as {
+                    type?: string
+                    token?: string
+                    content?: string
+                    session_id?: string
+                    detail?: string
+                  }
+                  if (parsed.type === 'done' && typeof parsed.session_id === 'string') {
+                    useChatStore.getState().setActiveSession(parsed.session_id)
+                    continue
+                  }
+                  if (parsed.type === 'error' && typeof parsed.detail === 'string') {
+                    appendToLastMessage(`\n\n_[${parsed.detail}]_`)
+                    continue
+                  }
+                  if (parsed.type === 'phase') {
+                    continue
+                  }
                   const token = parsed.token ?? parsed.content ?? ''
                   if (token) appendToLastMessage(token)
                 } catch {
@@ -93,9 +110,15 @@ export function useStreamingChat() {
               body: JSON.stringify({ message, session_id: sessionId }),
             })
             if (fallbackRes.ok) {
-              const data = await fallbackRes.json() as { assistant_message?: string }
+              const data = await fallbackRes.json() as {
+                assistant_message?: string
+                session_id?: string
+              }
               const content = data.assistant_message ?? ''
               appendToLastMessage(content)
+              if (typeof data.session_id === 'string') {
+                useChatStore.getState().setActiveSession(data.session_id)
+              }
             } else {
               appendToLastMessage('\n\n_[Error: Could not reach Zeus backend]_')
             }

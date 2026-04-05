@@ -4,6 +4,7 @@ import { ChatPage } from './pages/ChatPage'
 import { VizPage } from './pages/VizPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { IngestPage } from './pages/IngestPage'
 
 const router = createBrowserRouter([
   {
@@ -21,6 +22,10 @@ const router = createBrowserRouter([
   {
     path: '/settings',
     element: <SettingsPage />,
+  },
+  {
+    path: '/ingest',
+    element: <IngestPage />,
   },
   {
     path: '*',

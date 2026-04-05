@@ -54,6 +54,10 @@ class ChatSessionsListResponse(BaseModel):
     sessions: list[ChatSessionSummary]
 
 
+class ChatMessagesResponse(BaseModel):
+    messages: list[dict[str, Any]]
+
+
 def _session_manager(request: Request) -> SessionManager:
     sm = getattr(request.app.state, "session_manager", None)
     if sm is None:
@@ -303,6 +307,54 @@ async def list_chat_sessions(
         for s in recent
     ]
     return ChatSessionsListResponse(sessions=summaries)
+
+
+@router.post("/chat/sessions", response_model=ChatSessionSummary)
+async def create_chat_session(request: Request) -> ChatSessionSummary:
+    """Create an empty session (React SPA \"+ New Session\" uses POST here)."""
+    sm = _session_manager(request)
+    session = await sm.create(metadata={"source": "chat"})
+    return ChatSessionSummary(
+        id=session.id,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        turn_count=0,
+        summary=None,
+        topic="New chat",
+        metadata=session.metadata,
+    )
+
+
+@router.get("/chat/sessions/{session_id}/messages", response_model=ChatMessagesResponse)
+async def get_chat_session_messages(session_id: str, request: Request) -> ChatMessagesResponse:
+    """Return turns as UI messages for session restore."""
+    sm = _session_manager(request)
+    session = await sm.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    out: list[dict[str, Any]] = []
+    for i, turn in enumerate(session.turns):
+        ts_ms = int(turn.timestamp * 1000)
+        out.append(
+            {
+                "id": f"{session_id}-u-{i}",
+                "role": "user",
+                "content": turn.user,
+                "timestamp": ts_ms,
+                "source": "web",
+            }
+        )
+        out.append(
+            {
+                "id": f"{session_id}-a-{i}",
+                "role": "assistant",
+                "content": turn.assistant,
+                "timestamp": ts_ms,
+                "source": "web",
+                "context_sources": turn.context_sources,
+            }
+        )
+    return ChatMessagesResponse(messages=out)
 
 
 @router.get("/chat/sessions/{session_id}", response_model=Session)

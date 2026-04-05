@@ -11,7 +11,12 @@ import httpx
 from pydantic import BaseModel, Field
 
 from zeus.core.sessions import SessionManager, Turn
-from zeus.memory.search import format_context_block, get_profile_facts, search_memories
+from zeus.memory.search import (
+    MEMORY_SEARCH_TOP_K,
+    format_context_block,
+    get_profile_facts,
+    search_memories,
+)
 from zeus.safety.policy_engine import aegis_enabled, evaluate_text
 
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
@@ -41,6 +46,20 @@ def _ollama_url() -> str:
 def _ollama_model() -> str:
     return os.getenv("ZEUS_OLLAMA_MODEL") or os.getenv(
         "ZEUS_PROD_MODEL", "qwen2.5:7b-instruct"
+    )
+
+
+def _ollama_http_timeout() -> httpx.Timeout:
+    """httpx timeout for Ollama /api/chat. Default 15m — GPU queues + embed contention often exceed 120s."""
+    raw = os.getenv("ZEUS_OLLAMA_HTTP_TIMEOUT_SEC", "900").strip()
+    if raw.lower() in ("0", "none", "unlimited"):
+        return httpx.Timeout(connect=60.0, read=None, write=120.0, pool=60.0)
+    sec = max(120.0, float(raw))
+    return httpx.Timeout(
+        connect=min(60.0, sec),
+        read=sec,
+        write=min(120.0, sec),
+        pool=60.0,
     )
 
 
@@ -105,7 +124,7 @@ async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
         "options": {"num_predict": max_tokens},
     }
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{base}/api/chat", json=payload, timeout=120.0)
+        r = await client.post(f"{base}/api/chat", json=payload, timeout=_ollama_http_timeout())
         if r.status_code == 404:
             body = (r.text or "")[:300]
             raise RuntimeError(_ollama_model_missing_message(detail=body))
@@ -163,7 +182,7 @@ async def _run_llm_stream(
             "POST",
             f"{base}/api/chat",
             json=payload,
-            timeout=120.0,
+            timeout=_ollama_http_timeout(),
         ) as r:
             if r.status_code == 404:
                 body = (await r.aread()).decode("utf-8", errors="replace")[:300]
@@ -238,7 +257,7 @@ class QueryEngine:
                 memory=self.memory,
                 query=message,
                 user_id=ZEUS_USER_ID,
-                top_k=5,
+                top_k=MEMORY_SEARCH_TOP_K,
                 namespaces=[],
             )
             _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
@@ -336,7 +355,7 @@ class QueryEngine:
                 memory=self.memory,
                 query=message,
                 user_id=ZEUS_USER_ID,
-                top_k=5,
+                top_k=MEMORY_SEARCH_TOP_K,
                 namespaces=[],
             )
             _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)

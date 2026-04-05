@@ -68,7 +68,17 @@
 
   <div class="refresh-bar">
     <button id="refresh-btn" onclick="load()">Refresh</button>
+    <button id="reset-log-btn" type="button" style="background:var(--border);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:11px;font-family:inherit;">Reset query log</button>
+    <a href="/ingest" style="color:var(--accent);text-decoration:none;font-size:11px;">Iris ingest (app UI) →</a>
     <span id="last-updated">Loading…</span>
+  </div>
+
+  <!-- Row 0: Diagnostics (Ollama / Zeus scope) -->
+  <div class="grid">
+    <div class="card full" id="diag-card">
+      <h2>Diagnostics</h2>
+      <div id="diag-content"><div class="empty">Loading…</div></div>
+    </div>
   </div>
 
   <!-- Row 1: Uptime stats + Scheduler -->
@@ -123,6 +133,31 @@ async function loadIngest() {
   const r = await fetch('/admin/ingest/stats');
   if (!r.ok) throw new Error(`ingest ${r.status}`);
   return r.json();
+}
+
+async function loadDiagnostics() {
+  const r = await fetch('/admin/diagnostics');
+  if (!r.ok) throw new Error(`diagnostics ${r.status}`);
+  return r.json();
+}
+
+async function clearQueryLog() {
+  const r = await fetch('/admin/query-log/clear', { method: 'POST' });
+  if (!r.ok) throw new Error(`clear ${r.status}`);
+  return r.json();
+}
+
+function renderDiagnostics(d) {
+  const rows = [
+    ['Zeus PID (this process)', d.zeus_pid],
+    ['Ollama loaded models', d.ollama_running_model_count != null ? d.ollama_running_model_count : '—'],
+  ];
+  let err = '';
+  if (d.ollama_ps_error) err = `<div class="err" style="margin-top:8px">Ollama /api/ps: ${d.ollama_ps_error}</div>`;
+  const note = `<p style="color:var(--muted);font-size:11px;margin-top:10px;line-height:1.4">${d.scope_note || ''}</p>`;
+  return rows.map(([l, v]) =>
+    `<div class="stat-row"><span class="stat-label">${l}</span><span class="stat-val">${v}</span></div>`
+  ).join('') + err + note;
 }
 
 function renderSystem(data) {
@@ -204,8 +239,9 @@ function renderQueries(queries) {
 
 async function load() {
   try {
-    const [metrics, ingest] = await Promise.all([loadMetrics(), loadIngest()]);
+    const [metrics, ingest, diag] = await Promise.all([loadMetrics(), loadIngest(), loadDiagnostics()]);
 
+    document.getElementById('diag-content').innerHTML = renderDiagnostics(diag);
     document.getElementById('sys-content').innerHTML = renderSystem(metrics);
     document.getElementById('sched-content').innerHTML = renderScheduler(metrics.scheduler);
     document.getElementById('agents-content').innerHTML = renderAgents(metrics.agents);
@@ -217,6 +253,15 @@ async function load() {
     document.getElementById('last-updated').textContent = `Error: ${err.message}`;
   }
 }
+
+document.getElementById('reset-log-btn').addEventListener('click', async () => {
+  try {
+    await clearQueryLog();
+    await load();
+  } catch (e) {
+    document.getElementById('last-updated').textContent = 'Reset error: ' + e.message;
+  }
+});
 
 load();
 setInterval(load, 30000);

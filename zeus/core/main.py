@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
         from zeus.ingest.scheduler import build_scheduler
         from zeus.memory.consolidate import MemoryConsolidator
 
-        ingest_pipeline = IngestPipeline(sources=[])
+        ingest_pipeline = IngestPipeline(sources=[], memory=app.state.memory)
         consolidator = MemoryConsolidator(app.state.memory)
         scheduler = build_scheduler(ingest_pipeline, consolidator)
         scheduler.start()
@@ -111,9 +111,17 @@ async def lifespan(app: FastAPI):
 
     ingest_scheduler = getattr(app.state, "ingest_scheduler", None)
     if ingest_scheduler is not None:
-        ingest_scheduler.shutdown()
+        ingest_scheduler.shutdown(wait=False)
 
     await app.state.http_client.aclose()
+
+    mem = getattr(app.state, "memory", None)
+    close_fn = getattr(mem, "close", None) if mem is not None else None
+    if callable(close_fn):
+        try:
+            close_fn()
+        except Exception:
+            pass
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
