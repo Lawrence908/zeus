@@ -219,6 +219,10 @@ zeus/data/*.csv
 zeus/data/*.jsonl
 zeus/data/*.zip
 
+# Zeus — newsletter digest runtime data
+zeus/data/audio/
+zeus/data/newsletters/
+
 # Zeus — local model weights (Ollama manages these)
 *.gguf
 *.bin

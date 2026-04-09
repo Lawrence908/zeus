@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zeus Newsletter Digest</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('zeus.chat.theme');
+        if (t === 'light' || t === 'dark') {
+          document.documentElement.setAttribute('data-theme', t);
+        } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        } else {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+  <style>
+    :root,
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #07090d;
+      --panel: #0e1218;
+      --border: #1c2530;
+      --fg: #e8eef8;
+      --muted: #6b7a90;
+      --accent: #5c9eff;
+      --msg-strong: #9ebdff;
+      --btn-ghost-bg: #1a2434;
+      --btn-ghost-border: #2a3848;
+      --btn-primary-bg: #1a2f4d;
+      --btn-primary-border: #2a5080;
+      --toast-err-bg: #3d1515;
+      --toast-err-border: #662222;
+      --toast-err-fg: #ffcccc;
+      --toast-ok-bg: #143d1f;
+      --toast-ok-border: #226632;
+      --toast-ok-fg: #ccffdd;
+      --code-bg: #151b26;
+      --link-hover: #8ebfff;
+    }
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f0f2f7;
+      --panel: #ffffff;
+      --border: #d5dbe6;
+      --fg: #1a2230;
+      --muted: #5a6578;
+      --accent: #2563c4;
+      --msg-strong: #1e4a8c;
+      --btn-ghost-bg: #e8ecf4;
+      --btn-ghost-border: #c5cddc;
+      --btn-primary-bg: #d8e6ff;
+      --btn-primary-border: #7aa8e8;
+      --toast-err-bg: #fde8e8;
+      --toast-err-border: #e8a0a0;
+      --toast-err-fg: #5c1010;
+      --toast-ok-bg: #e0f5e8;
+      --toast-ok-border: #8cc9a0;
+      --toast-ok-fg: #0d3d1a;
+      --code-bg: #eef1f7;
+      --link-hover: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    header nav { display: flex; align-items: center; gap: 0.5rem; }
+    header nav a { color: var(--accent); margin-left: 0.65rem; text-decoration: none; }
+    header nav a:hover { color: var(--link-hover); }
+    #theme-toggle {
+      font-size: 1.1rem;
+      padding: 0.25rem 0.5rem;
+      background: var(--btn-ghost-bg);
+      border: 1px solid var(--btn-ghost-border);
+      border-radius: 6px;
+      color: var(--fg);
+      cursor: pointer;
+      line-height: 1;
+    }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button:focus:not(:focus-visible) { outline: none; }
+
+    .container {
+      max-width: 800px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem;
+      flex: 1;
+    }
+
+    /* Generate button */
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .controls select {
+      padding: 0.5rem 0.75rem;
+      background: var(--panel);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    #generate-btn {
+      padding: 0.5rem 1.25rem;
+      background: var(--btn-primary-bg);
+      border: 1px solid var(--btn-primary-border);
+      border-radius: 8px;
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    #generate-btn:hover { opacity: 0.85; }
+    #generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Loading state */
+    .loading { display: none; align-items: center; gap: 0.5rem; color: var(--muted); margin-bottom: 1rem; }
+    .loading.active { display: flex; }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Digest card */
+    .digest-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .digest-card .meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .digest-card .meta .type-badge {
+      background: var(--btn-primary-bg);
+      border: 1px solid var(--btn-primary-border);
+      color: var(--accent);
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .digest-card .meta .date { color: var(--muted); font-size: 0.85rem; }
+    .digest-card .summary { color: var(--fg); margin-bottom: 1rem; line-height: 1.5; }
+
+    .digest-card h3 {
+      color: var(--msg-strong);
+      font-size: 0.9rem;
+      margin: 1rem 0 0.5rem;
+      font-weight: 600;
+    }
+
+    .bullets { list-style: none; padding: 0; margin: 0; }
+    .bullets li {
+      padding: 0.4rem 0;
+      padding-left: 1.2rem;
+      position: relative;
+      line-height: 1.45;
+      border-bottom: 1px solid var(--border);
+    }
+    .bullets li:last-child { border-bottom: none; }
+    .bullets li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.7rem;
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+
+    .advice-box {
+      background: var(--btn-primary-bg);
+      border: 1px solid var(--btn-primary-border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-top: 0.75rem;
+      color: var(--fg);
+      line-height: 1.45;
+    }
+
+    /* Audio player */
+    .audio-section {
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+    .audio-section audio {
+      width: 100%;
+      height: 40px;
+      border-radius: 8px;
+    }
+
+    /* Error / empty */
+    .error-msg {
+      background: var(--toast-err-bg);
+      border: 1px solid var(--toast-err-border);
+      color: var(--toast-err-fg);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .error-msg.visible { display: block; }
+
+    .empty-state {
+      text-align: center;
+      color: var(--muted);
+      padding: 3rem 1rem;
+    }
+
+    /* History section */
+    .history-header {
+      color: var(--muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 2rem 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display:flex;align-items:center;gap:0.75rem;">
+      <h1>Newsletter Digest</h1>
+    </div>
+    <nav>
+      <a href="/">Chat</a>
+      <a href="/admin">Admin</a>
+      <button id="theme-toggle" title="Toggle theme"></button>
+    </nav>
+  </header>
+
+  <div class="container">
+    <div class="controls">
+      <select id="type-select">
+        <option value="all">All Newsletters</option>
+      </select>
+      <select id="count-select">
+        <option value="1">Last 1</option>
+        <option value="2">Last 2</option>
+        <option value="3">Last 3</option>
+        <option value="5">Last 5</option>
+      </select>
+      <button id="generate-btn">Generate Digest</button>
+    </div>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <span>Fetching newsletters and generating summary...</span>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <div id="current-digest"></div>
+
+    <div class="history-header" id="history-header" style="display:none;">Previous Digests</div>
+    <div id="history-list"></div>
+
+    <div class="empty-state" id="empty-state">
+      <p>No digests yet. Click <strong>Generate Digest</strong> to summarize your latest newsletters.</p>
+    </div>
+  </div>
+
+  <script>
+    // --- Theme toggle (matches chat.html) ---
+    const themeBtn = document.getElementById('theme-toggle');
+    function applyTheme(t) {
+      document.documentElement.setAttribute('data-theme', t);
+      themeBtn.textContent = t === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+      localStorage.setItem('zeus.chat.theme', t);
+    }
+    applyTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+    themeBtn.addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme');
+      applyTheme(cur === 'dark' ? 'light' : 'dark');
+    });
+
+    // --- State ---
+    const generateBtn = document.getElementById('generate-btn');
+    const loadingEl = document.getElementById('loading');
+    const errorEl = document.getElementById('error-msg');
+    const currentDigestEl = document.getElementById('current-digest');
+    const historyHeader = document.getElementById('history-header');
+    const historyList = document.getElementById('history-list');
+    const emptyState = document.getElementById('empty-state');
+    const typeSelect = document.getElementById('type-select');
+    const countSelect = document.getElementById('count-select');
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      try {
+        var d = new Date(iso);
+        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch (e) { return iso; }
+    }
+
+    function renderDigest(d, isHistory) {
+      var card = document.createElement('div');
+      card.className = 'digest-card';
+
+      var bulletsHtml = d.bullets.map(function(b) {
+        return '<li>' + escapeHtml(b) + '</li>';
+      }).join('');
+
+      var audioHtml = '';
+      if (d.audio_url) {
+        audioHtml = '<div class="audio-section"><h3>Podcast</h3><audio controls preload="metadata"><source src="' + escapeHtml(d.audio_url) + '" type="audio/wav">Audio not supported.</audio></div>';
+      }
+
+      var adviceHtml = '';
+      if (d.advice) {
+        adviceHtml = '<div class="advice-box"><strong>Advice:</strong> ' + escapeHtml(d.advice) + '</div>';
+      }
+
+      card.innerHTML =
+        '<div class="meta">' +
+          '<span class="type-badge">' + escapeHtml(d.newsletter_type) + '</span>' +
+          '<span class="date">' + formatDate(d.generated_at) + '</span>' +
+        '</div>' +
+        '<div class="summary">' + escapeHtml(d.summary) + '</div>' +
+        '<h3>Key Highlights</h3>' +
+        '<ul class="bullets">' + bulletsHtml + '</ul>' +
+        adviceHtml +
+        audioHtml;
+
+      return card;
+    }
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(str || ''));
+      return div.innerHTML;
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.classList.add('visible');
+      setTimeout(function() { errorEl.classList.remove('visible'); }, 8000);
+    }
+
+    // --- Load existing digests ---
+    async function loadDigests() {
+      try {
+        var resp = await fetch('/api/newsletter/digests?limit=20');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var digests = data.digests || [];
+        if (digests.length === 0) {
+          emptyState.style.display = '';
+          historyHeader.style.display = 'none';
+          return;
+        }
+        emptyState.style.display = 'none';
+
+        // Show most recent as current
+        currentDigestEl.innerHTML = '';
+        currentDigestEl.appendChild(renderDigest(digests[0], false));
+
+        // Show rest as history
+        if (digests.length > 1) {
+          historyHeader.style.display = '';
+          historyList.innerHTML = '';
+          for (var i = 1; i < digests.length; i++) {
+            historyList.appendChild(renderDigest(digests[i], true));
+          }
+        } else {
+          historyHeader.style.display = 'none';
+          historyList.innerHTML = '';
+        }
+      } catch (e) {
+        console.error('Failed to load digests:', e);
+      }
+    }
+
+    // --- Generate new digest ---
+    generateBtn.addEventListener('click', async function () {
+      generateBtn.disabled = true;
+      loadingEl.classList.add('active');
+      errorEl.classList.remove('visible');
+
+      try {
+        var resp = await fetch('/api/newsletter/digest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            newsletter_type: typeSelect.value,
+            num_recent: parseInt(countSelect.value, 10)
+          })
+        });
+
+        if (!resp.ok) {
+          var err = await resp.json().catch(function() { return {}; });
+          throw new Error(err.detail || 'Failed to generate digest (HTTP ' + resp.status + ')');
+        }
+
+        var data = await resp.json();
+        emptyState.style.display = 'none';
+
+        // Move current to history
+        if (currentDigestEl.firstChild) {
+          historyHeader.style.display = '';
+          historyList.insertBefore(currentDigestEl.firstChild, historyList.firstChild);
+        }
+
+        // Show new digest
+        currentDigestEl.innerHTML = '';
+        currentDigestEl.appendChild(renderDigest(data.digest, false));
+      } catch (e) {
+        showError(e.message);
+      } finally {
+        generateBtn.disabled = false;
+        loadingEl.classList.remove('active');
+      }
+    });
+
+    // --- Populate newsletter type options from NEWSLETTER_SOURCES ---
+    // The backend doesn't expose source config yet, so we use a static list.
+    // Future: GET /api/newsletter/sources endpoint.
+
+    // --- Init ---
+    loadDigests();
+  </script>
+</body>
+</html>
