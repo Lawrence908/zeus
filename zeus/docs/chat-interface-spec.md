@@ -16,6 +16,7 @@ Provide a minimal local web chat interface for Zeus that shares the same context
 - `GET /viz` -> standalone Phaos (voice-state orb) page; links to chat
 - `POST /chat/message` -> JSON chat API (non-streaming)
 - `POST /chat/stream` -> SSE streaming (`text/event-stream`; events: `token`, `done`, `phase`, `error`)
+- `POST /voice/interact` -> multipart form: `audio` (WAV), optional `session_id`, `use_context`, `max_tokens`; returns JSON `transcript` + `assistant_message` (React chat: mic push-to-talk encodes browser audio to 16 kHz mono WAV)
 - `GET /chat/sessions` -> list recent sessions (query `limit`)
 - `GET /chat/sessions/{session_id}` -> full session (turns, `topic`, …)
 - `DELETE /chat/sessions/{session_id}` -> delete session
@@ -62,6 +63,8 @@ flowchart TD
   safety --> sessionStore["PersistTurnToSession"]
   sessionStore --> uiResponse["ReturnMessageToUI"]
 ```
+
+**Context budgeting:** Production chat uses `QueryEngine` (`zeus/core/query.py`), not a separate Oracle hop: retrieved memories and the session transcript share one heuristic budget, `ZEUS_CONTEXT_MAX_TOKENS` (⅓ / ⅔ split). Session packing and rolling-summary thresholds are `ZEUS_SESSION_*` (see `CLAUDE.md` and `.env.example`). The streaming client must persist `session_id` from the SSE `done` event so turns accumulate in one session.
 
 ## UI Requirements
 
