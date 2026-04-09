@@ -9,6 +9,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -216,10 +217,17 @@ async def generate_newsletter_digest(body: DigestRequest) -> DigestResponse:
         raise HTTPException(status_code=503, detail=str(exc))
 
     source = NewsletterSource(config=config)
-    newsletters = source.fetch_newsletters_raw(
-        newsletter_type=body.newsletter_type,
-        num_recent=body.num_recent,
-    )
+    try:
+        newsletters = await asyncio.to_thread(
+            source.fetch_newsletters_raw,
+            newsletter_type=body.newsletter_type,
+            num_recent=body.num_recent,
+        )
+    except Exception as exc:
+        logger.error("IMAP fetch failed: %s", exc)
+        raise HTTPException(
+            status_code=502, detail=f"Newsletter fetch failed: {exc}"
+        )
 
     if not newsletters:
         raise HTTPException(
