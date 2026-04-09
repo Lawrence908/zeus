@@ -81,7 +81,7 @@ Closing this spike should establish whether **Ruflo owns** multi-step swarm sema
   - **LAB-61 (mem0 Integration & Retrieval Quality)**: mem0 client + retrieval helpers exist (`zeus/memory/config.py`, `zeus/memory/search.py`), but quality eval harness / tuning loop isn’t represented as a dedicated suite yet. **Orchestration alignment:** add sub-scope or child work for **retrieval after summarization** and **execution-log / task summaries** in memory (short-term session vs long-term vector vs structured execution trail). Cross-link: **Backlog** *Mnemosyne: task execution log + rolling summaries*; **Project 7** LAB-144.
   - **LAB-56 (Privacy & Data Governance / Aegis)**: **in-process Aegis** is present (`zeus/safety/policy_engine.py`, YAML under `zeus/safety/policies/`, optional `ZEUS_AEGIS_ENABLED` / `ZEUS_AEGIS_POLICY` / `NEMOCLAW_POLICY` per `.env.example`). Chat, streaming chat, voice text responses, and `/orchestration/call` outputs can be filtered by policy. **Still open** on this ticket: privacy level tagging, PII scanning across ingest, deduplication strategy, collection versioning—see ticket scope. **Orchestration alignment:** **input validation**, **tool argument checks**, and **defensive execution** (no blind tool runs). Cross-link: **Backlog** *Aegis: tool argument verification + execution guardrails*; **Project 7** LAB-145–146; **Project 10** LAB-326 (bus pre-hook + `evaluate_payload`).
 - **Not started (no code present yet)**:
-  - **LAB-64 (Email Ingest)**: no email source/parser found under `zeus/ingest/sources/`.
+  - **LAB-64 (Email Ingest)**: General email ingest (starred/sent) not started. Newsletter-specific email ingest shipped via LAB-336.
 
 | Parent | Title                                | Labels             | Subs |
 | ------ | ------------------------------------ | ------------------ | ---- |
@@ -122,6 +122,30 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 `run_ingest()` calls `get_memory_client()` internally on every scheduled run, creating a fresh mem0/Qdrant client each time instead of reusing `app.state.memory`. Adds connection overhead and complicates clean shutdown.
 
 **Fix:** Add optional `memory` param to `IngestPipeline.__init__` and thread it through to `run_ingest`. In `main.py` lifespan, pass `memory=app.state.memory` when constructing the pipeline. Gate on **Project 6**.
+
+### LAB-336 — Newsletter Digest System ✅
+**Status (9 Apr 2026): Shipped** — merged via PR #22.
+**Files:** `zeus/ingest/sources/newsletter.py`, `zeus/core/newsletter.py`, `zeus/core/static/newsletters.html`, `tests/test_newsletter.py` (44 tests)
+
+IMAP fetch → LLM summarization → optional TTS audio → web UI. Uses `IngestSource` protocol, `_run_llm()` for env-aware Claude/Ollama, `VoiceboxTTS.synthesize()`, `asyncio.to_thread()` for blocking IMAP.
+
+| Sub | Title | Status | Notes |
+|-----|-------|--------|-------|
+| LAB-337 | Newsletter IMAP Fetch + Parse | ✅ Done | `zeus/ingest/sources/newsletter.py` |
+| LAB-338 | Newsletter Summarization Endpoint | ✅ Done | `POST /api/newsletter/digest` |
+| LAB-339 | Newsletter TTS Audio Generation | ✅ Done | Voicebox WAV, `/api/newsletter/audio/` |
+| LAB-340 | Newsletter Web UI Page | ✅ Done | `/newsletters` route, dark/light theme |
+| LAB-341 | Newsletter Schedule Skeleton + Manifest | ✅ Done | JSON manifest at `zeus/data/newsletters/` |
+
+**Extension tickets (deferred):**
+
+| Sub | Title | Priority | Notes |
+|-----|-------|----------|-------|
+| LAB-342 | Newsletter Qdrant Ingest — Wire chunks() into Mnemosyne | Medium | Store summaries + raw content in Qdrant for retrieval; cross-link LAB-61 |
+| LAB-343 | Newsletter Scheduled Digests via KAIROS | Low | `NewsletterObservationSource` for KAIROS daemon; depends on LAB-330 |
+| LAB-344 | Newsletter Multi-Source Aggregated Digest | Low | Theme-grouped bullets, source attribution, dedup overlapping stories |
+
+**Dependencies:** LAB-342 is self-contained. LAB-343 requires LAB-330 (KAIROS). LAB-344 is self-contained (prompt + model + UI changes only).
 
 
 ## Project 3 — Voice Loop
@@ -576,4 +600,7 @@ How: LAB-330 KAIROS is the implementation. Resource gates: `KAIROS_MAX_ACTIONS_P
 - **LAB-328 (Tool Pack)** blocks LAB-330 (KAIROS needs tools to act with)
 - **LAB-329 (Session Persistence)** blocks LAB-291 (Telegram sessions need persistence) and LAB-330 (KAIROS memory continuity across restarts)
 - **LAB-330 (KAIROS)** depends on LAB-332 (TaskRunner), LAB-328 (tool pack), LAB-329 (session persistence)
+- **LAB-342 (Newsletter Qdrant Ingest)** — self-contained; wires existing `chunks()` into digest flow
+- **LAB-343 (Newsletter Scheduled Digests)** depends on LAB-330 (KAIROS daemon)
+- **LAB-344 (Newsletter Multi-Source Aggregation)** — self-contained; prompt + model + UI only
 
