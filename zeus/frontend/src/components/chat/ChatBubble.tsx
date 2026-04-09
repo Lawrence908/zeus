@@ -93,6 +93,11 @@ function UserBubble({ message }: ChatBubbleProps) {
       <div className="bg-primary-container/5 border border-primary/10 rounded p-4 text-sm text-on-surface font-body leading-relaxed text-right">
         <MarkdownMessage content={message.content} />
       </div>
+      {message.source && message.source !== 'web' && (
+        <div className="flex justify-end">
+          <SourceBadge source={message.source} />
+        </div>
+      )}
     </div>
   )
 }

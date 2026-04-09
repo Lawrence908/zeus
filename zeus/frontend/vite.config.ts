@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/chat': 'http://localhost:8000',
+      '/voice': 'http://localhost:8000',
       '/api': 'http://localhost:8000',
       '/ws': { target: 'ws://localhost:8000', ws: true },
       '/static': 'http://localhost:8000',

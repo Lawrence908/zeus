@@ -12,6 +12,8 @@ interface SettingsStore {
   telegramChatIds: string
   autoSummarize: boolean
   sessionWindowSize: number
+  /** Browser SpeechSynthesis for assistant replies after voice turns (until LuxTTS/Voicebox). */
+  voiceReplyEnabled: boolean
   setTheme: (t: 'dark' | 'light') => void
   setModelEnv: (e: 'dev' | 'prod') => void
   setAegisEnabled: (v: boolean) => void
@@ -21,6 +23,7 @@ interface SettingsStore {
   setTelegramChatIds: (ids: string) => void
   setAutoSummarize: (v: boolean) => void
   setSessionWindowSize: (n: number) => void
+  setVoiceReplyEnabled: (v: boolean) => void
 }
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -35,6 +38,7 @@ export const useSettingsStore = create<SettingsStore>()(
       telegramChatIds: '',
       autoSummarize: true,
       sessionWindowSize: 16,
+      voiceReplyEnabled: false,
       setTheme: (theme) => set({ theme }),
       setModelEnv: (modelEnv) => set({ modelEnv }),
       setAegisEnabled: (aegisEnabled) => set({ aegisEnabled }),
@@ -44,6 +48,7 @@ export const useSettingsStore = create<SettingsStore>()(
       setTelegramChatIds: (telegramChatIds) => set({ telegramChatIds }),
       setAutoSummarize: (autoSummarize) => set({ autoSummarize }),
       setSessionWindowSize: (sessionWindowSize) => set({ sessionWindowSize }),
+      setVoiceReplyEnabled: (voiceReplyEnabled) => set({ voiceReplyEnabled }),
     }),
     {
       name: 'zeus-settings',

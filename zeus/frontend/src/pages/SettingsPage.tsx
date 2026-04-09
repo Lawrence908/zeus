@@ -3,13 +3,14 @@ import { useState, useEffect } from 'react'
 import { TopNav } from '../components/layout/TopNav'
 import { useSettingsStore } from '../store/settingsStore'
 
-type Section = 'model' | 'aegis' | 'telegram' | 'sessions' | 'appearance'
+type Section = 'model' | 'aegis' | 'telegram' | 'sessions' | 'voice' | 'appearance'
 
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'model', label: 'Model', icon: 'model_training' },
   { id: 'aegis', label: 'Aegis Safety', icon: 'shield_with_heart' },
   { id: 'telegram', label: 'Telegram', icon: 'send' },
   { id: 'sessions', label: 'Sessions', icon: 'chat_bubble' },
+  { id: 'voice', label: 'Voice', icon: 'mic' },
   { id: 'appearance', label: 'Appearance', icon: 'contrast' },
 ]
 
@@ -81,6 +82,7 @@ export function SettingsPage() {
     telegramChatIds, setTelegramChatIds,
     autoSummarize, setAutoSummarize,
     sessionWindowSize, setSessionWindowSize,
+    voiceReplyEnabled, setVoiceReplyEnabled,
   } = useSettingsStore()
 
   useEffect(() => {
@@ -281,6 +283,27 @@ export function SettingsPage() {
                   <span>4</span>
                   <span>32</span>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Voice section */}
+          {activeSection === 'voice' && (
+            <div>
+              <SectionTitle>Voice</SectionTitle>
+              <p className="text-sm font-body text-on-surface-variant/80 mb-4">
+                On the chat page, the microphone uses Zeus <code className="text-xs bg-surface-container-high px-1 rounded">/voice/interact</code>{' '}
+                (Whisper STT, then the same session as text). High-quality TTS will use Voicebox / LuxTTS when wired; for now you can use the browser as a stand-in.
+              </p>
+              <div className="mb-6">
+                <Toggle
+                  checked={voiceReplyEnabled}
+                  onChange={setVoiceReplyEnabled}
+                  label="Speak assistant replies (browser TTS)"
+                />
+                <p className="mt-1.5 text-xs font-body text-on-surface-variant/60">
+                  After a voice turn, read the reply with the OS voice. Disable for silent transcripts only.
+                </p>
               </div>
             </div>
           )}
