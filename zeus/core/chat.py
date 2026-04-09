@@ -81,7 +81,7 @@ async def chat_redirect():
 @router.get("/viz", include_in_schema=False)
 async def viz_redirect():
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/viz", status_code=301)
+    return RedirectResponse(url="/", status_code=301)
 
 
 @router.post("/chat/message", response_model=ChatMessageResponse)

@@ -79,7 +79,7 @@ export function PhaosOrb({ size = 'compact' }: PhaosOrbProps) {
   const coreSize = isCompact ? 88 : 220
 
   return (
-    <div className={`flex flex-col items-center gap-${isCompact ? '3' : '6'}`}>
+    <div className={`flex flex-col items-center ${isCompact ? 'gap-3' : 'gap-6'}`}>
       {/* Ghost text label (fullscreen only) */}
       {!isCompact && (
         <div

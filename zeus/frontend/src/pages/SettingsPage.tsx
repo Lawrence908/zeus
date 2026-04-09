@@ -1,5 +1,5 @@
 // zeus/frontend/src/pages/SettingsPage.tsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { TopNav } from '../components/layout/TopNav'
 import { useSettingsStore } from '../store/settingsStore'
 
@@ -23,10 +23,16 @@ interface ToggleProps {
 function Toggle({ checked, onChange, label }: ToggleProps) {
   return (
     <label className="flex items-center gap-3 cursor-pointer">
+      <input
+        type="checkbox"
+        role="switch"
+        className="sr-only"
+        checked={checked}
+        onChange={() => onChange(!checked)}
+      />
       <div
         className="relative w-10 h-5 rounded-full transition-colors"
         style={{ backgroundColor: checked ? '#00d4ff' : '#3c494e' }}
-        onClick={() => onChange(!checked)}
       >
         <div
           className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
@@ -41,7 +47,7 @@ function Toggle({ checked, onChange, label }: ToggleProps) {
 }
 
 interface FieldLabelProps {
-  children: React.ReactNode
+  children: ReactNode
   htmlFor?: string
 }
 
@@ -56,7 +62,7 @@ function FieldLabel({ children, htmlFor }: FieldLabelProps) {
   )
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <h2 className="font-headline font-semibold text-base text-on-surface mb-4 pb-2 border-b border-outline-variant/20">
       {children}

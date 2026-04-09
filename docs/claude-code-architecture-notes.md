@@ -1,24 +1,23 @@
-CLAUDE CODE LEAK
+# Claude Code Architecture Notes
 
-This is a summary of the Claude Code leak.
+Observations on AI coding agent architecture patterns, drawn from public analyses of Claude Code’s design.
 
 ## Summary
 
-* The Claude Code leak does NOT give you better models — it gives you a blueprint for better *systems*.
+* Better AI assistants come from better *systems*, not just better models.
 
+The weights, training data, and core model architecture are proprietary. What is publicly documented and more actionable:
 
-The weights, training data, and core model architecture were **not leaked**. What *was* leaked is arguably more useful for you:
-
-> how a top-tier AI coding agent is actually engineered in production.
+> how a production AI coding agent is actually engineered.
 
 ---
 
-# 🧠 What actually leaked (and why it matters)
+# Key Architecture Patterns
 
 * ~512k lines of TypeScript across ~1,900 files ([The Register][1])
 * Internal tools, slash commands, agent workflows
 * Memory systems + “self-healing” context handling
-* Experimental features like always-on agents (KAIROS) ([Techzine Global][2])
+* Experimental features like always-on agents (KAIROS-style) ([Techzine Global][2])
 
 **Key takeaway:**
 

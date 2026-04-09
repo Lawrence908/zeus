@@ -4,7 +4,10 @@ import os
 from collections.abc import Iterable
 
 # Tunable via env (LAB-126); clamped to mem0 practical range.
-MEMORY_SEARCH_TOP_K = max(1, min(20, int(os.getenv("ZEUS_MEMORY_SEARCH_TOP_K", "8"))))
+try:
+    MEMORY_SEARCH_TOP_K = max(1, min(20, int(os.getenv("ZEUS_MEMORY_SEARCH_TOP_K", "8"))))
+except (TypeError, ValueError):
+    MEMORY_SEARCH_TOP_K = 8
 
 
 def _matches_namespaces(memory_item: dict, namespaces: list[str]) -> bool:
@@ -31,7 +34,7 @@ def search_memories(
     namespaces: list[str] | None = None,
 ) -> list[dict]:
     """Search mem0 and apply lightweight namespace filtering."""
-    k = MEMORY_SEARCH_TOP_K if top_k is None else top_k
+    k = MEMORY_SEARCH_TOP_K if top_k is None else max(1, min(20, top_k))
     results = memory.search(query=query, user_id=user_id, limit=k)
     if not isinstance(results, list):
         return []

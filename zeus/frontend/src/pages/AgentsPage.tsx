@@ -113,13 +113,15 @@ export function AgentsPage() {
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
+      let buf = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {

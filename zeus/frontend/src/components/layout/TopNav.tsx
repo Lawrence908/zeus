@@ -76,11 +76,11 @@ export function TopNav() {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Telegram status */}
+      {/* Voice connection status */}
       {voiceConnected && (
         <div className="flex items-center gap-1.5 text-xs font-label font-medium text-on-surface-variant">
           <span className="w-1.5 h-1.5 rounded-full bg-primary-container pulsar" />
-          <span className="uppercase tracking-widest text-[10px]">Telegram Active</span>
+          <span className="uppercase tracking-widest text-[10px]">Voice Active</span>
         </div>
       )}
 
