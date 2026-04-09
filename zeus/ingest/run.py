@@ -163,6 +163,7 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
     from zeus.ingest.sources.gcal import GoogleCalendarSource
     from zeus.ingest.sources.git import GitSource
     from zeus.ingest.sources.markdown import MarkdownSource
+    from zeus.ingest.sources.newsletter import NewsletterSource
     from zeus.ingest.sources.obsidian import ObsidianSource
 
     sources = []
@@ -299,6 +300,23 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
             sources.append(
                 BookmarksSource(
                     export_path=export_path,
+                    user_id=args.user_id,
+                )
+            )
+
+    if args.source in ("newsletter", "all"):
+        try:
+            nl_cfg = NewsletterSource.from_env()
+        except Exception as e:
+            if args.source == "newsletter":
+                fail_hard(f"newsletter config invalid: {e}")
+            logger.warning("skipping newsletter — config invalid: %s", e)
+        else:
+            sources.append(
+                NewsletterSource(
+                    config=nl_cfg,
+                    chunk_size=args.chunk_size,
+                    chunk_overlap=args.chunk_overlap,
                     user_id=args.user_id,
                 )
             )
@@ -583,7 +601,7 @@ Examples:
     p.add_argument(
         "--source",
         choices=["context_pack", "markdown", "chatgpt", "email",
-                 "obsidian", "git", "gcal", "bookmarks", "all"],
+                 "obsidian", "git", "gcal", "bookmarks", "newsletter", "all"],
         default="all",
         help="Which source type to ingest (default: all — includes zeus/data/raw/context_pack.md)",
     )
