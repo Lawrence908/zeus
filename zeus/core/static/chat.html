@@ -692,7 +692,9 @@
       input.disabled = busy;
       sendBtn.disabled = busy;
       micBtn.disabled = busy;
-      stopBtn.hidden = !busy;
+      // Only show Stop when busy *and* a streaming AbortController is active.
+      // Non-streaming fetches have no abort signal, so the button would be a no-op.
+      stopBtn.hidden = !busy || !streamAbortController;
       stopBtn.disabled = false;
     }
 
@@ -1175,6 +1177,26 @@
 
     // ── Browser voice capture (hold-to-talk → POST /voice/interact) ────────
     const voiceStatusEl = document.getElementById('voice-status');
+    // AudioWorklet captures mic PCM (ScriptProcessorNode is deprecated).
+    const VOICE_PCM_WORKLET = `
+class ZeusPcmCaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) return true;
+    const channel = input[0];
+    const len = channel.length;
+    const i16 = new Int16Array(len);
+    for (let i = 0; i < len; i++) {
+      const s = channel[i];
+      i16[i] = Math.max(-32768, Math.min(32767, Math.round(s * 32768)));
+    }
+    this.port.postMessage(i16.buffer, [i16.buffer]);
+    return true;
+  }
+}
+registerProcessor('zeus-pcm-capture', ZeusPcmCaptureProcessor);
+`;
+
     let voiceAudioCtx = null;
     let voiceStream = null;
     let voiceProcessor = null;
@@ -1253,21 +1275,34 @@
       }
       const targetRate = 16000;
       voiceAudioCtx = new AudioContext({ sampleRate: targetRate });
+      const workletBlob = new Blob([VOICE_PCM_WORKLET], { type: 'application/javascript' });
+      const workletUrl = URL.createObjectURL(workletBlob);
+      try {
+        await voiceAudioCtx.audioWorklet.addModule(workletUrl);
+      } finally {
+        URL.revokeObjectURL(workletUrl);
+      }
       const source = voiceAudioCtx.createMediaStreamSource(voiceStream);
-      voiceProcessor = voiceAudioCtx.createScriptProcessor(4096, 1, 1);
+      voiceProcessor = new AudioWorkletNode(voiceAudioCtx, 'zeus-pcm-capture', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        channelCount: 1,
+      });
       voicePCMChunks = [];
       voiceRecording = true;
-      voiceProcessor.onaudioprocess = (e) => {
+      voiceProcessor.port.onmessage = (e) => {
         if (!voiceRecording) return;
-        const f32 = e.inputBuffer.getChannelData(0);
-        const i16 = new Int16Array(f32.length);
-        for (let i = 0; i < f32.length; i++) {
-          i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32768)));
-        }
-        voicePCMChunks.push(i16);
+        const i16 = new Int16Array(e.data);
+        const copy = new Int16Array(i16.length);
+        copy.set(i16);
+        voicePCMChunks.push(copy);
       };
+      const mute = voiceAudioCtx.createGain();
+      mute.gain.value = 0;
       source.connect(voiceProcessor);
-      voiceProcessor.connect(voiceAudioCtx.destination);
+      voiceProcessor.connect(mute);
+      mute.connect(voiceAudioCtx.destination);
       micBtn.classList.add('recording');
       setVoiceStatus('Recording…');
       publishVoiceState('listening');

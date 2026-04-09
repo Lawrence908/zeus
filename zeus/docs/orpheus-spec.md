@@ -19,8 +19,8 @@ WhisperLiveKit (GPU, SimulStreaming)
 Silence / VAD end-of-utterance
     │  final transcript
     ▼
-Oracle /context/query (FastAPI → mnemosyne)
-    │  context block (≤ 2048 tokens)
+Zeus Core — mnemosyne retrieval + session transcript (QueryEngine / Oracle paths)
+    │  heuristic budget: `ZEUS_CONTEXT_MAX_TOKENS` (default 6144; see `CLAUDE.md`)
     ▼
 LLM (Claude API in dev / Qwen2.5-7B in prod)
     │  response tokens (streaming)

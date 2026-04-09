@@ -263,7 +263,7 @@ curl -s localhost:8000/orchestration/status | python3 -m json.tool
 **Tasks:**
 
 1. Add session model (`session_id`, turns, summary, metadata) — done in `zeus/core/sessions.py`
-2. Store recent turns and rolling summaries — in-memory + LLM rolling summary past 20 turns
+2. Store recent turns and rolling summaries — in-memory + env-driven token budget (`ZEUS_CONTEXT_MAX_TOKENS`) and rolling summary when `ZEUS_SESSION_SUMMARY_AT_TURNS` is reached (see `zeus/core/sessions.py`, `CLAUDE.md`)
 3. Make Oracle session-aware (`/context/query` can include `session_id`) — deferred; chat/query path is session-aware
 4. Add session resume and expiration behavior — resume via `GET /chat/sessions`, `GET /chat/sessions/{id}`; no TTL yet
 5. Persist session artifacts in memory layer (or SQLite sidecar) — deferred; `SessionStorage` protocol ready for swap-in

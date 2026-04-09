@@ -129,6 +129,46 @@ def get_memory_config() -> dict[str, Any]:
 
 
 _patched = False
+_embed_patched = False
+
+
+def _patch_ollama_embedding() -> None:
+    """Patch mem0's OllamaEmbedding to set a connect/read timeout on the
+    underlying httpx client, preventing indefinite hangs when Ollama is
+    overloaded or unresponsive.
+
+    Controlled by OLLAMA_EMBED_TIMEOUT_SEC (default: 120).
+    Set to 0 to disable the patch (no timeout).
+    """
+    global _embed_patched
+    if _embed_patched:
+        return
+    _embed_patched = True
+
+    raw = os.getenv("OLLAMA_EMBED_TIMEOUT_SEC", "120").strip()
+    try:
+        timeout_sec = float(raw)
+    except ValueError:
+        timeout_sec = 120.0
+    if timeout_sec <= 0:
+        return
+
+    try:
+        from mem0.embeddings.ollama import OllamaEmbedding
+        from ollama import Client
+    except ImportError:
+        return
+
+    _orig_init = OllamaEmbedding.__init__
+
+    def _init_with_timeout(self, config=None):  # type: ignore[override]
+        _orig_init(self, config)
+        self.client = Client(
+            host=self.config.ollama_base_url,
+            timeout=timeout_sec,
+        )
+
+    OllamaEmbedding.__init__ = _init_with_timeout  # type: ignore[method-assign]
 
 
 def _patch_anthropic_llm():
@@ -196,5 +236,6 @@ def get_memory_client():
     from mem0 import Memory
 
     _patch_anthropic_llm()
+    _patch_ollama_embedding()
     config = get_memory_config()
     return Memory.from_config(config)

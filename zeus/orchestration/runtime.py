@@ -69,7 +69,11 @@ class AgentRuntime:
             raise FileNotFoundError(f"Ruflo config not found: {self._config_path}")
 
         with open(self._config_path) as f:
-            self._ruflo_config = yaml.safe_load(f)
+            loaded = yaml.safe_load(f)
+
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Ruflo config {self._config_path} is empty or not a YAML mapping")
+        self._ruflo_config = loaded
 
         for entry in self._ruflo_config.get("agents", []):
             name = entry["name"]
@@ -102,6 +106,9 @@ class AgentRuntime:
     def _parse_agent_yaml(self, path: Path, auto_start: bool) -> AgentDefinition:
         with open(path) as f:
             raw = yaml.safe_load(f)
+
+        if not isinstance(raw, dict) or "name" not in raw:
+            raise ValueError(f"Agent YAML {path} is empty or missing required 'name' field")
 
         # Model block can be a plain string or {dev: ..., prod: ...}
         model_block = raw.get("model", {})

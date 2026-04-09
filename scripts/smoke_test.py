@@ -122,7 +122,7 @@ async def check_embed_model() -> CheckResult:
             r = await client.post(
                 f"{OLLAMA_URL}/api/embeddings",
                 json={"model": EMBED_MODEL, "prompt": "zeus smoke test"},
-                timeout=30,
+                timeout=120.0,
             )
         latency = (time.monotonic() - t0) * 1000
 

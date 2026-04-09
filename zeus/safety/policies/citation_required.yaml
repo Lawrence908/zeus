@@ -1,0 +1,11 @@
+name: citation_required
+description: Research agent — baseline safety; citation rules belong in prompts/tools.
+rules:
+  - name: no_rm_rf_root
+    pattern: 'rm\s+-rf\s+/(\s|$)'
+    action: reject
+    message: "Unsafe system instructions are not allowed."
+  - name: hardcoded_credential
+    pattern: '(?i)(api[_-]?key|password|secret)\s*=\s*[''"][^''"]{8,}[''"]'
+    action: flag_for_review
+    message: ""

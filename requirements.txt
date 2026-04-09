@@ -7,8 +7,19 @@ mem0ai>=0.1.0
 ollama>=0.4.0
 qdrant-client>=1.9.0
 python-dotenv>=1.0.0
+rich>=13.0.0
 anthropic>=0.30.0
 websockets>=12.0
 mcp>=1.0.0
 python-multipart>=0.0.14
 pyyaml>=6.0
+# Sprint 9 — Observability + Scheduled Ingest
+apscheduler>=3.10.0
+# Sprint 10 — Additional Ingest Sources
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.2.0
+beautifulsoup4>=4.12.0
+gitpython>=3.1.0
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.2.0
+pytest>=8.0.0

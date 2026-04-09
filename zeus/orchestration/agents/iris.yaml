@@ -32,3 +32,19 @@ config:
       path: "zeus/data/raw/chatgpt_export.json"
     - type: context_pack
       path: "zeus/data/raw/context_pack.md"
+    # Sprint 10 sources (require env vars / files to be present)
+    - type: obsidian
+      vault_path: "${OBSIDIAN_VAULT_PATH}"
+      exclude_dirs: [".obsidian", "templates", "archive"]
+    - type: git
+      repo_path: "."
+      author_email: "${GIT_AUTHOR_EMAIL}"
+      max_commits: 500
+    - type: gcal
+      credentials_path: "zeus/data/gcal_credentials.json"
+      token_path: "zeus/data/gcal_token.json"
+      days_back: 90
+      days_forward: 30
+    - type: bookmarks
+      export_path: "zeus/data/raw/bookmarks.html"
+      fetch_content: false

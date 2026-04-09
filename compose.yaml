@@ -1,6 +1,9 @@
 # zeus/compose.yaml — Zeus service stack
 # Usage: docker compose up -d
-# This base file is CPU-safe. For GPU passthrough, include compose.gpu.yaml.
+#
+# Ollama is configured for one NVIDIA GPU via deploy.resources (requires
+# nvidia-container-toolkit on the host). For a CPU-only host, remove the
+# `deploy:` block under `ollama` or use a machine without the NVIDIA stack.
 
 services:
   # --- Mnemosyne: Vector DB ---
@@ -14,6 +17,8 @@ services:
       - qdrant_data:/qdrant/storage
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
+      # Fewer lines than default INFO (every HTTP request); warnings/errors still show
+      - QDRANT__LOG_LEVEL=${QDRANT_LOG_LEVEL:-WARN}
     restart: unless-stopped
     networks:
       - web
@@ -31,11 +36,22 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
+      # Zeus uses Ollama for both nomic-embed-text and the chat model; 1 forces
+      # constant unload/reload on the GPU (very slow). 2 fits ~10GB cards (Qwen 7B Q4 + embed).
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      # Quieter llama.cpp / GGUF load traces in logs (unset or "info" when debugging loads)
+      - GGML_LOG_LEVEL=${OLLAMA_GGML_LOG_LEVEL:-error}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ollama", "list"]
-      interval: 10s
+      interval: 30s
       timeout: 5s
       retries: 3
     networks:
@@ -74,6 +90,12 @@ services:
   # Not defined here yet (no stable public image). Run Voicebox on the same host
   # as Orpheus and point VOICEBOX_URL at it (see zeus/docs/orpheus-spec.md).
 
+  # --- Aegis: NemoClaw + OpenShell (LAB-119) ---
+  # Not a compose service: NVIDIA ships NemoClaw via host installer (Node + Docker
+  # sandboxes + OpenShell). See https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
+  # Zeus applies in-process YAML policies from zeus/safety/policies/ when
+  # ZEUS_AEGIS_ENABLED=1. Optional NEMOCLAW_RUNTIME_URL reserved for a future HTTP sidecar.
+
   # --- Zeus Core: FastAPI API bus ---
   zeus-core:
     build:
@@ -95,9 +117,10 @@ services:
       ollama:
         condition: service_healthy
     restart: unless-stopped
+    # /health = process up only. /status still probes Qdrant + Ollama (use for real checks).
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/status', timeout=3)"]
-      interval: 10s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
       timeout: 5s
       retries: 3
     networks:

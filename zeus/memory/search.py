@@ -1,6 +1,13 @@
 """zeus/memory/search.py — Mnemosyne search helpers."""
 
+import os
 from collections.abc import Iterable
+
+# Tunable via env (LAB-126); clamped to mem0 practical range.
+try:
+    MEMORY_SEARCH_TOP_K = max(1, min(20, int(os.getenv("ZEUS_MEMORY_SEARCH_TOP_K", "8"))))
+except (TypeError, ValueError):
+    MEMORY_SEARCH_TOP_K = 8
 
 
 def _matches_namespaces(memory_item: dict, namespaces: list[str]) -> bool:
@@ -23,17 +30,18 @@ def search_memories(
     memory,
     query: str,
     user_id: str,
-    top_k: int = 5,
+    top_k: int | None = None,
     namespaces: list[str] | None = None,
 ) -> list[dict]:
     """Search mem0 and apply lightweight namespace filtering."""
-    results = memory.search(query=query, user_id=user_id, limit=top_k)
+    k = MEMORY_SEARCH_TOP_K if top_k is None else max(1, min(20, top_k))
+    results = memory.search(query=query, user_id=user_id, limit=k)
     if not isinstance(results, list):
         return []
 
     namespace_filters = namespaces or []
     filtered = [item for item in results if _matches_namespaces(item, namespace_filters)]
-    return filtered[:top_k]
+    return filtered[:k]
 
 
 def format_context_block(memories: Iterable[dict], max_tokens: int = 2048) -> tuple[str, int]:
@@ -84,20 +92,18 @@ def format_context_block(memories: Iterable[dict], max_tokens: int = 2048) -> tu
 
 
 def get_profile_facts(memory, user_id: str, top_k: int = 8) -> list[str]:
-    """Retrieve stable user profile facts with priority for context_pack memories."""
-    preferred = search_memories(
-        memory=memory,
-        query="stable profile facts identity goals preferences current projects",
-        user_id=user_id,
-        top_k=max(top_k * 2, 8),
-        namespaces=["context_pack"],
-    )
-    fallback = search_memories(
-        memory=memory,
-        query="stable profile facts identity goals preferences current projects",
-        user_id=user_id,
-        top_k=max(top_k * 2, 8),
-    )
+    """Retrieve stable user profile facts with priority for context_pack memories.
+
+    One vector search + in-process split avoids a duplicate Ollama embed of the same
+    query (mem0 embeds per search; Zeus alternates embed/chat models on the GPU).
+    """
+    q = "stable profile facts identity goals preferences current projects"
+    fetch_n = max(top_k * 2, 8)
+    raw = memory.search(query=q, user_id=user_id, limit=fetch_n)
+    if not isinstance(raw, list):
+        raw = []
+    preferred = [m for m in raw if _matches_namespaces(m, ["context_pack"])]
+    fallback = [m for m in raw if not _matches_namespaces(m, ["context_pack"])]
 
     # Keep order stable while de-duplicating by text.
     seen: set[str] = set()

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from zeus.core.query import QueryEngine, _active_model_name
@@ -37,6 +37,7 @@ class ChatMessageResponse(BaseModel):
     model_used: str
     token_estimate: int
     topic: str | None = None
+    aegis_flags: list[str] = Field(default_factory=list)
 
 
 class ChatSessionSummary(BaseModel):
@@ -53,6 +54,10 @@ class ChatSessionsListResponse(BaseModel):
     sessions: list[ChatSessionSummary]
 
 
+class ChatMessagesResponse(BaseModel):
+    messages: list[dict[str, Any]]
+
+
 def _session_manager(request: Request) -> SessionManager:
     sm = getattr(request.app.state, "session_manager", None)
     if sm is None:
@@ -67,20 +72,11 @@ def _query_engine(request: Request) -> QueryEngine:
     return qe
 
 
-@router.get("/chat")
-async def chat_page() -> FileResponse:
-    path = _STATIC / "chat.html"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="chat.html not found")
-    return FileResponse(path, media_type="text/html")
+@router.get("/chat", include_in_schema=False)
+async def chat_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/", status_code=301)
 
-
-@router.get("/viz")
-async def viz_page() -> FileResponse:
-    path = _STATIC / "viz" / "viz.html"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="viz.html not found")
-    return FileResponse(path, media_type="text/html")
 
 
 @router.post("/chat/message", response_model=ChatMessageResponse)
@@ -110,6 +106,7 @@ async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessag
         model_used=result.model_used,
         token_estimate=result.token_estimate,
         topic=result.topic,
+        aegis_flags=result.aegis_flags,
     )
 
 @router.post("/voice/interact")
@@ -191,6 +188,7 @@ async def voice_interact(
         "latency_ms": result.latency_ms,
         "context_sources": result.context_sources,
         "topic": topic,
+        "aegis_flags": result.aegis_flags,
     }
 
 
@@ -304,6 +302,54 @@ async def list_chat_sessions(
         for s in recent
     ]
     return ChatSessionsListResponse(sessions=summaries)
+
+
+@router.post("/chat/sessions", response_model=ChatSessionSummary)
+async def create_chat_session(request: Request) -> ChatSessionSummary:
+    """Create an empty session (React SPA \"+ New Session\" uses POST here)."""
+    sm = _session_manager(request)
+    session = await sm.create(metadata={"source": "chat"})
+    return ChatSessionSummary(
+        id=session.id,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        turn_count=0,
+        summary=None,
+        topic="New chat",
+        metadata=session.metadata,
+    )
+
+
+@router.get("/chat/sessions/{session_id}/messages", response_model=ChatMessagesResponse)
+async def get_chat_session_messages(session_id: str, request: Request) -> ChatMessagesResponse:
+    """Return turns as UI messages for session restore."""
+    sm = _session_manager(request)
+    session = await sm.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    out: list[dict[str, Any]] = []
+    for i, turn in enumerate(session.turns):
+        ts_ms = int(turn.timestamp * 1000)
+        out.append(
+            {
+                "id": f"{session_id}-u-{i}",
+                "role": "user",
+                "content": turn.user,
+                "timestamp": ts_ms,
+                "source": getattr(turn, "source", None) or session.metadata.get("source", "web"),
+            }
+        )
+        out.append(
+            {
+                "id": f"{session_id}-a-{i}",
+                "role": "assistant",
+                "content": turn.assistant,
+                "timestamp": ts_ms,
+                "source": getattr(turn, "source", None) or session.metadata.get("source", "web"),
+                "context_sources": turn.context_sources,
+            }
+        )
+    return ChatMessagesResponse(messages=out)
 
 
 @router.get("/chat/sessions/{session_id}", response_model=Session)

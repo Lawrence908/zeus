@@ -1,16 +1,21 @@
 # zeus/core/main.py — Zeus Core API bus and health endpoint
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from zeus.api.main import router as oracle_router
+from zeus.core.admin import init_query_log
+from zeus.core.admin import router as admin_router
 from zeus.core.chat import router as chat_router
+from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.query import QueryEngine, _run_llm
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
@@ -18,6 +23,7 @@ from zeus.memory.config import get_memory_client
 from zeus.orchestration.bus import router as orchestration_router
 from zeus.orchestration.hooks import build_default_registry
 from zeus.orchestration.runtime import AgentRuntime
+from zeus.safety.integration import register_aegis_bus_post_hook
 from zeus.voice.state import VoiceStateHub
 
 ZEUS_VERSION = "0.1.0"
@@ -57,6 +63,7 @@ async def check_service(client: httpx.AsyncClient, name: str, url: str) -> Servi
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.boot_time = BOOT_TIME
     app.state.http_client = httpx.AsyncClient()
     app.state.memory = get_memory_client()
     app.state.voice_hub = VoiceStateHub()
@@ -74,52 +81,105 @@ async def lifespan(app: FastAPI):
     runtime.load()
     await runtime.start_all_auto()
     app.state.agent_runtime = runtime
-    app.state.hook_registry = build_default_registry()
+
+    orch_hooks = build_default_registry()
+    register_aegis_bus_post_hook(orch_hooks)
+    app.state.orchestration_hooks = orch_hooks
+
+    # Observability — query log ring buffer
+    init_query_log(app)
+
+    # Scheduled ingest (APScheduler)
+    # Sources are empty by default; populate via INGEST_* env vars or CLI.
+    # The scheduler still runs on schedule — it just skips if no sources are wired.
+    app.state.ingest_scheduler = None
+    try:
+        from zeus.ingest.pipeline import IngestPipeline
+        from zeus.ingest.scheduler import build_scheduler
+        from zeus.memory.consolidate import MemoryConsolidator
+
+        ingest_pipeline = IngestPipeline(sources=[], memory=app.state.memory)
+        consolidator = MemoryConsolidator(app.state.memory)
+        scheduler = build_scheduler(ingest_pipeline, consolidator)
+        scheduler.start()
+        app.state.ingest_scheduler = scheduler
+    except Exception as exc:
+        import logging
+        logging.getLogger("zeus").warning("scheduler not started: %s", exc)
 
     yield
+
+    ingest_scheduler = getattr(app.state, "ingest_scheduler", None)
+    if ingest_scheduler is not None:
+        ingest_scheduler.shutdown(wait=False)
+
     await app.state.http_client.aclose()
 
+    mem = getattr(app.state, "memory", None)
+    close_fn = getattr(mem, "close", None) if mem is not None else None
+    if callable(close_fn):
+        try:
+            close_fn()
+        except Exception:
+            pass
 
-app = FastAPI(
-    title="Zeus Core",
-    version=ZEUS_VERSION,
-    lifespan=lifespan,
-)
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_SPA_DIR = _STATIC_DIR / "app"
+_SPA_INDEX = _SPA_DIR / "index.html"
+
+app = FastAPI(title="Zeus Core", version=ZEUS_VERSION, lifespan=lifespan)
+app.add_middleware(QueryLoggingMiddleware)
+
 app.include_router(oracle_router)
-app.include_router(voice_state_router)
+app.include_router(admin_router)
 app.include_router(chat_router)
+app.include_router(voice_state_router)
 app.include_router(orchestration_router)
 
-_static_dir = Path(__file__).resolve().parent / "static"
-if _static_dir.is_dir():
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+app.mount(
+    "/static",
+    StaticFiles(directory=str(_STATIC_DIR)),
+    name="static",
+)
 
-
-@app.get("/status", response_model=StatusResponse)
-async def status():
-    """Health check: reports version, uptime, and reachability of all services."""
-    client = app.state.http_client
-
-    services = await check_service(client, "qdrant", f"{QDRANT_URL}/healthz")
-    ollama = await check_service(client, "ollama", f"{OLLAMA_URL}/api/tags")
-
-    return StatusResponse(
-        version=ZEUS_VERSION,
-        environment=ZEUS_ENV,
-        uptime_seconds=round(time.time() - BOOT_TIME, 1),
-        services=[services, ollama],
+# Serve React SPA assets (built by zeus/frontend via `npm run build`)
+if (_SPA_DIR / "assets").is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_SPA_DIR / "assets")),
+        name="spa-assets",
     )
 
 
-@app.get("/")
-async def root():
-    return {
-        "name": "zeus",
-        "version": ZEUS_VERSION,
-        "env": ZEUS_ENV,
-        "ui": {
-            "chat": "/chat",
-            "phaos_viz": "/viz",
-            "voice_state_ws": "/ws/voice-state",
-        },
-    }
+@app.get("/health", include_in_schema=False)
+async def health() -> dict[str, str]:
+    """Liveness only — for Docker/orchestrator probes. Does not call Qdrant or Ollama."""
+    return {"status": "ok"}
+
+
+@app.get("/status", response_model=StatusResponse)
+async def status(request: Request) -> StatusResponse:
+    client: httpx.AsyncClient = request.app.state.http_client
+    qdrant_url = f"{QDRANT_URL.rstrip('/')}/readyz"
+    ollama_url = f"{OLLAMA_URL.rstrip('/')}/api/tags"
+    qdrant, ollama = await asyncio.gather(
+        check_service(client, "qdrant", qdrant_url),
+        check_service(client, "ollama", ollama_url),
+    )
+    boot = getattr(request.app.state, "boot_time", BOOT_TIME)
+    return StatusResponse(
+        version=ZEUS_VERSION,
+        environment=ZEUS_ENV,
+        uptime_seconds=round(time.time() - boot, 1),
+        services=[qdrant, ollama],
+    )
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def spa_fallback(path: str) -> FileResponse:
+    """Serve React SPA for all non-API routes. Registered last so it never shadows API routes."""
+    if _SPA_INDEX.is_file():
+        return FileResponse(str(_SPA_INDEX), media_type="text/html")
+    from fastapi import HTTPException
+    raise HTTPException(status_code=503, detail="Frontend not built. Run `npm run build` in zeus/frontend/.")
