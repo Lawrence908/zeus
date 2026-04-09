@@ -8,7 +8,9 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
+
+import yaml
 
 from zeus.ingest.pipeline import chunk_text
 from zeus.ingest.types import Chunk
@@ -24,19 +26,21 @@ _HEADING_SPLIT_RE = re.compile(r"(?=^#{1,3} )", re.MULTILINE)
 _DEFAULT_EXCLUDE = {".obsidian", "templates", "archive", ".trash"}
 
 
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Return (metadata_dict, body_without_frontmatter)."""
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """Return (metadata_dict, body_without_frontmatter). YAML lists and nested keys supported."""
     match = _FRONTMATTER_RE.match(text)
     if not match:
         return {}, text
 
-    meta: dict = {}
-    for line in match.group(1).splitlines():
-        if ":" in line:
-            key, _, val = line.partition(":")
-            meta[key.strip()] = val.strip()
-
+    raw = match.group(1).strip()
     body = text[match.end():].strip()
+
+    try:
+        loaded = yaml.safe_load(raw)
+        meta: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
+    except yaml.YAMLError:
+        meta = {}
+
     return meta, body
 
 
@@ -89,7 +93,8 @@ class ObsidianSource:
             is_daily = bool(_DAILY_NOTE_RE.match(path.stem))
             rel_path = str(path.relative_to(self.vault_path))
 
-            title = frontmatter.get("title") or path.stem
+            title_raw = frontmatter.get("title")
+            title = str(title_raw).strip() if title_raw is not None else path.stem
             meta_base = {
                 "file": rel_path,
                 "title": title,

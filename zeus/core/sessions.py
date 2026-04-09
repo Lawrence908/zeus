@@ -1,6 +1,7 @@
 # zeus/core/sessions.py — Multi-turn session storage and rolling summaries
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -49,10 +50,35 @@ class Session(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-TURN_SUMMARY_THRESHOLD = 20
-KEEP_RECENT_TURNS = 10
-
 LlmFn = Callable[..., Awaitable[str]]
+
+
+def _safe_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _session_keep_raw_turns() -> int:
+    """Full turns retained in storage after a rolling summary (default 150)."""
+    return max(10, _safe_int_env("ZEUS_SESSION_KEEP_RAW_TURNS", 150))
+
+
+def _session_summary_at_turns() -> int:
+    """When stored turn count reaches this, older turns are summarized and compacted."""
+    keep = _session_keep_raw_turns()
+    raw = _safe_int_env("ZEUS_SESSION_SUMMARY_AT_TURNS", 200)
+    return max(keep + 1, raw)
+
+
+def _session_pack_max_turns() -> int:
+    """
+    When building the prompt, only consider at most this many newest stored turns
+    before token packing (avoids scanning huge sessions). 0 = no limit.
+    """
+    v = _safe_int_env("ZEUS_SESSION_PACK_MAX_TURNS", 150)
+    return 0 if v <= 0 else v
 
 
 def _truncate_to_token_budget(text: str, max_tokens: int) -> str:
@@ -62,6 +88,48 @@ def _truncate_to_token_budget(text: str, max_tokens: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars].rstrip() + "\n[truncated]"
+
+
+def _turn_block(t: Turn) -> str:
+    return f"User: {t.user}\nAssistant: {t.assistant}"
+
+
+def _pack_recent_turns(
+    turns: list[Turn],
+    *,
+    max_tokens: int,
+    pack_max_turns: int,
+) -> str:
+    """
+    Newest-first greedy pack into a char budget (~4 chars per token), then truncate.
+    """
+    if max_tokens <= 0 or not turns:
+        return ""
+    max_chars = max_tokens * 4
+    if pack_max_turns > 0:
+        candidates = turns[-pack_max_turns:]
+    else:
+        candidates = turns
+
+    selected: list[Turn] = []
+    used = 0
+    for t in reversed(candidates):
+        block = _turn_block(t)
+        sep_len = 2 if selected else 0
+        need = len(block) + sep_len
+        if used + need <= max_chars:
+            selected.append(t)
+            used += need
+        elif not selected:
+            return _truncate_to_token_budget(block, max_tokens)
+        else:
+            break
+
+    selected.reverse()
+    if not selected:
+        return ""
+    recent_block = "\n\n".join(_turn_block(t) for t in selected)
+    return _truncate_to_token_budget(recent_block, max_tokens)
 
 
 @runtime_checkable
@@ -149,7 +217,7 @@ class SessionManager:
             session.topic = topic_from_first_message(first_user)
         session.updated_at = time.time()
         await self._storage.save(session)
-        if len(session.turns) > TURN_SUMMARY_THRESHOLD:
+        if len(session.turns) >= _session_summary_at_turns():
             await self.generate_summary(session_id)
             session = await self._storage.load(session_id)
             if session is None:
@@ -160,7 +228,6 @@ class SessionManager:
         self,
         session_id: str,
         *,
-        max_turns: int = 10,
         max_tokens: int = 4096,
     ) -> str:
         session = await self._storage.load(session_id)
@@ -176,10 +243,11 @@ class SessionManager:
             if summary_block.strip():
                 parts.append(f"## Earlier conversation (summary)\n{summary_block.strip()}")
 
-        recent = session.turns[-max_turns:]
-        turn_blocks = [f"User: {t.user}\nAssistant: {t.assistant}" for t in recent]
-        recent_block = "\n\n".join(turn_blocks)
-        recent_block = _truncate_to_token_budget(recent_block, turns_token_budget)
+        recent_block = _pack_recent_turns(
+            session.turns,
+            max_tokens=turns_token_budget,
+            pack_max_turns=_session_pack_max_turns(),
+        )
         if recent_block.strip():
             parts.append("## Recent turns\n" + recent_block.strip())
 
@@ -189,10 +257,13 @@ class SessionManager:
         session = await self._storage.load(session_id)
         if session is None:
             return ""
-        if len(session.turns) <= TURN_SUMMARY_THRESHOLD:
+
+        keep = _session_keep_raw_turns()
+        summary_at = _session_summary_at_turns()
+        if len(session.turns) < summary_at:
             return session.summary or ""
 
-        to_summarize = session.turns[:-KEEP_RECENT_TURNS]
+        to_summarize = session.turns[:-keep]
         if not to_summarize:
             return session.summary or ""
 
@@ -228,7 +299,7 @@ class SessionManager:
             new_summary = (session.summary or "") + "\n\n" + transcript[:2000]
 
         session.summary = (new_summary or "").strip() or session.summary
-        session.turns = session.turns[-KEEP_RECENT_TURNS:]
+        session.turns = session.turns[-keep:]
         session.updated_at = time.time()
         await self._storage.save(session)
         return session.summary or ""

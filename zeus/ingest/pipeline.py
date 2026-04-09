@@ -10,7 +10,7 @@ import sys
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, AsyncIterator, Literal, Protocol
+from typing import TYPE_CHECKING, Any, AsyncIterator, Literal, Protocol
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -140,6 +140,15 @@ def _tally_mem0_result(result: dict, ops: dict[str, int]) -> None:
             ops[event] += 1
 
 
+def _resolve_memory(dry_run: bool, injected: Any | None) -> Any | None:
+    """Return mem0 client for live ingest, or None for dry_run / missing client."""
+    if dry_run:
+        return None
+    if injected is not None:
+        return injected
+    return get_memory_client()
+
+
 def _use_rich_progress(ingest_ui: Literal["auto", "rich", "plain"]) -> bool:
     if ingest_ui == "plain":
         return False
@@ -153,6 +162,7 @@ async def run_ingest(
     chunk_size: int = 512,
     dry_run: bool = False,
     *,
+    memory: Any | None = None,
     ingest_ui: Literal["auto", "rich", "plain"] = "auto",
     console: Console | None = None,
 ) -> list[IngestResult]:
@@ -167,7 +177,7 @@ async def run_ingest(
     stays on plain logging). Pass console when using Rich logging + progress
     together so output does not garble.
     """
-    memory = None if dry_run else get_memory_client()
+    memory = _resolve_memory(dry_run, memory)
     results: list[IngestResult] = []
     use_progress = _use_rich_progress(ingest_ui)
     progress_cm = nullcontext(None)
@@ -382,10 +392,18 @@ class IngestPipeline:
     The scheduler calls run_all_sources() on the configured interval.
     """
 
-    def __init__(self, sources: list[IngestSource], chunk_size: int = 512, dry_run: bool = False) -> None:
+    def __init__(
+        self,
+        sources: list[IngestSource],
+        chunk_size: int = 512,
+        dry_run: bool = False,
+        *,
+        memory: Any | None = None,
+    ) -> None:
         self._sources = list(sources)
         self._chunk_size = chunk_size
         self._dry_run = dry_run
+        self._memory = memory
 
     async def run_all_sources(self, incremental: bool = True) -> list["IngestResult"]:
         if not self._sources:
@@ -394,7 +412,12 @@ class IngestPipeline:
         if incremental:
             # incremental mode is not yet implemented — full ingest runs regardless
             logger.debug("IngestPipeline: incremental mode requested (currently a no-op)")
-        return await run_ingest(self._sources, chunk_size=self._chunk_size, dry_run=self._dry_run)
+        return await run_ingest(
+            self._sources,
+            chunk_size=self._chunk_size,
+            dry_run=self._dry_run,
+            memory=self._memory,
+        )
 
 
 def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]:

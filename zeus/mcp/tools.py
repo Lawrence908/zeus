@@ -16,7 +16,7 @@ def _allow_write() -> bool:
     return os.getenv("ZEUS_MCP_ALLOW_WRITE", "false").strip().lower() in {"1", "true", "yes", "y"}
 
 
-async def zeus_query(*, query: str, top_k: int = 5, max_tokens: int = 1024) -> dict[str, Any]:
+async def zeus_query(*, query: str, top_k: int = 8, max_tokens: int = 1024) -> dict[str, Any]:
     async with httpx.AsyncClient() as client:
         r = await client.post(
             f"{_core_url()}/context/query",
@@ -61,4 +61,44 @@ async def zeus_remember(*, text: str, namespace: str = "general", tags: list[str
         r.raise_for_status()
         data = r.json() or {}
         return {"memory_id": str(data.get("memory_id") or ""), "status": str(data.get("status") or "ok")}
+
+
+async def zeus_ingest_trigger(*, source: str = "all") -> dict[str, Any]:
+    if not _allow_write():
+        raise PermissionError("ZEUS_MCP_ALLOW_WRITE is false; zeus_ingest_trigger disabled")
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{_core_url()}/ingest/trigger",
+            json={"source": source},
+            timeout=120.0,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        return {
+            "status": str(data.get("status") or "ok"),
+            "chunks_indexed": int(data.get("chunks_indexed") or 0),
+            "sources_run": list(data.get("sources_run") or []),
+        }
+
+
+async def zeus_memory_search(*, query: str, limit: int = 5) -> dict[str, Any]:
+    lim = max(1, min(20, limit))
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{_core_url()}/memory/search",
+            json={"query": query, "limit": lim},
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        results = data.get("results") or []
+        lines: list[str] = []
+        for i, row in enumerate(results, 1):
+            score = float(row.get("score") or 0.0)
+            text = str(row.get("text") or "")[:200]
+            src = str(row.get("source") or "unknown")
+            lines.append(f"{i}. [{score:.3f}] ({src})\n   {text}")
+        summary = "\n".join(lines) if lines else "No relevant memories found."
+        return {"summary": summary, "count": len(results), "results": results}
 

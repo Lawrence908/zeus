@@ -1,10 +1,12 @@
 # zeus/core/admin.py — Admin API routes and dashboard (Sprint 9b-9c / LAB-148-149)
 # Exposes /admin/metrics, /admin/ingest/stats, and /admin HTML dashboard.
+import os
 import time
 from collections import deque
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 
@@ -103,6 +105,48 @@ async def ingest_stats(request: Request) -> dict[str, Any]:
 
     except Exception as exc:
         return {"error": str(exc)}
+
+
+@router.get("/diagnostics")
+async def admin_diagnostics(request: Request) -> dict[str, Any]:
+    """
+    Container-scoped diagnostics plus Ollama /api/ps (models loaded in Ollama).
+    Does not enumerate arbitrary host processes — those require host tools or shared PID ns.
+    """
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11435").rstrip("/")
+    client: httpx.AsyncClient = request.app.state.http_client
+    out: dict[str, Any] = {
+        "zeus_pid": os.getpid(),
+        "scope_note": (
+            "Host clients (e.g. many python3 PIDs in lsof on the published Ollama port) "
+            "are not visible here unless Zeus shares the host PID/network namespace."
+        ),
+        "ollama_ps": None,
+        "ollama_ps_error": None,
+        "ollama_running_model_count": None,
+    }
+    try:
+        resp = await client.get(f"{ollama_url}/api/ps", timeout=5.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            out["ollama_ps"] = data
+            models = data.get("models") if isinstance(data, dict) else None
+            if isinstance(models, list):
+                out["ollama_running_model_count"] = len(models)
+        else:
+            out["ollama_ps_error"] = f"HTTP {resp.status_code}"
+    except Exception as exc:
+        out["ollama_ps_error"] = str(exc)
+    return out
+
+
+@router.post("/query-log/clear")
+async def admin_query_log_clear(request: Request) -> dict[str, str]:
+    """Clear the in-process admin query log ring buffer (observability only)."""
+    qlog: deque | None = getattr(request.app.state, "query_log", None)
+    if qlog is not None:
+        qlog.clear()
+    return {"status": "ok"}
 
 
 def _get_qdrant_client(memory):

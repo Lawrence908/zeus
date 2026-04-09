@@ -58,19 +58,20 @@ flowchart TD
 
 ## Context Injection Policy
 
-When serving a response:
+When serving a response (implemented in `QueryEngine` + `SessionManager.get_context_window`):
 
-1. Include last N turns (default 8)
-2. Include rolling summary if available
-3. Include Oracle context retrieved for current user query
-4. Respect token budget by truncating oldest turns first
+1. **Budget:** `ZEUS_CONTEXT_MAX_TOKENS` (default 6144) is the single heuristic knob; **⅓** formats retrieved memory hits, **⅔** formats the session block.
+2. **Recent turns:** Newest turns are packed into the session slice until the budget is exhausted (≈4 characters per token); candidates are limited to the newest `ZEUS_SESSION_PACK_MAX_TURNS` (default 150; `0` = no cap).
+3. Include rolling summary if available (within the session slice’s summary sub-budget).
+4. Include Oracle / mem0 retrieval for the current user query in the memory slice (not the session slice).
+5. Oldest included turns drop first when the budget is full (greedy newest-first pack, then truncate).
 
 ## Summarization Policy
 
-- Trigger summary every 6 turns or 1200 estimated tokens
-- Keep summary concise and factual
-- Preserve key decisions, preferences, active tasks
-- Replace stale summaries with updated merged summary
+- **Trigger:** When stored turn count ≥ `ZEUS_SESSION_SUMMARY_AT_TURNS` (default 200; must exceed `ZEUS_SESSION_KEEP_RAW_TURNS`).
+- **Compaction:** Summarize all but the last `ZEUS_SESSION_KEEP_RAW_TURNS` (default 150) full turns into the rolling summary, then retain only those raw turns.
+- Keep summary concise and factual; preserve key decisions, preferences, active tasks.
+- Merge new summary with any previous summary text.
 
 ## Retention
 

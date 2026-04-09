@@ -11,7 +11,12 @@ import httpx
 from pydantic import BaseModel, Field
 
 from zeus.core.sessions import SessionManager, Turn
-from zeus.memory.search import format_context_block, get_profile_facts, search_memories
+from zeus.memory.search import (
+    MEMORY_SEARCH_TOP_K,
+    format_context_block,
+    get_profile_facts,
+    search_memories,
+)
 from zeus.safety.policy_engine import aegis_enabled, evaluate_text
 
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
@@ -24,6 +29,16 @@ ZEUS_DEV_MODEL = os.getenv("ZEUS_DEV_MODEL") or os.getenv(
 ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "chris")
 
 _TIMING_LOG_THRESHOLD_MS = int(os.getenv("ZEUS_TIMING_LOG_THRESHOLD_MS", "250"))
+
+
+def _llm_context_budget_tokens() -> int:
+    """
+    Single heuristic token budget for memory retrieval + session conversation blocks.
+    Split ⅓ memories, ⅔ conversation (then summary vs recent turns inside the session).
+    Default 6144 ≈ prior 2048 + 4096. Tune with hardware / model context.
+    """
+    raw = os.getenv("ZEUS_CONTEXT_MAX_TOKENS", "6144").strip()
+    return max(1536, int(raw))
 
 
 def _log_timing(step: str, elapsed_ms: float) -> None:
@@ -41,6 +56,23 @@ def _ollama_url() -> str:
 def _ollama_model() -> str:
     return os.getenv("ZEUS_OLLAMA_MODEL") or os.getenv(
         "ZEUS_PROD_MODEL", "qwen2.5:7b-instruct"
+    )
+
+
+def _ollama_http_timeout() -> httpx.Timeout:
+    """httpx timeout for Ollama /api/chat. Default 15m — GPU queues + embed contention often exceed 120s."""
+    raw = os.getenv("ZEUS_OLLAMA_HTTP_TIMEOUT_SEC", "900").strip()
+    if raw.lower() in ("0", "none", "unlimited"):
+        return httpx.Timeout(connect=60.0, read=None, write=120.0, pool=60.0)
+    try:
+        sec = max(120.0, float(raw))
+    except (TypeError, ValueError):
+        sec = 900.0
+    return httpx.Timeout(
+        connect=min(60.0, sec),
+        read=sec,
+        write=min(120.0, sec),
+        pool=60.0,
     )
 
 
@@ -105,7 +137,7 @@ async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
         "options": {"num_predict": max_tokens},
     }
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{base}/api/chat", json=payload, timeout=120.0)
+        r = await client.post(f"{base}/api/chat", json=payload, timeout=_ollama_http_timeout())
         if r.status_code == 404:
             body = (r.text or "")[:300]
             raise RuntimeError(_ollama_model_missing_message(detail=body))
@@ -163,7 +195,7 @@ async def _run_llm_stream(
             "POST",
             f"{base}/api/chat",
             json=payload,
-            timeout=120.0,
+            timeout=_ollama_http_timeout(),
         ) as r:
             if r.status_code == 404:
                 body = (await r.aread()).decode("utf-8", errors="replace")[:300]
@@ -229,6 +261,10 @@ class QueryEngine:
         t = time.monotonic()
         sid = session.id
 
+        budget = _llm_context_budget_tokens()
+        memory_token_budget = budget // 3
+        conversation_token_budget = budget - memory_token_budget
+
         memory_section = ""
         sources: list[str] = []
         if use_context:
@@ -238,13 +274,15 @@ class QueryEngine:
                 memory=self.memory,
                 query=message,
                 user_id=ZEUS_USER_ID,
-                top_k=5,
+                top_k=MEMORY_SEARCH_TOP_K,
                 namespaces=[],
             )
             _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
             if results:
                 t_fmt = time.monotonic()
-                memory_section, _ = format_context_block(results, max_tokens=2048)
+                memory_section, _ = format_context_block(
+                    results, max_tokens=memory_token_budget
+                )
                 _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
                 for mem in results:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
@@ -262,8 +300,7 @@ class QueryEngine:
         t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
             sid,
-            max_turns=10,
-            max_tokens=4096,
+            max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
         system = _build_system_prompt(
@@ -327,6 +364,10 @@ class QueryEngine:
         _log_timing("sessions.get", (time.monotonic() - t) * 1000)
         sid = session.id
 
+        budget = _llm_context_budget_tokens()
+        memory_token_budget = budget // 3
+        conversation_token_budget = budget - memory_token_budget
+
         memory_section = ""
         sources: list[str] = []
         if use_context:
@@ -336,13 +377,15 @@ class QueryEngine:
                 memory=self.memory,
                 query=message,
                 user_id=ZEUS_USER_ID,
-                top_k=5,
+                top_k=MEMORY_SEARCH_TOP_K,
                 namespaces=[],
             )
             _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
             if results:
                 t_fmt = time.monotonic()
-                memory_section, _ = format_context_block(results, max_tokens=2048)
+                memory_section, _ = format_context_block(
+                    results, max_tokens=memory_token_budget
+                )
                 _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
                 for mem in results:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
@@ -360,8 +403,7 @@ class QueryEngine:
         t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
             sid,
-            max_turns=10,
-            max_tokens=4096,
+            max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
         system = _build_system_prompt(
