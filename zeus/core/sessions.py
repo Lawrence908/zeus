@@ -53,15 +53,22 @@ class Session(BaseModel):
 LlmFn = Callable[..., Awaitable[str]]
 
 
+def _safe_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 def _session_keep_raw_turns() -> int:
     """Full turns retained in storage after a rolling summary (default 150)."""
-    return max(10, int(os.getenv("ZEUS_SESSION_KEEP_RAW_TURNS", "150")))
+    return max(10, _safe_int_env("ZEUS_SESSION_KEEP_RAW_TURNS", 150))
 
 
 def _session_summary_at_turns() -> int:
     """When stored turn count reaches this, older turns are summarized and compacted."""
     keep = _session_keep_raw_turns()
-    raw = int(os.getenv("ZEUS_SESSION_SUMMARY_AT_TURNS", "200"))
+    raw = _safe_int_env("ZEUS_SESSION_SUMMARY_AT_TURNS", 200)
     return max(keep + 1, raw)
 
 
@@ -70,7 +77,7 @@ def _session_pack_max_turns() -> int:
     When building the prompt, only consider at most this many newest stored turns
     before token packing (avoids scanning huge sessions). 0 = no limit.
     """
-    v = int(os.getenv("ZEUS_SESSION_PACK_MAX_TURNS", "150"))
+    v = _safe_int_env("ZEUS_SESSION_PACK_MAX_TURNS", 150)
     return 0 if v <= 0 else v
 
 

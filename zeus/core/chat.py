@@ -78,11 +78,6 @@ async def chat_redirect():
     return RedirectResponse(url="/", status_code=301)
 
 
-@router.get("/viz", include_in_schema=False)
-async def viz_redirect():
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/", status_code=301)
-
 
 @router.post("/chat/message", response_model=ChatMessageResponse)
 async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessageResponse:
@@ -341,7 +336,7 @@ async def get_chat_session_messages(session_id: str, request: Request) -> ChatMe
                 "role": "user",
                 "content": turn.user,
                 "timestamp": ts_ms,
-                "source": "web",
+                "source": getattr(turn, "source", None) or session.metadata.get("source", "web"),
             }
         )
         out.append(
@@ -350,7 +345,7 @@ async def get_chat_session_messages(session_id: str, request: Request) -> ChatMe
                 "role": "assistant",
                 "content": turn.assistant,
                 "timestamp": ts_ms,
-                "source": "web",
+                "source": getattr(turn, "source", None) or session.metadata.get("source", "web"),
                 "context_sources": turn.context_sources,
             }
         )

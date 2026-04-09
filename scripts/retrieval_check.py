@@ -31,8 +31,13 @@ def _post(url: str, payload: dict) -> dict:
 
 
 def embed(text: str) -> list[float]:
-    result = _post(f"{OLLAMA_URL}/api/embed", {"model": EMBED_MODEL, "input": text})
-    embeddings = result.get("embeddings") or result.get("embedding")
+    try:
+        result = _post(f"{OLLAMA_URL}/api/embed", {"model": EMBED_MODEL, "input": text})
+        embeddings = result.get("embeddings") or result.get("embedding")
+    except Exception:
+        # Fall back to older /api/embeddings endpoint
+        result = _post(f"{OLLAMA_URL}/api/embeddings", {"model": EMBED_MODEL, "prompt": text})
+        embeddings = result.get("embedding")
     if embeddings and isinstance(embeddings[0], list):
         return embeddings[0]
     return embeddings

@@ -64,7 +64,10 @@ def _ollama_http_timeout() -> httpx.Timeout:
     raw = os.getenv("ZEUS_OLLAMA_HTTP_TIMEOUT_SEC", "900").strip()
     if raw.lower() in ("0", "none", "unlimited"):
         return httpx.Timeout(connect=60.0, read=None, write=120.0, pool=60.0)
-    sec = max(120.0, float(raw))
+    try:
+        sec = max(120.0, float(raw))
+    except (TypeError, ValueError):
+        sec = 900.0
     return httpx.Timeout(
         connect=min(60.0, sec),
         read=sec,

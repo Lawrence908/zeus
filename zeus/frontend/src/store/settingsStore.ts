@@ -52,6 +52,10 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'zeus-settings',
+      partialize: (state) => {
+        const { telegramBotToken: _, ...rest } = state
+        return rest
+      },
     }
   )
 )

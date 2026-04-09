@@ -259,7 +259,7 @@ document.getElementById('reset-log-btn').addEventListener('click', async () => {
     await clearQueryLog();
     await load();
   } catch (e) {
-    document.getElementById('last-updated').textContent = 'Reset error: ' + e.message;
+    document.getElementById('last-updated').textContent = 'Reset error: ' + (e instanceof Error ? e.message : String(e));
   }
 });
 

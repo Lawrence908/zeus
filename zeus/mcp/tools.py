@@ -64,6 +64,9 @@ async def zeus_remember(*, text: str, namespace: str = "general", tags: list[str
 
 
 async def zeus_ingest_trigger(*, source: str = "all") -> dict[str, Any]:
+    if not _allow_write():
+        raise PermissionError("ZEUS_MCP_ALLOW_WRITE is false; zeus_ingest_trigger disabled")
+
     async with httpx.AsyncClient() as client:
         r = await client.post(
             f"{_core_url()}/ingest/trigger",
