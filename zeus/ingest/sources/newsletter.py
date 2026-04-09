@@ -83,11 +83,25 @@ class NewsletterSource:
             raise ValueError(
                 f"NEWSLETTER_SOURCES must be valid JSON, got: {sources_raw[:100]}"
             )
+        if not isinstance(sources, dict):
+            raise ValueError(
+                "NEWSLETTER_SOURCES must be a JSON object, got: "
+                f"{type(sources).__name__}"
+            )
         if not user or not password:
             raise ValueError(
                 "NEWSLETTER_IMAP_USER and NEWSLETTER_IMAP_PASS must be set"
             )
-        if not sources:
+        # Validate each entry is a non-empty string
+        validated: dict[str, str] = {}
+        for key, val in sources.items():
+            if not isinstance(val, str) or not val.strip():
+                raise ValueError(
+                    f"NEWSLETTER_SOURCES[{key!r}] must be a non-empty string, "
+                    f"got: {val!r}"
+                )
+            validated[str(key)] = val.strip()
+        if not validated:
             raise ValueError(
                 "NEWSLETTER_SOURCES must contain at least one entry"
             )
@@ -97,7 +111,7 @@ class NewsletterSource:
             imap_pass=password,
             imap_port=port,
             mailbox=mailbox,
-            sources=sources,
+            sources=validated,
             limit=limit,
             since_days=since_days,
         )
@@ -146,8 +160,9 @@ class NewsletterSource:
         imap = self._connect()
         try:
             for ntype, sender_email in senders.items():
-                query = f'(FROM "{sender_email}" SINCE {since_str})'
-                status, data = imap.search(None, query)
+                status, data = imap.search(
+                    None, "FROM", f'"{sender_email}"', "SINCE", since_str
+                )
                 if status != "OK" or not data or not data[0]:
                     logger.info("no emails found for %s (%s)", ntype, sender_email)
                     continue
@@ -210,8 +225,14 @@ class NewsletterSource:
         newsletter_type: str = "all",
         num_recent: int = 1,
     ) -> list[RawNewsletter]:
-        """Fetch raw newsletter bodies for summarization (not chunked)."""
+        """Fetch raw newsletter bodies for summarization (not chunked).
+
+        Results are sorted by date descending so slicing by num_recent
+        always returns the most recent newsletters across all senders.
+        """
         all_newsletters = self._fetch_from_imap(newsletter_type=newsletter_type)
+        # Sort by date descending — empty dates sort last
+        all_newsletters.sort(key=lambda nl: nl.date_iso or "", reverse=True)
         return all_newsletters[:num_recent]
 
     async def chunks(self) -> AsyncIterator[Chunk]:

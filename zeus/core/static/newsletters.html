@@ -288,7 +288,7 @@
         <option value="3">Last 3</option>
         <option value="5">Last 5</option>
       </select>
-      <button id="generate-btn">Generate Digest</button>
+      <button id="generate-btn" aria-label="Generate newsletter digest">Generate Digest</button>
     </div>
 
     <div class="loading" id="loading">
@@ -341,7 +341,7 @@
       } catch (e) { return iso; }
     }
 
-    function renderDigest(d, isHistory) {
+    function renderDigest(d) {
       var card = document.createElement('div');
       card.className = 'digest-card';
 
@@ -401,14 +401,14 @@
 
         // Show most recent as current
         currentDigestEl.innerHTML = '';
-        currentDigestEl.appendChild(renderDigest(digests[0], false));
+        currentDigestEl.appendChild(renderDigest(digests[0]));
 
         // Show rest as history
         if (digests.length > 1) {
           historyHeader.style.display = '';
           historyList.innerHTML = '';
           for (var i = 1; i < digests.length; i++) {
-            historyList.appendChild(renderDigest(digests[i], true));
+            historyList.appendChild(renderDigest(digests[i]));
           }
         } else {
           historyHeader.style.display = 'none';
@@ -451,7 +451,7 @@
 
         // Show new digest
         currentDigestEl.innerHTML = '';
-        currentDigestEl.appendChild(renderDigest(data.digest, false));
+        currentDigestEl.appendChild(renderDigest(data.digest));
       } catch (e) {
         showError(e.message);
       } finally {
@@ -460,11 +460,26 @@
       }
     });
 
-    // --- Populate newsletter type options from NEWSLETTER_SOURCES ---
-    // The backend doesn't expose source config yet, so we use a static list.
-    // Future: GET /api/newsletter/sources endpoint.
+    // --- Populate newsletter type options from configured sources ---
+    async function loadSources() {
+      try {
+        var resp = await fetch('/api/newsletter/sources');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var sources = data.sources || [];
+        for (var i = 0; i < sources.length; i++) {
+          var opt = document.createElement('option');
+          opt.value = sources[i].type;
+          opt.textContent = sources[i].type.charAt(0).toUpperCase() + sources[i].type.slice(1) + ' (' + sources[i].email + ')';
+          typeSelect.appendChild(opt);
+        }
+      } catch (e) {
+        console.error('Failed to load newsletter sources:', e);
+      }
+    }
 
     // --- Init ---
+    loadSources();
     loadDigests();
   </script>
 </body>

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from zeus.core.query import _run_llm
+
+# In-process lock for manifest read-modify-write cycles
+_manifest_lock = threading.Lock()
 
 logger = logging.getLogger("zeus.newsletter")
 
@@ -189,7 +193,8 @@ async def _generate_audio(summary_dict: dict) -> str | None:
 
     _ensure_dirs()
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"newsletter_{ts}.wav"
+    short_id = uuid.uuid4().hex[:8]
+    filename = f"newsletter_{ts}_{short_id}.wav"
     filepath = _AUDIO_DIR / filename
     filepath.write_bytes(audio_bytes)
     logger.info("saved audio: %s (%d bytes)", filepath, len(audio_bytes))
@@ -246,10 +251,11 @@ async def generate_newsletter_digest(body: DigestRequest) -> DigestResponse:
         generated_at=now_iso,
     )
 
-    # Save to manifest
-    manifest = _load_manifest()
-    _append_digest(manifest, entry.model_dump())
-    _save_manifest(manifest)
+    # Save to manifest (locked to prevent concurrent corruption)
+    with _manifest_lock:
+        manifest = _load_manifest()
+        _append_digest(manifest, entry.model_dump())
+        _save_manifest(manifest)
 
     return DigestResponse(digest=entry, newsletters_used=len(newsletters))
 
@@ -275,6 +281,23 @@ async def get_newsletter_audio(filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Audio file not found")
 
     return FileResponse(str(filepath), media_type="audio/wav")
+
+
+@router.get("/api/newsletter/sources")
+async def list_newsletter_sources() -> dict:
+    """Return configured newsletter source types for UI population."""
+    from zeus.ingest.sources.newsletter import NewsletterSource
+
+    try:
+        config = NewsletterSource.from_env()
+        return {
+            "sources": [
+                {"type": ntype, "email": email}
+                for ntype, email in config.sources.items()
+            ]
+        }
+    except ValueError:
+        return {"sources": []}
 
 
 @router.get("/newsletters", include_in_schema=False)
