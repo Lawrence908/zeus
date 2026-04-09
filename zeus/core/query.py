@@ -31,6 +31,16 @@ ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "chris")
 _TIMING_LOG_THRESHOLD_MS = int(os.getenv("ZEUS_TIMING_LOG_THRESHOLD_MS", "250"))
 
 
+def _llm_context_budget_tokens() -> int:
+    """
+    Single heuristic token budget for memory retrieval + session conversation blocks.
+    Split ⅓ memories, ⅔ conversation (then summary vs recent turns inside the session).
+    Default 6144 ≈ prior 2048 + 4096. Tune with hardware / model context.
+    """
+    raw = os.getenv("ZEUS_CONTEXT_MAX_TOKENS", "6144").strip()
+    return max(1536, int(raw))
+
+
 def _log_timing(step: str, elapsed_ms: float) -> None:
     if elapsed_ms < _TIMING_LOG_THRESHOLD_MS:
         return
@@ -248,6 +258,10 @@ class QueryEngine:
         t = time.monotonic()
         sid = session.id
 
+        budget = _llm_context_budget_tokens()
+        memory_token_budget = budget // 3
+        conversation_token_budget = budget - memory_token_budget
+
         memory_section = ""
         sources: list[str] = []
         if use_context:
@@ -263,7 +277,9 @@ class QueryEngine:
             _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
             if results:
                 t_fmt = time.monotonic()
-                memory_section, _ = format_context_block(results, max_tokens=2048)
+                memory_section, _ = format_context_block(
+                    results, max_tokens=memory_token_budget
+                )
                 _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
                 for mem in results:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
@@ -281,8 +297,7 @@ class QueryEngine:
         t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
             sid,
-            max_turns=10,
-            max_tokens=4096,
+            max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
         system = _build_system_prompt(
@@ -346,6 +361,10 @@ class QueryEngine:
         _log_timing("sessions.get", (time.monotonic() - t) * 1000)
         sid = session.id
 
+        budget = _llm_context_budget_tokens()
+        memory_token_budget = budget // 3
+        conversation_token_budget = budget - memory_token_budget
+
         memory_section = ""
         sources: list[str] = []
         if use_context:
@@ -361,7 +380,9 @@ class QueryEngine:
             _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
             if results:
                 t_fmt = time.monotonic()
-                memory_section, _ = format_context_block(results, max_tokens=2048)
+                memory_section, _ = format_context_block(
+                    results, max_tokens=memory_token_budget
+                )
                 _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
                 for mem in results:
                     sources.append(mem.get("metadata", {}).get("source", "unknown"))
@@ -379,8 +400,7 @@ class QueryEngine:
         t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
             sid,
-            max_turns=10,
-            max_tokens=4096,
+            max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
         system = _build_system_prompt(
