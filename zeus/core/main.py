@@ -16,6 +16,7 @@ from zeus.core.admin import init_query_log
 from zeus.core.admin import router as admin_router
 from zeus.core.chat import router as chat_router
 from zeus.core.middleware import QueryLoggingMiddleware
+from zeus.core.newsletter import router as newsletter_router
 from zeus.core.query import QueryEngine, _run_llm
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
@@ -136,6 +137,7 @@ app.include_router(admin_router)
 app.include_router(chat_router)
 app.include_router(voice_state_router)
 app.include_router(orchestration_router)
+app.include_router(newsletter_router)
 
 app.mount(
     "/static",
