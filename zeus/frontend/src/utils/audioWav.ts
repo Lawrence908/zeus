@@ -1,94 +1,67 @@
-// zeus/frontend/src/utils/audioWav.ts
-// Utility: convert a MediaRecorder blob (webm/ogg) to 16 kHz mono WAV for /voice/interact.
+// zeus/frontend/src/lib/audioWav.ts — Audio conversion utilities for voice chat
+// Stub: full implementation will arrive with Orpheus voice pipeline integration
 
 /**
- * Pick the best MIME type that MediaRecorder supports, preferring webm opus.
- * Returns undefined if none of the preferred types is supported.
- */
-export function pickMediaRecorderMime(): string | undefined {
-  const preferred = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/ogg',
-  ]
-  for (const mime of preferred) {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime)) {
-      return mime
-    }
-  }
-  return undefined
-}
-
-/**
- * Decode a media blob via the Web Audio API and re-encode as 16 kHz mono
- * linear-PCM WAV (16-bit). Returns a Uint8Array containing the full WAV file.
+ * Convert a media Blob (from MediaRecorder) to 16kHz mono WAV ArrayBuffer.
  */
 export async function mediaBlobToWav16kMono(blob: Blob): Promise<Uint8Array> {
-  const arrayBuffer = await blob.arrayBuffer()
   const audioCtx = new OfflineAudioContext(1, 1, 16000)
-  const decoded = await audioCtx.decodeAudioData(arrayBuffer)
+  const arrayBuf = await blob.arrayBuffer()
+  const decoded = await audioCtx.decodeAudioData(arrayBuf)
 
-  // Resample to 16 kHz mono
-  const targetSampleRate = 16000
-  const offlineCtx = new OfflineAudioContext(
-    1,
-    Math.ceil(decoded.duration * targetSampleRate),
-    targetSampleRate,
-  )
+  const offlineCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000)
   const source = offlineCtx.createBufferSource()
   source.buffer = decoded
   source.connect(offlineCtx.destination)
   source.start()
+
   const rendered = await offlineCtx.startRendering()
-
   const samples = rendered.getChannelData(0)
-  return encodeWav(samples, targetSampleRate)
-}
 
-/** Encode float32 PCM samples into a 16-bit WAV file. */
-function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
-  const numChannels = 1
-  const bitsPerSample = 16
-  const bytesPerSample = bitsPerSample / 8
-  const blockAlign = numChannels * bytesPerSample
-  const dataSize = samples.length * bytesPerSample
-  const headerSize = 44
-  const buffer = new ArrayBuffer(headerSize + dataSize)
-  const view = new DataView(buffer)
+  // Build WAV file
+  const wavBuf = new ArrayBuffer(44 + samples.length * 2)
+  const view = new DataView(wavBuf)
 
-  // RIFF header
-  writeString(view, 0, 'RIFF')
-  view.setUint32(4, 36 + dataSize, true)
-  writeString(view, 8, 'WAVE')
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i))
+  }
 
-  // fmt chunk
-  writeString(view, 12, 'fmt ')
-  view.setUint32(16, 16, true) // chunk size
-  view.setUint16(20, 1, true) // PCM
-  view.setUint16(22, numChannels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * blockAlign, true)
-  view.setUint16(32, blockAlign, true)
-  view.setUint16(34, bitsPerSample, true)
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, 16000, true)
+  view.setUint32(28, 32000, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeStr(36, 'data')
+  view.setUint32(40, samples.length * 2, true)
 
-  // data chunk
-  writeString(view, 36, 'data')
-  view.setUint32(40, dataSize, true)
-
-  // PCM samples (float32 -> int16)
-  let offset = 44
   for (let i = 0; i < samples.length; i++) {
     const s = Math.max(-1, Math.min(1, samples[i]))
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-    offset += 2
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
   }
 
-  return new Uint8Array(buffer)
+  return new Uint8Array(wavBuf)
 }
 
-function writeString(view: DataView, offset: number, str: string): void {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i))
+/**
+ * Pick the best supported MIME type for MediaRecorder.
+ */
+export function pickMediaRecorderMime(): string {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+  ]
+  for (const mime of candidates) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime)) {
+      return mime
+    }
   }
+  return ''
 }
