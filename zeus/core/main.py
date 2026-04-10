@@ -18,6 +18,7 @@ from zeus.core.chat import router as chat_router
 from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.newsletter import router as newsletter_router
 from zeus.core.query import QueryEngine, _run_llm
+from zeus.core.session_storage import SQLiteSessionStorage
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
 from zeus.memory.config import get_memory_client
@@ -68,7 +69,13 @@ async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient()
     app.state.memory = get_memory_client()
     app.state.voice_hub = VoiceStateHub()
-    storage = InMemoryStorage()
+    session_backend = os.getenv("ZEUS_SESSION_BACKEND", "memory").lower()
+    if session_backend == "sqlite":
+        db_path = os.getenv("ZEUS_SESSION_DB_PATH", "zeus/data/sessions.db")
+        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+        storage = SQLiteSessionStorage(db_path)
+    else:
+        storage = InMemoryStorage()
     session_manager = SessionManager(storage, llm_fn=_run_llm)
     app.state.session_manager = session_manager
     app.state.query_engine = QueryEngine(
