@@ -3,12 +3,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 
 import httpx
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("zeus.query")
+
+MAX_REFLECT = 3
+_REFLECT_BACKOFF = [0.5, 1.0]  # seconds after attempt 1, 2
+
+_FAILED_REPLY_RE = re.compile(
+    r"^(sorry|i (can't|cannot)|i don't know|i'm unable)", re.IGNORECASE
+)
 
 from zeus.core.sessions import SessionManager, Turn
 from zeus.memory.search import (
@@ -94,6 +105,7 @@ class QueryResult(BaseModel):
     model_used: str
     token_estimate: int
     topic: str | None = None
+    reflection_attempts: int = 0
     aegis_flags: list[str] = Field(default_factory=list)
 
 
@@ -235,6 +247,23 @@ def _build_system_prompt(
     )
 
 
+def _is_empty_or_failed_reply(reply: str) -> bool:
+    """True if the reply is empty, too short, or a known refusal pattern."""
+    stripped = reply.strip()
+    if not stripped or len(stripped) < 10:
+        return True
+    return bool(_FAILED_REPLY_RE.match(stripped))
+
+
+def _build_reflection_prompt(original: str, failed_reply: str, attempt: int) -> str:
+    """Prepend a reflection instruction to the original query for retry."""
+    truncated = failed_reply[:100]
+    return (
+        f"[Attempt {attempt}] Your previous response was insufficient: "
+        f"'{truncated}'. Rephrase and try again.\n\n{original}"
+    )
+
+
 class QueryEngine:
     def __init__(self, memory: object, session_manager: SessionManager) -> None:
         self.memory = memory
@@ -310,7 +339,21 @@ class QueryEngine:
         )
         user_prompt = f"User: {message}\nAssistant:"
         t_llm = time.monotonic()
-        reply = await _run_llm(system=system, user_prompt=user_prompt, max_tokens=max_tokens)
+        reflection_attempts = 0
+        current_prompt = user_prompt
+        reply = await _run_llm(system=system, user_prompt=current_prompt, max_tokens=max_tokens)
+        for attempt in range(2, MAX_REFLECT + 1):
+            if not _is_empty_or_failed_reply(reply):
+                break
+            reflection_attempts += 1
+            backoff = _REFLECT_BACKOFF[attempt - 2] if attempt - 2 < len(_REFLECT_BACKOFF) else _REFLECT_BACKOFF[-1]
+            logger.info(
+                "Reflection attempt %d/%d (backoff %.1fs) — reply was: %r",
+                attempt, MAX_REFLECT, backoff, reply[:100],
+            )
+            await asyncio.sleep(backoff)
+            current_prompt = _build_reflection_prompt(user_prompt, reply, attempt)
+            reply = await _run_llm(system=system, user_prompt=current_prompt, max_tokens=max_tokens)
         _log_timing("llm.call", (time.monotonic() - t_llm) * 1000)
         aegis_flags: list[str] = []
         if aegis_enabled():
@@ -343,6 +386,7 @@ class QueryEngine:
             model_used=model_used,
             token_estimate=token_estimate,
             topic=session_after.topic,
+            reflection_attempts=reflection_attempts,
             aegis_flags=aegis_flags,
         )
 
@@ -414,24 +458,48 @@ class QueryEngine:
         user_prompt = f"User: {message}\nAssistant:"
 
         t_llm = time.monotonic()
+        current_prompt = user_prompt
+        # Collect first stream fully to classify
         parts: list[str] = []
         async for chunk in _run_llm_stream(
             system=system,
-            user_prompt=user_prompt,
+            user_prompt=current_prompt,
             max_tokens=max_tokens,
         ):
             parts.append(chunk)
-            if not aegis_enabled():
-                yield chunk
+        reply = "".join(parts)
+
+        # Reflection loop for streaming
+        for attempt in range(2, MAX_REFLECT + 1):
+            if not _is_empty_or_failed_reply(reply):
+                break
+            backoff = _REFLECT_BACKOFF[attempt - 2] if attempt - 2 < len(_REFLECT_BACKOFF) else _REFLECT_BACKOFF[-1]
+            logger.info(
+                "Stream reflection attempt %d/%d (backoff %.1fs) — reply was: %r",
+                attempt, MAX_REFLECT, backoff, reply[:100],
+            )
+            yield "[Retry]"
+            await asyncio.sleep(backoff)
+            current_prompt = _build_reflection_prompt(user_prompt, reply, attempt)
+            parts = []
+            async for chunk in _run_llm_stream(
+                system=system,
+                user_prompt=current_prompt,
+                max_tokens=max_tokens,
+            ):
+                parts.append(chunk)
+            reply = "".join(parts)
 
         _log_timing("llm.stream_total", (time.monotonic() - t_llm) * 1000)
-        reply = "".join(parts)
+        # Aegis on final reply only
         if aegis_enabled():
             outcome = evaluate_text(reply, policy_name=None)
             if outcome.status == "rejected":
                 reply = outcome.message or "This response was blocked by safety policy."
             else:
                 reply = outcome.text
+            yield reply
+        else:
             yield reply
         latency_ms = int((time.monotonic() - t0) * 1000)
         turn = Turn(
