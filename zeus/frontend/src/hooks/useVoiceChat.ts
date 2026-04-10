@@ -3,7 +3,7 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import { useChatStore } from '../store/chatStore'
 import { useVoiceStore } from '../store/voiceStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { mediaBlobToWav16kMono, pickMediaRecorderMime } from '../lib/audioWav'
+import { mediaBlobToWav16kMono, pickMediaRecorderMime } from '../utils/audioWav'
 
 function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
