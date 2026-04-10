@@ -24,7 +24,7 @@ from zeus.memory.config import get_memory_client
 from zeus.orchestration.bus import router as orchestration_router
 from zeus.orchestration.hooks import build_default_registry, bus_metrics
 from zeus.orchestration.runtime import AgentRuntime
-from zeus.safety.integration import register_aegis_bus_post_hook
+from zeus.safety.integration import register_aegis_bus_pre_hook, register_aegis_bus_post_hook
 from zeus.voice.state import VoiceStateHub
 
 ZEUS_VERSION = "0.1.0"
@@ -84,6 +84,7 @@ async def lifespan(app: FastAPI):
     app.state.agent_runtime = runtime
 
     orch_hooks = build_default_registry()
+    register_aegis_bus_pre_hook(orch_hooks)
     register_aegis_bus_post_hook(orch_hooks)
     app.state.orchestration_hooks = orch_hooks
     app.state.bus_metrics = bus_metrics

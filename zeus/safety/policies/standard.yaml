@@ -9,3 +9,7 @@ rules:
     pattern: '(?i)(api[_-]?key|password|secret)\s*=\s*[''"][^''"]{8,}[''"]'
     action: flag_for_review
     message: ""
+  - name: prompt_injection_attempt
+    pattern: '(?i)(ignore previous instructions|disregard your system prompt|act as .{0,40} without restrictions)'
+    action: reject
+    message: "Prompt injection pattern detected"

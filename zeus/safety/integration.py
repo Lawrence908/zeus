@@ -1,12 +1,14 @@
-# zeus/safety/integration.py — Orchestration bus post-hook for Aegis
+# zeus/safety/integration.py — Orchestration bus pre/post hooks for Aegis
 from __future__ import annotations
 
 import json
 import logging
 from typing import Any
 
+from fastapi import HTTPException
+
 from zeus.orchestration.hooks import HookRegistry
-from zeus.safety.policy_engine import aegis_enabled, evaluate_text
+from zeus.safety.policy_engine import AegisPolicyEngine, aegis_enabled, evaluate_text
 
 logger = logging.getLogger("zeus.aegis")
 
@@ -41,6 +43,35 @@ async def aegis_bus_post_hook(context: dict[str, Any]) -> dict[str, Any]:
         "aegis_policy": policy,
     }
     return context
+
+
+async def aegis_bus_pre_hook(context: dict[str, Any]) -> dict[str, Any]:
+    """Validate tool/bus call arguments against Aegis policies before execution."""
+    if not aegis_enabled():
+        return context
+    policy = str(context.get("safety_policy") or "standard")
+    payload = context.get("payload")
+    if not isinstance(payload, dict) or not payload:
+        return context
+    engine = AegisPolicyEngine(policy=policy)
+    outcome = engine.evaluate_payload(payload, policy_name=policy)
+    if outcome.status != "rejected":
+        return context
+    logger.warning(
+        "Aegis pre-hook blocked bus call target=%s endpoint=%s policy=%s reason=%s",
+        context.get("target_agent"),
+        context.get("endpoint"),
+        policy,
+        outcome.message,
+    )
+    raise HTTPException(
+        status_code=400,
+        detail=outcome.message or "Input blocked by Aegis policy.",
+    )
+
+
+def register_aegis_bus_pre_hook(registry: HookRegistry) -> None:
+    registry.register_pre("aegis_input_validator", aegis_bus_pre_hook)
 
 
 def register_aegis_bus_post_hook(registry: HookRegistry) -> None:
