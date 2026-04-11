@@ -238,6 +238,7 @@ class AgentRuntime:
                     "status": state.status,
                     "description": state.definition.description,
                     "model": state.definition.model,
+                    "models": self._get_model_map(state.definition.raw),
                     "auto_start": state.definition.auto_start,
                     "tools": state.definition.tools,
                     "safety_policy": state.definition.safety_policy,
@@ -246,6 +247,14 @@ class AgentRuntime:
                 for name, state in self._agents.items()
             },
         }
+
+    @staticmethod
+    def _get_model_map(raw: dict) -> dict[str, str]:
+        """Extract {dev: ..., prod: ...} model map from raw agent YAML."""
+        model_block = raw.get("model", {})
+        if isinstance(model_block, dict):
+            return {k: str(v) for k, v in model_block.items()}
+        return {"dev": str(model_block), "prod": str(model_block)}
 
     # ------------------------------------------------------------------
     # Internal

@@ -13,6 +13,7 @@ interface AgentInfo {
   status: AgentStatusValue
   description: string
   model: string
+  models: Record<string, string>
   auto_start: boolean
   tools: string[]
   safety_policy: string
@@ -103,14 +104,18 @@ function stepStatusBadge(status: string): string {
 interface AgentCardProps {
   name: string
   agent: AgentInfo
+  environment: string
   isSelected: boolean
   onSelect: () => void
   onToggle: (action: 'start' | 'stop') => void
   isToggling: boolean
 }
 
-function AgentCard({ name, agent, isSelected, onSelect, onToggle, isToggling }: AgentCardProps) {
+function AgentCard({ name, agent, isSelected, onSelect, onToggle, isToggling, environment }: AgentCardProps) {
   const sc = statusColor(agent.status)
+  const altEnv = environment === 'dev' ? 'prod' : 'dev'
+  const altModel = agent.models?.[altEnv]
+  const isLocal = !agent.model.includes('claude')
 
   return (
     <div
@@ -162,8 +167,16 @@ function AgentCard({ name, agent, isSelected, onSelect, onToggle, isToggling }: 
 
       {/* Badges row */}
       <div className="flex flex-wrap gap-1.5 items-center mb-3">
-        <span className="text-[9px] font-label uppercase tracking-wider px-1.5 py-0.5 bg-surface-container-high rounded border border-outline-variant/20 text-on-surface-variant">
-          {agent.model || 'no model'}
+        <span
+          className={[
+            'text-[9px] font-label uppercase tracking-wider px-1.5 py-0.5 rounded border',
+            isLocal
+              ? 'bg-primary-container/20 border-primary/30 text-primary'
+              : 'bg-tertiary-container/20 border-tertiary/30 text-tertiary',
+          ].join(' ')}
+          title={altModel ? `${altEnv}: ${altModel}` : undefined}
+        >
+          {isLocal ? '⬡ ' : '☁ '}{agent.model || 'no model'}
         </span>
         <AegisBadge />
         <span className="text-[9px] font-label text-on-surface-variant/50">
@@ -699,12 +712,24 @@ export function AgentsPage() {
             </h1>
             <p className="font-body text-sm text-on-surface-variant">
               Ruflo-managed task-specific agents. Monitor status, start/stop agents, and dispatch tasks.
-              {status && (
-                <span className="ml-2 text-[10px] font-label uppercase tracking-widest text-on-surface-variant/50">
-                  env: {status.environment} / ruflo {status.ruflo_version}
-                </span>
-              )}
             </p>
+            {status && (
+              <div className="flex items-center gap-3 mt-2">
+                <span
+                  className={[
+                    'text-[10px] font-label uppercase tracking-widest px-2 py-1 rounded border',
+                    status.environment === 'prod'
+                      ? 'bg-primary-container/20 border-primary/30 text-primary'
+                      : 'bg-tertiary-container/20 border-tertiary/30 text-tertiary',
+                  ].join(' ')}
+                >
+                  {status.environment === 'prod' ? '⬡ local' : '☁ cloud'} / {status.environment}
+                </span>
+                <span className="text-[10px] font-label text-on-surface-variant/40">
+                  ruflo {status.ruflo_version}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Error banner */}
@@ -750,6 +775,7 @@ export function AgentsPage() {
                   key={name}
                   name={name}
                   agent={agents[name]}
+                  environment={status?.environment ?? 'dev'}
                   isSelected={selectedAgent === name}
                   onSelect={() => setSelectedAgent(name)}
                   onToggle={(action) => void handleToggleAgent(name, action)}
