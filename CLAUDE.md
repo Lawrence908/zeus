@@ -155,3 +155,7 @@ All services must check `ZEUS_ENV` and configure themselves accordingly. Never h
 - MCP exposure is a first-class integration boundary so Zeus memory/context can be reused by external assistant clients
 - Session continuity is required for natural multi-turn interactions across both chat and voice paths
 - Observability is mandatory once always-on deployment begins (query latency, ingest cadence, service health)
+
+## Writing Style
+
+- **No emdashes**: Never use emdashes (the long dash character) in generated text. Use commas, semicolons, colons, or restructure sentences instead.
