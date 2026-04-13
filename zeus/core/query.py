@@ -21,6 +21,7 @@ _FAILED_REPLY_RE = re.compile(
     r"^(sorry|i (can't|cannot)|i don't know|i'm unable)", re.IGNORECASE
 )
 
+from zeus.core.prompts import render as render_prompt
 from zeus.core.sessions import SessionManager, Turn
 from zeus.memory.search import (
     MEMORY_SEARCH_TOP_K,
@@ -64,15 +65,27 @@ def _ollama_url() -> str:
     return os.getenv("OLLAMA_URL", "http://localhost:11435").rstrip("/")
 
 
+# Mutable at runtime via POST /models/active — defaults from env vars.
+_active_ollama_model: str | None = None
+
+
 def _ollama_model() -> str:
+    if _active_ollama_model:
+        return _active_ollama_model
     return os.getenv("ZEUS_OLLAMA_MODEL") or os.getenv(
         "ZEUS_PROD_MODEL", "qwen2.5:7b-instruct"
     )
 
 
+def set_ollama_model(model: str) -> None:
+    """Switch the active Ollama model at runtime (no restart needed)."""
+    global _active_ollama_model
+    _active_ollama_model = model.strip() if model.strip() else None
+
+
 def _ollama_http_timeout() -> httpx.Timeout:
-    """httpx timeout for Ollama /api/chat. Default 15m — GPU queues + embed contention often exceed 120s."""
-    raw = os.getenv("ZEUS_OLLAMA_HTTP_TIMEOUT_SEC", "900").strip()
+    """httpx timeout for Ollama /api/chat. Default 30m for long summarization jobs."""
+    raw = os.getenv("ZEUS_OLLAMA_HTTP_TIMEOUT_SEC", "1800").strip()
     if raw.lower() in ("0", "none", "unlimited"):
         return httpx.Timeout(connect=60.0, read=None, write=120.0, pool=60.0)
     try:
@@ -234,16 +247,18 @@ def _build_system_prompt(
     memory_section: str,
     conversation_section: str,
 ) -> str:
-    conv = conversation_section.strip() if conversation_section.strip() else "(No prior turns in this session.)"
-    mem = memory_section.strip() if memory_section.strip() else "(No retrieved memories for this query.)"
-    return (
-        "You are Zeus, a personal AI assistant for Chris. You have access to Chris's "
-        "personal knowledge base and conversation history.\n\n"
-        f"## Profile\n{profile_section}\n\n"
-        f"## Relevant Context\n{mem}\n\n"
-        f"## Conversation\n{conv}\n\n"
-        "Be concise, direct, and helpful. Use markdown when it aids clarity.\n"
-        "If you don't know something, say so — don't fabricate."
+    """Render zeus/core/prompts/chat_system.md with the current runtime context.
+
+    Template lives in a .md file so it can be edited without touching Python.
+    Set ZEUS_PROMPT_RELOAD=1 to re-read on every call during iteration.
+    """
+    return render_prompt(
+        "chat_system",
+        model_name=_active_model_name(),
+        provider="Anthropic Claude" if _chat_use_claude() else "Ollama (local)",
+        profile_section=profile_section.strip() or "(No profile facts loaded yet.)",
+        memory_section=memory_section.strip() or "(No retrieved memories for this query.)",
+        conversation_section=conversation_section.strip() or "(No prior turns in this session.)",
     )
 
 

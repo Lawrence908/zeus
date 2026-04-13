@@ -17,10 +17,11 @@ from zeus.core.admin import router as admin_router
 from zeus.core.chat import router as chat_router
 from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.newsletter import router as newsletter_router
-from zeus.core.query import QueryEngine, _run_llm
+from zeus.core.query import QueryEngine, _run_llm, _active_model_name, _chat_use_claude, _ollama_model, set_ollama_model
 from zeus.core.session_storage import SQLiteSessionStorage
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
+from zeus.integrations.telegram import build_telegram_bot
 from zeus.memory.config import get_memory_client
 from zeus.orchestration.bus import router as orchestration_router
 from zeus.orchestration.hooks import build_default_registry, bus_metrics
@@ -99,6 +100,17 @@ async def lifespan(app: FastAPI):
     # Observability — query log ring buffer
     init_query_log(app)
 
+    # Telegram bridge (LAB-291) — optional, enabled via TELEGRAM_ENABLED
+    app.state.telegram_bot = None
+    try:
+        tg_bot = build_telegram_bot(app.state.query_engine)
+        if tg_bot is not None:
+            await tg_bot.start()
+            app.state.telegram_bot = tg_bot
+    except Exception as exc:
+        import logging
+        logging.getLogger("zeus").warning("telegram bot failed to start: %s", exc)
+
     # Scheduled ingest (APScheduler)
     # Sources are empty by default; populate via INGEST_* env vars or CLI.
     # The scheduler still runs on schedule — it just skips if no sources are wired.
@@ -122,6 +134,13 @@ async def lifespan(app: FastAPI):
     ingest_scheduler = getattr(app.state, "ingest_scheduler", None)
     if ingest_scheduler is not None:
         ingest_scheduler.shutdown(wait=False)
+
+    tg_bot = getattr(app.state, "telegram_bot", None)
+    if tg_bot is not None:
+        try:
+            await tg_bot.stop()
+        except Exception:
+            pass
 
     await app.state.http_client.aclose()
 
@@ -184,6 +203,119 @@ async def status(request: Request) -> StatusResponse:
         environment=ZEUS_ENV,
         uptime_seconds=round(time.time() - boot, 1),
         services=[qdrant, ollama],
+    )
+
+
+# ------------------------------------------------------------------
+# Model management endpoints
+# ------------------------------------------------------------------
+
+
+class ModelInfo(BaseModel):
+    name: str
+    size: int | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    modified_at: str | None = None
+    family: str | None = None
+
+
+class ModelsListResponse(BaseModel):
+    provider: str  # "ollama" | "claude"
+    models: list[ModelInfo]
+
+
+class ActiveModelResponse(BaseModel):
+    provider: str
+    model: str
+    gpu_available: bool | None = None
+
+
+class SetModelRequest(BaseModel):
+    model: str
+
+
+@app.get("/models", response_model=ModelsListResponse)
+async def list_models(request: Request) -> ModelsListResponse:
+    """List models available in Ollama (pulled to the container)."""
+    client: httpx.AsyncClient = request.app.state.http_client
+    ollama_url = f"{OLLAMA_URL.rstrip('/')}/api/tags"
+    try:
+        resp = await client.get(ollama_url, timeout=5.0)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return ModelsListResponse(provider="ollama", models=[])
+
+    models: list[ModelInfo] = []
+    for m in data.get("models", []):
+        details = m.get("details", {})
+        models.append(ModelInfo(
+            name=m.get("name", ""),
+            size=m.get("size"),
+            parameter_size=details.get("parameter_size"),
+            quantization_level=details.get("quantization_level"),
+            modified_at=m.get("modified_at"),
+            family=details.get("family"),
+        ))
+    return ModelsListResponse(provider="ollama", models=models)
+
+
+@app.get("/models/active", response_model=ActiveModelResponse)
+async def get_active_model(request: Request) -> ActiveModelResponse:
+    """Return the currently active model and provider."""
+    provider = "claude" if _chat_use_claude() else "ollama"
+    model = _active_model_name()
+
+    # Check GPU status from Ollama
+    gpu_available: bool | None = None
+    if provider == "ollama":
+        client: httpx.AsyncClient = request.app.state.http_client
+        try:
+            resp = await client.get(f"{OLLAMA_URL.rstrip('/')}/api/ps", timeout=3.0)
+            if resp.status_code == 200:
+                ps_data = resp.json()
+                running = ps_data.get("models", [])
+                for rm in running:
+                    # If any model is using a GPU layer, GPU is available
+                    details = rm.get("details", {})
+                    size_vram = rm.get("size_vram", 0)
+                    gpu_available = size_vram > 0
+                    break
+                if not running:
+                    gpu_available = None  # no models loaded yet, unknown
+        except Exception:
+            pass
+
+    return ActiveModelResponse(provider=provider, model=model, gpu_available=gpu_available)
+
+
+@app.post("/models/active", response_model=ActiveModelResponse)
+async def set_active_model(body: SetModelRequest) -> ActiveModelResponse:
+    """Switch the active Ollama model at runtime (no restart needed)."""
+    set_ollama_model(body.model)
+    provider = "claude" if _chat_use_claude() else "ollama"
+    return ActiveModelResponse(provider=provider, model=_active_model_name())
+
+
+class TelegramStatusResponse(BaseModel):
+    enabled: bool
+    connected: bool
+    bot_username: str | None = None
+    chat_count: int = 0
+
+
+@app.get("/integrations/telegram/status", response_model=TelegramStatusResponse)
+async def telegram_status(request: Request) -> TelegramStatusResponse:
+    bot = getattr(request.app.state, "telegram_bot", None)
+    enabled = os.getenv("TELEGRAM_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    if bot is None:
+        return TelegramStatusResponse(enabled=enabled, connected=False)
+    return TelegramStatusResponse(
+        enabled=enabled,
+        connected=bot.running,
+        bot_username=bot.bot_username,
+        chat_count=bot.chat_count,
     )
 
 
