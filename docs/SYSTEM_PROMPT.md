@@ -18,7 +18,7 @@ A personal AI assistant stack composed from proven open-source repos. The goal i
 - Observability: query/ingest metrics + admin dashboard
 - Embed model: nomic-embed-text via Ollama
 - Dev model: Claude API (Sonnet 4.6)
-- Prod model: Ollama → Qwen2.5-7B-Instruct Q4_K_M on 3080
+- Prod model: Ollama → llama3.2-3B on 3080
 
 ## Repo Structure
 zeus/
