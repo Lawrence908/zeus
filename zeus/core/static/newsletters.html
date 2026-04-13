@@ -140,6 +140,57 @@
     #generate-btn:hover { opacity: 0.85; }
     #generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    /* Quick digest section */
+    .quick-digest {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .quick-digest summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--accent);
+      user-select: none;
+    }
+    .quick-digest summary:hover { color: var(--link-hover); }
+    .quick-digest .qd-inner { margin-top: 0.75rem; }
+    .quick-digest textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 0.65rem 0.75rem;
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: system-ui, sans-serif;
+      font-size: 0.9rem;
+      resize: vertical;
+      line-height: 1.45;
+    }
+    .quick-digest textarea::placeholder { color: var(--muted); }
+    .quick-digest textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .quick-digest .qd-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 0.5rem;
+    }
+    #qd-generate-btn {
+      padding: 0.5rem 1.25rem;
+      background: var(--btn-primary-bg);
+      border: 1px solid var(--btn-primary-border);
+      border-radius: 8px;
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    #qd-generate-btn:hover { opacity: 0.85; }
+    #qd-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
     /* Loading state */
     .loading { display: none; align-items: center; gap: 0.5rem; color: var(--muted); margin-bottom: 1rem; }
     .loading.active { display: flex; }
@@ -248,6 +299,72 @@
       padding: 3rem 1rem;
     }
 
+    /* Category / advice sections */
+    .section-header {
+      color: var(--muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 2rem 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-header:first-of-type { margin-top: 0.5rem; }
+
+    .advice-panel {
+      background: var(--panel);
+      border: 1px solid var(--btn-primary-border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .advice-panel .advice-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .advice-panel .advice-header .cat-badge {
+      background: var(--btn-primary-bg);
+      border: 1px solid var(--btn-primary-border);
+      color: var(--accent);
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .advice-panel .advice-header .advice-meta {
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    .advice-panel .advice-content {
+      color: var(--fg);
+      line-height: 1.6;
+      white-space: pre-line;
+      font-size: 0.9rem;
+    }
+
+    .category-section { margin-bottom: 1.5rem; }
+    .category-section .cat-title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .category-section .cat-title .arrow {
+      color: var(--muted);
+      font-size: 0.75rem;
+      transition: transform 0.15s;
+    }
+    .category-section .cat-title .arrow.open { transform: rotate(90deg); }
+    .category-section .digest-list { display: none; }
+    .category-section .digest-list.open { display: block; }
+
     /* History section */
     .history-header {
       color: var(--muted);
@@ -291,6 +408,16 @@
       <button id="generate-btn" aria-label="Generate newsletter digest">Generate Digest</button>
     </div>
 
+    <details class="quick-digest">
+      <summary>Quick Digest — paste any email or text</summary>
+      <div class="qd-inner">
+        <textarea id="qd-text" placeholder="Paste email body, article, or any text you want summarized..."></textarea>
+        <div class="qd-actions">
+          <button id="qd-generate-btn" type="button">Digest</button>
+        </div>
+      </div>
+    </details>
+
     <div class="loading" id="loading">
       <div class="spinner"></div>
       <span>Fetching newsletters and generating summary...</span>
@@ -298,9 +425,11 @@
 
     <div class="error-msg" id="error-msg"></div>
 
+    <div id="advice-section"></div>
+
     <div id="current-digest"></div>
 
-    <div class="history-header" id="history-header" style="display:none;">Previous Digests</div>
+    <div class="history-header" id="history-header" style="display:none;">Digest History</div>
     <div id="history-list"></div>
 
     <div class="empty-state" id="empty-state">
@@ -326,6 +455,7 @@
     const generateBtn = document.getElementById('generate-btn');
     const loadingEl = document.getElementById('loading');
     const errorEl = document.getElementById('error-msg');
+    const adviceSectionEl = document.getElementById('advice-section');
     const currentDigestEl = document.getElementById('current-digest');
     const historyHeader = document.getElementById('history-header');
     const historyList = document.getElementById('history-list');
@@ -341,6 +471,57 @@
       } catch (e) { return iso; }
     }
 
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(str || ''));
+      return div.innerHTML;
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.classList.add('visible');
+      setTimeout(function() { errorEl.classList.remove('visible'); }, 8000);
+    }
+
+    // --- Advice panels ---
+    function renderAdvicePanel(doc) {
+      var panel = document.createElement('div');
+      panel.className = 'advice-panel';
+      panel.innerHTML =
+        '<div class="advice-header">' +
+          '<span class="cat-badge">' + escapeHtml(doc.category) + '</span>' +
+          '<span class="advice-meta">' +
+            'Updated ' + formatDate(doc.updated_at) +
+            (doc.update_count > 1 ? ' (' + doc.update_count + ' digests synthesized)' : '') +
+          '</span>' +
+        '</div>' +
+        '<div class="advice-content">' + escapeHtml(doc.advice) + '</div>';
+      return panel;
+    }
+
+    async function loadAdvice() {
+      try {
+        var resp = await fetch('/api/newsletter/advice');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var docs = data.documents || [];
+        adviceSectionEl.innerHTML = '';
+        if (docs.length === 0) return;
+
+        var header = document.createElement('div');
+        header.className = 'section-header';
+        header.textContent = 'Running Advice';
+        adviceSectionEl.appendChild(header);
+
+        for (var i = 0; i < docs.length; i++) {
+          adviceSectionEl.appendChild(renderAdvicePanel(docs[i]));
+        }
+      } catch (e) {
+        console.error('Failed to load advice:', e);
+      }
+    }
+
+    // --- Digest cards ---
     function renderDigest(d) {
       var card = document.createElement('div');
       card.className = 'digest-card';
@@ -354,11 +535,6 @@
         audioHtml = '<div class="audio-section"><h3>Podcast</h3><audio controls preload="metadata"><source src="' + escapeHtml(d.audio_url) + '" type="audio/wav">Audio not supported.</audio></div>';
       }
 
-      var adviceHtml = '';
-      if (d.advice) {
-        adviceHtml = '<div class="advice-box"><strong>Advice:</strong> ' + escapeHtml(d.advice) + '</div>';
-      }
-
       card.innerHTML =
         '<div class="meta">' +
           '<span class="type-badge">' + escapeHtml(d.newsletter_type) + '</span>' +
@@ -367,22 +543,9 @@
         '<div class="summary">' + escapeHtml(d.summary) + '</div>' +
         '<h3>Key Highlights</h3>' +
         '<ul class="bullets">' + bulletsHtml + '</ul>' +
-        adviceHtml +
         audioHtml;
 
       return card;
-    }
-
-    function escapeHtml(str) {
-      var div = document.createElement('div');
-      div.appendChild(document.createTextNode(str || ''));
-      return div.innerHTML;
-    }
-
-    function showError(msg) {
-      errorEl.textContent = msg;
-      errorEl.classList.add('visible');
-      setTimeout(function() { errorEl.classList.remove('visible'); }, 8000);
     }
 
     // --- Load existing digests ---
@@ -449,13 +612,63 @@
           historyList.insertBefore(currentDigestEl.firstChild, historyList.firstChild);
         }
 
-        // Show new digest
+        // Show new digest and refresh advice panels
         currentDigestEl.innerHTML = '';
         currentDigestEl.appendChild(renderDigest(data.digest));
+        await loadAdvice();
       } catch (e) {
         showError(e.message);
       } finally {
         generateBtn.disabled = false;
+        loadingEl.classList.remove('active');
+      }
+    });
+
+    // --- Quick digest from pasted text ---
+    const qdTextarea = document.getElementById('qd-text');
+    const qdBtn = document.getElementById('qd-generate-btn');
+
+    qdBtn.addEventListener('click', async function () {
+      var text = qdTextarea.value.trim();
+      if (text.length < 20) {
+        showError('Please paste at least a few sentences of text to digest.');
+        return;
+      }
+
+      qdBtn.disabled = true;
+      loadingEl.classList.add('active');
+      errorEl.classList.remove('visible');
+
+      try {
+        var resp = await fetch('/api/newsletter/digest-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text })
+        });
+
+        if (!resp.ok) {
+          var err = await resp.json().catch(function() { return {}; });
+          throw new Error(err.detail || 'Failed to generate digest (HTTP ' + resp.status + ')');
+        }
+
+        var data = await resp.json();
+        emptyState.style.display = 'none';
+
+        // Move current to history
+        if (currentDigestEl.firstChild) {
+          historyHeader.style.display = '';
+          historyList.insertBefore(currentDigestEl.firstChild, historyList.firstChild);
+        }
+
+        // Show new digest, refresh advice, clear textarea
+        currentDigestEl.innerHTML = '';
+        currentDigestEl.appendChild(renderDigest(data.digest));
+        await loadAdvice();
+        qdTextarea.value = '';
+      } catch (e) {
+        showError(e.message);
+      } finally {
+        qdBtn.disabled = false;
         loadingEl.classList.remove('active');
       }
     });
@@ -480,6 +693,7 @@
 
     // --- Init ---
     loadSources();
+    loadAdvice();
     loadDigests();
   </script>
 </body>

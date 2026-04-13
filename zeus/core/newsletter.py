@@ -1,10 +1,13 @@
 """zeus/core/newsletter.py — Newsletter digest API router.
 
 Endpoints:
-  POST /api/newsletter/digest   — Generate summary + TTS audio from recent newsletters
-  GET  /api/newsletter/digests  — List past digest entries
-  GET  /api/newsletter/audio/{filename} — Serve generated audio files
-  GET  /newsletters             — Web UI page
+  POST /api/newsletter/digest      — Generate summary + TTS audio from recent newsletters
+  POST /api/newsletter/digest-text — Generate digest from pasted text
+  GET  /api/newsletter/digests     — List past digest entries
+  GET  /api/newsletter/advice      — List all per-category advice documents
+  GET  /api/newsletter/advice/{category} — Get single category advice document
+  GET  /api/newsletter/audio/{filename}  — Serve generated audio files
+  GET  /newsletters                — Web UI page
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from zeus.core.query import _run_llm
+from zeus.core.query import _run_llm, _run_llm_stream
 
 # In-process lock for manifest read-modify-write cycles
 _manifest_lock = threading.Lock()
@@ -35,6 +38,7 @@ router = APIRouter(tags=["newsletter"])
 _AUDIO_DIR = Path(os.getenv("NEWSLETTER_AUDIO_DIR", "zeus/data/audio"))
 _MANIFEST_DIR = Path("zeus/data/newsletters")
 _MANIFEST_PATH = _MANIFEST_DIR / "manifest.json"
+_ADVICE_DIR = _MANIFEST_DIR / "advice"
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # Filename validation: alphanumeric, underscores, hyphens, dots only
@@ -51,6 +55,23 @@ Do not include URLs in bullet points.
 
 Return your response as valid JSON with this exact structure:
 {"summary": "A 2-3 sentence overview", "bullets": ["point 1", "point 2", ...], "advice": "Your actionable advice"}
+"""
+
+_ADVICE_SYNTHESIS_PROMPT = """\
+You maintain a running advice document for a personal AI assistant user. \
+You will receive the current advice document (which may be empty for a new category) \
+and new advice from a recent newsletter digest.
+
+Your job is to produce an updated advice document that:
+- Integrates the new advice with existing advice, removing duplicates
+- Keeps advice actionable and specific, not generic
+- Groups related advice together under short headings if there are multiple topics
+- Removes advice that has been superseded by newer, more relevant guidance
+- Stays concise: aim for 5-15 bullet points total, organized by topic
+- Uses plain language, no markdown formatting beyond simple headings and bullets
+
+Return your response as valid JSON with this exact structure:
+{"advice": "The full updated advice document as a single string with newlines", "updated_at": "reason for changes in this update"}
 """
 
 
@@ -78,6 +99,21 @@ class DigestEntry(BaseModel):
 class DigestResponse(BaseModel):
     digest: DigestEntry
     newsletters_used: int
+
+
+class QuickDigestRequest(BaseModel):
+    text: str = Field(..., min_length=20, max_length=100_000)
+
+
+class AdviceDocument(BaseModel):
+    category: str
+    advice: str
+    updated_at: str
+    update_count: int = 0
+
+
+class AdviceListResponse(BaseModel):
+    documents: list[AdviceDocument]
 
 
 class DigestsListResponse(BaseModel):
@@ -118,22 +154,115 @@ def _append_digest(manifest: dict, entry: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Per-category advice documents
+# ---------------------------------------------------------------------------
+
+_SAFE_CATEGORY_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+
+
+def _advice_path(category: str) -> Path:
+    return _ADVICE_DIR / f"{category}.json"
+
+
+def _load_advice(category: str) -> dict:
+    path = _advice_path(category)
+    if not path.exists():
+        return {"category": category, "advice": "", "updated_at": "", "update_count": 0}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.warning("corrupt advice file for %s, resetting", category)
+        return {"category": category, "advice": "", "updated_at": "", "update_count": 0}
+
+
+def _save_advice(doc: dict) -> None:
+    _ADVICE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _advice_path(doc["category"])
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _load_all_advice() -> list[dict]:
+    if not _ADVICE_DIR.exists():
+        return []
+    docs = []
+    for path in sorted(_ADVICE_DIR.glob("*.json")):
+        try:
+            docs.append(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return docs
+
+
+async def _synthesize_advice(category: str, new_advice: str) -> dict:
+    """Merge new digest advice into the running advice document for a category."""
+    existing = _load_advice(category)
+    current_advice = existing.get("advice", "")
+
+    if not new_advice.strip():
+        return existing
+
+    user_prompt = (
+        f"Category: {category}\n\n"
+        f"Current advice document:\n{current_advice or '(empty, this is the first digest for this category)'}\n\n"
+        f"New advice from latest digest:\n{new_advice}"
+    )
+
+    chunks: list[str] = []
+    async for chunk in _run_llm_stream(
+        system=_ADVICE_SYNTHESIS_PROMPT,
+        user_prompt=user_prompt,
+        max_tokens=1024,
+    ):
+        chunks.append(chunk)
+    raw = "".join(chunks)
+
+    try:
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if json_match:
+            parsed = json.loads(json_match.group())
+        else:
+            parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Advice synthesis response was not valid JSON, appending raw")
+        parsed = {"advice": f"{current_advice}\n\n{new_advice}".strip(), "updated_at": "append fallback"}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "category": category,
+        "advice": str(parsed.get("advice", "")),
+        "updated_at": now_iso,
+        "update_count": existing.get("update_count", 0) + 1,
+    }
+
+    with _manifest_lock:
+        _save_advice(doc)
+
+    logger.info("updated advice for %s (update #%d): %s", category, doc["update_count"], parsed.get("updated_at", ""))
+    return doc
+
+
+# ---------------------------------------------------------------------------
 # LLM summarization
 # ---------------------------------------------------------------------------
 
 async def _summarize_newsletters(texts: list[str]) -> dict:
     """Call Zeus LLM to summarize newsletter text(s) into structured JSON."""
     combined = "\n\n---\n\n".join(texts)
-    # Truncate if extremely long (keep ~8k words for context)
+    # Truncate if extremely long (keep ~4k words for context)
     words = combined.split()
-    if len(words) > 8000:
-        combined = " ".join(words[:8000]) + "\n\n[truncated]"
+    if len(words) > 4000:
+        combined = " ".join(words[:4000]) + "\n\n[truncated]"
 
-    raw = await _run_llm(
+    chunks: list[str] = []
+    async for chunk in _run_llm_stream(
         system=_SUMMARIZE_SYSTEM_PROMPT,
         user_prompt=f"Summarize the following newsletter(s):\n\n{combined}",
         max_tokens=1024,
-    )
+    ):
+        chunks.append(chunk)
+    raw = "".join(chunks)
 
     # Parse JSON from LLM response
     try:
@@ -265,7 +394,43 @@ async def generate_newsletter_digest(body: DigestRequest) -> DigestResponse:
         _append_digest(manifest, entry.model_dump())
         _save_manifest(manifest)
 
+    # Synthesize advice into the running category document
+    if summary_dict["advice"]:
+        await _synthesize_advice(body.newsletter_type, summary_dict["advice"])
+
     return DigestResponse(digest=entry, newsletters_used=len(newsletters))
+
+
+@router.post("/api/newsletter/digest-text", response_model=DigestResponse)
+async def generate_digest_from_text(body: QuickDigestRequest) -> DigestResponse:
+    """Summarize pasted text through the newsletter digest pipeline."""
+    summary_dict = await _summarize_newsletters([body.text])
+
+    audio_file = await _generate_audio(summary_dict)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    entry = DigestEntry(
+        id=str(uuid.uuid4()),
+        newsletter_type="quick",
+        date=now_iso,
+        summary=summary_dict["summary"],
+        bullets=summary_dict["bullets"],
+        advice=summary_dict["advice"],
+        audio_file=audio_file,
+        audio_url=f"/api/newsletter/audio/{audio_file}" if audio_file else None,
+        generated_at=now_iso,
+    )
+
+    with _manifest_lock:
+        manifest = _load_manifest()
+        _append_digest(manifest, entry.model_dump())
+        _save_manifest(manifest)
+
+    # Synthesize advice into the "quick" category document
+    if summary_dict["advice"]:
+        await _synthesize_advice("quick", summary_dict["advice"])
+
+    return DigestResponse(digest=entry, newsletters_used=1)
 
 
 @router.get("/api/newsletter/digests", response_model=DigestsListResponse)
@@ -276,6 +441,26 @@ async def list_digests(limit: int = 10) -> DigestsListResponse:
     return DigestsListResponse(
         digests=[DigestEntry(**d) for d in digests],
     )
+
+
+@router.get("/api/newsletter/advice", response_model=AdviceListResponse)
+async def list_advice_documents() -> AdviceListResponse:
+    """List all per-category advice documents."""
+    docs = _load_all_advice()
+    return AdviceListResponse(
+        documents=[AdviceDocument(**d) for d in docs if d.get("advice")],
+    )
+
+
+@router.get("/api/newsletter/advice/{category}", response_model=AdviceDocument)
+async def get_advice_document(category: str) -> AdviceDocument:
+    """Get the running advice document for a specific category."""
+    if not _SAFE_CATEGORY_RE.match(category):
+        raise HTTPException(status_code=400, detail="Invalid category name")
+    doc = _load_advice(category)
+    if not doc.get("advice"):
+        raise HTTPException(status_code=404, detail=f"No advice document for category {category!r}")
+    return AdviceDocument(**doc)
 
 
 @router.get("/api/newsletter/audio/{filename}")
