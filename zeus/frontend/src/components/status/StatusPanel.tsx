@@ -1,9 +1,6 @@
 // zeus/frontend/src/components/status/StatusPanel.tsx
 import { useEffect, useState } from 'react'
 import { PhaosOrb } from '../orb/PhaosOrb'
-import { AudioBars } from '../orb/AudioBars'
-import { useVoiceStore } from '../../store/voiceStore'
-import type { VoiceState } from '../../store/voiceStore'
 
 interface ServiceHealth {
   name: string
@@ -22,14 +19,10 @@ interface MetricsData {
   avg_latency_ms?: number | null
 }
 
-function getStateLabel(state: VoiceState): string {
-  switch (state) {
-    case 'listening': return 'LISTENING'
-    case 'processing': return 'PROCESSING'
-    case 'speaking': return 'SPEAKING'
-    case 'wake_detected': return 'WAKE DETECTED'
-    default: return 'IDLE'
-  }
+interface ActiveModelData {
+  provider?: string
+  model?: string
+  gpu_available?: boolean | null
 }
 
 interface MetricRowProps {
@@ -45,6 +38,20 @@ function MetricRow({ label, value, status = 'ok' }: MetricRowProps) {
     error: 'text-error',
   }[status]
 
+  const isLong = value.length > 14
+  if (isLong) {
+    return (
+      <div className="flex flex-col gap-1 py-1.5">
+        <span className="text-[10px] font-label uppercase tracking-widest text-on-surface-variant/60">
+          {label}
+        </span>
+        <span className={`text-[10px] font-label font-semibold break-all ${valueColor}`} title={value}>
+          {value}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-center justify-between py-1.5">
       <span className="text-[10px] font-label uppercase tracking-widest text-on-surface-variant/60">
@@ -58,22 +65,26 @@ function MetricRow({ label, value, status = 'ok' }: MetricRowProps) {
 }
 
 export function StatusPanel() {
-  const { state, level } = useVoiceStore()
   const [status, setStatus] = useState<StatusData>({})
   const [metrics, setMetrics] = useState<MetricsData>({})
+  const [activeModel, setActiveModel] = useState<ActiveModelData>({})
 
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const [statusRes, metricsRes] = await Promise.all([
+        const [statusRes, metricsRes, modelRes] = await Promise.all([
           fetch('/status'),
           fetch('/admin/metrics'),
+          fetch('/models/active'),
         ])
         if (statusRes.ok) {
           setStatus(await statusRes.json() as StatusData)
         }
         if (metricsRes.ok) {
           setMetrics(await metricsRes.json() as MetricsData)
+        }
+        if (modelRes.ok) {
+          setActiveModel(await modelRes.json() as ActiveModelData)
         }
       } catch {
         // backend not available
@@ -87,16 +98,9 @@ export function StatusPanel() {
 
   return (
     <aside className="w-[280px] shrink-0 border-l border-outline-variant/20 flex flex-col bg-surface-container-lowest/30">
-      {/* Orb panel */}
-      <div className="flex flex-col items-center p-6 border-b border-outline-variant/20 gap-3">
+      {/* Voice state indicator */}
+      <div className="flex flex-col items-center p-6 border-b border-outline-variant/20">
         <PhaosOrb size="compact" />
-        <span
-          className="text-[10px] font-label tracking-[0.2em] uppercase font-medium"
-          style={{ color: state === 'idle' ? '#859398' : '#00d4ff' }}
-        >
-          {getStateLabel(state)}
-        </span>
-        <AudioBars level={level} barCount={15} height={20} />
       </div>
 
       {/* System metrics */}
@@ -118,9 +122,13 @@ export function StatusPanel() {
             const latencyValue = typeof avgLatency === 'number' ? `${Math.round(avgLatency)}ms` : '—'
             const latencyStatus: 'ok' | 'warn' | 'error' =
               typeof avgLatency === 'number' && avgLatency > 1000 ? 'warn' : 'ok'
+            const modelName = activeModel.model ?? '—'
+            const modelStatus: 'ok' | 'warn' | 'error' =
+              activeModel.provider === 'ollama' && activeModel.gpu_available === false ? 'warn' : 'ok'
             return (
               <>
                 <MetricRow label="Core Health" value={qdrantStatus} status={coreStatus} />
+                <MetricRow label="Active Model" value={modelName} status={modelStatus} />
                 <MetricRow label="Model Env" value={status.environment?.toUpperCase() ?? '—'} status="ok" />
                 <MetricRow label="Uptime" value={status.uptime_seconds != null ? `${Math.floor(status.uptime_seconds)}s` : '—'} status="ok" />
                 <MetricRow label="Avg Latency" value={latencyValue} status={latencyStatus} />

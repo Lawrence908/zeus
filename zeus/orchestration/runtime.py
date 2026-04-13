@@ -230,14 +230,19 @@ class AgentRuntime:
 
     def get_status(self) -> dict:
         """Return a serialisable snapshot of the whole swarm."""
+        # Resolve the actually-active model at call time so runtime model
+        # switches (POST /models/active) are reflected across AgentsPage / admin.
+        from zeus.core.query import _active_model_name
+        active_model = _active_model_name()
         return {
             "environment": ZEUS_ENV,
             "ruflo_version": self._ruflo_config.get("version", "unknown"),
+            "active_model": active_model,
             "agents": {
                 name: {
                     "status": state.status,
                     "description": state.definition.description,
-                    "model": state.definition.model,
+                    "model": active_model,
                     "models": self._get_model_map(state.definition.raw),
                     "auto_start": state.definition.auto_start,
                     "tools": state.definition.tools,

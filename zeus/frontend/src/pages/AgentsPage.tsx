@@ -23,6 +23,7 @@ interface AgentInfo {
 interface OrchestrationStatus {
   environment: string
   ruflo_version: string
+  active_model?: string
   agents: Record<string, AgentInfo>
 }
 
@@ -116,6 +117,7 @@ function AgentCard({ name, agent, isSelected, onSelect, onToggle, isToggling, en
   const altEnv = environment === 'dev' ? 'prod' : 'dev'
   const altModel = agent.models?.[altEnv]
   const isLocal = !agent.model.includes('claude')
+  const tooltip = altModel ? `${altEnv}: ${altModel}` : undefined
 
   return (
     <div
@@ -174,7 +176,7 @@ function AgentCard({ name, agent, isSelected, onSelect, onToggle, isToggling, en
               ? 'bg-primary-container/20 border-primary/30 text-primary'
               : 'bg-tertiary-container/20 border-tertiary/30 text-tertiary',
           ].join(' ')}
-          title={altModel ? `${altEnv}: ${altModel}` : undefined}
+          title={tooltip}
         >
           {isLocal ? '⬡ ' : '☁ '}{agent.model || 'no model'}
         </span>

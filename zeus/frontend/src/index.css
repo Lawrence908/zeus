@@ -31,10 +31,6 @@
   backdrop-filter: blur(20px);
 }
 
-.orb-glow {
-  box-shadow: 0 0 40px rgba(0, 212, 255, 0.3), 0 0 80px rgba(0, 212, 255, 0.1);
-}
-
 .nebula-bleed {
   background:
     radial-gradient(circle at 80% 20%, rgba(96, 1, 209, 0.08) 0%, transparent 50%),
@@ -52,16 +48,6 @@
   50% { opacity: 0.9; transform: scale(1.05); }
 }
 .animate-pulse-cyan { animation: pulse-cyan 3s ease-in-out infinite; }
-
-@keyframes orb-spin-slow { to { transform: rotate(360deg); } }
-@keyframes orb-spin-reverse { to { transform: rotate(-360deg); } }
-.orb-ring-slow { animation: orb-spin-slow 10s linear infinite; }
-.orb-ring-reverse { animation: orb-spin-reverse 15s linear infinite; }
-
-@keyframes bar-bounce {
-  0%, 100% { transform: scaleY(0.4); }
-  50% { transform: scaleY(1); }
-}
 
 @keyframes thinking-dot {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }

@@ -2,7 +2,6 @@
 import { useNavigate } from 'react-router-dom'
 import { TopNav } from '../components/layout/TopNav'
 import { PhaosOrb } from '../components/orb/PhaosOrb'
-import { AudioBars } from '../components/orb/AudioBars'
 import { useVoiceStore, type VoiceState } from '../store/voiceStore'
 import { useVoiceState } from '../hooks/useVoiceState'
 
@@ -33,7 +32,7 @@ function CornerAccent({ position }: { position: 'tl' | 'tr' | 'bl' | 'br' }) {
 
 export function VizPage() {
   const navigate = useNavigate()
-  const { state, level } = useVoiceStore()
+  const { state } = useVoiceStore()
   useVoiceState()
 
   const stateLabel = getStateLabel(state)
@@ -113,13 +112,6 @@ export function VizPage() {
         style={{ paddingTop: 52 }}
       >
         <PhaosOrb size="fullscreen" />
-      </div>
-
-      {/* Audio bars bottom */}
-      <div className="flex justify-center pb-24 px-8">
-        <div className="w-full max-w-md">
-          <AudioBars level={level} barCount={32} height={64} />
-        </div>
       </div>
 
       {/* Bottom-right controls */}
