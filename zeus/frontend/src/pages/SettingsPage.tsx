@@ -89,6 +89,65 @@ export function SettingsPage() {
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState<string>('')
 
+  const [telegramSaving, setTelegramSaving] = useState(false)
+  const [telegramStatus, setTelegramStatus] = useState<string>('')
+  const [telegramTokenMasked, setTelegramTokenMasked] = useState<string | null>(null)
+
+  type BenchmarkResult = {
+    model: string
+    host: string
+    started_at: number
+    finished_at: number
+    tokens_per_second: number
+    ttft_ms: number | null
+    prompt_eval_tps: number
+    total_eval_tokens: number
+    error: string | null
+  }
+  type BenchmarksPayload = {
+    results: Record<string, BenchmarkResult>
+    updated_at: number | null
+    status: { running: boolean; current: string | null; queued: string[]; completed: string[] }
+  }
+  const [benchmarks, setBenchmarks] = useState<BenchmarksPayload | null>(null)
+  const [benchStarting, setBenchStarting] = useState(false)
+
+  const fetchBenchmarks = useCallback(async () => {
+    try {
+      const res = await fetch('/models/benchmarks')
+      if (res.ok) setBenchmarks(await res.json() as BenchmarksPayload)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchBenchmarks()
+  }, [fetchBenchmarks])
+
+  // Poll while a run is in progress
+  useEffect(() => {
+    if (!benchmarks?.status.running) return
+    const id = setInterval(() => { void fetchBenchmarks() }, 2000)
+    return () => clearInterval(id)
+  }, [benchmarks?.status.running, fetchBenchmarks])
+
+  const handleRunBenchmarks = async (models?: string[]) => {
+    setBenchStarting(true)
+    try {
+      const res = await fetch('/models/benchmarks/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ models: models ?? null }),
+      })
+      if (res.ok) {
+        await fetchBenchmarks()
+      }
+    } finally {
+      setBenchStarting(false)
+    }
+  }
+
   const {
     theme, setTheme,
     modelEnv, setModelEnv,
@@ -130,6 +189,91 @@ export function SettingsPage() {
   useEffect(() => {
     void fetchModels()
   }, [fetchModels])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadTelegram = async () => {
+      try {
+        const res = await fetch('/admin/settings')
+        if (!res.ok) return
+        const data = await res.json() as {
+          telegram?: {
+            enabled?: boolean
+            allowed_chat_ids?: number[]
+            bot_token_masked?: string | null
+            aegis_policy?: string | null
+          }
+        }
+        if (cancelled) return
+        const tg = data.telegram ?? {}
+        if (typeof tg.enabled === 'boolean') setTelegramEnabled(tg.enabled)
+        if (Array.isArray(tg.allowed_chat_ids)) {
+          setTelegramChatIds(tg.allowed_chat_ids.join('\n'))
+        }
+        setTelegramTokenMasked(tg.bot_token_masked ?? null)
+        // Never populate the real token into the local store.
+        setTelegramBotToken('')
+      } catch {
+        // backend not available
+      }
+    }
+    void loadTelegram()
+    return () => { cancelled = true }
+  }, [setTelegramEnabled, setTelegramChatIds, setTelegramBotToken])
+
+  const handleSaveTelegram = async () => {
+    setTelegramSaving(true)
+    setTelegramStatus('')
+    try {
+      const chatIds = telegramChatIds
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n) && !Number.isNaN(n))
+
+      const payload: {
+        telegram: {
+          enabled: boolean
+          allowed_chat_ids: number[]
+          bot_token?: string
+        }
+      } = {
+        telegram: {
+          enabled: telegramEnabled,
+          allowed_chat_ids: chatIds,
+        },
+      }
+      if (telegramBotToken.trim()) {
+        payload.telegram.bot_token = telegramBotToken.trim()
+      }
+
+      const res = await fetch('/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        setTelegramStatus(`Save failed (${res.status}) ${text}`.trim())
+        return
+      }
+      setTelegramStatus('Saved. Bot restarted.')
+      setTelegramBotToken('')
+      // Refresh masked token display
+      const refreshed = await fetch('/admin/settings')
+      if (refreshed.ok) {
+        const data = await refreshed.json() as {
+          telegram?: { bot_token_masked?: string | null }
+        }
+        setTelegramTokenMasked(data.telegram?.bot_token_masked ?? null)
+      }
+    } catch (err) {
+      setTelegramStatus(`Save failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setTelegramSaving(false)
+    }
+  }
 
   const handleModelSwitch = async (modelName: string) => {
     setModelLoading(true)
@@ -258,13 +402,25 @@ export function SettingsPage() {
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-2">
                   <FieldLabel>Available Ollama Models</FieldLabel>
-                  <button
-                    onClick={() => void fetchModels()}
-                    className="text-[10px] font-label uppercase tracking-wider text-on-surface-variant/60 hover:text-on-surface transition-colors flex items-center gap-1"
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 12 }}>refresh</span>
-                    Refresh
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => void handleRunBenchmarks()}
+                      disabled={benchStarting || benchmarks?.status.running}
+                      className="text-[10px] font-label uppercase tracking-wider text-on-surface-variant/60 hover:text-on-surface transition-colors flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 12 }}>speed</span>
+                      {benchmarks?.status.running
+                        ? `Benchmarking ${benchmarks.status.current ?? '...'}`
+                        : 'Run Benchmarks'}
+                    </button>
+                    <button
+                      onClick={() => void fetchModels()}
+                      className="text-[10px] font-label uppercase tracking-wider text-on-surface-variant/60 hover:text-on-surface transition-colors flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 12 }}>refresh</span>
+                      Refresh
+                    </button>
+                  </div>
                 </div>
 
                 {modelError && (
@@ -330,6 +486,31 @@ export function SettingsPage() {
                               {m.size != null && (
                                 <span className="text-[10px] font-label text-on-surface-variant/40">
                                   {formatBytes(m.size)}
+                                </span>
+                              )}
+                              {(() => {
+                                const b = benchmarks?.results[m.name]
+                                if (!b) return null
+                                if (b.error) {
+                                  return (
+                                    <span className="text-[10px] font-label text-red-400/80" title={b.error}>
+                                      bench failed
+                                    </span>
+                                  )
+                                }
+                                return (
+                                  <span
+                                    className="text-[10px] font-label"
+                                    style={{ color: '#00d4ff' }}
+                                    title={`TTFT ${b.ttft_ms ?? '?'} ms · prompt-eval ${b.prompt_eval_tps} tok/s`}
+                                  >
+                                    {b.tokens_per_second.toFixed(1)} tok/s
+                                  </span>
+                                )
+                              })()}
+                              {benchmarks?.status.running && benchmarks.status.current === m.name && (
+                                <span className="text-[10px] font-label text-amber-400/80">
+                                  benchmarking…
                                 </span>
                               )}
                             </div>
@@ -410,7 +591,7 @@ export function SettingsPage() {
                   type="password"
                   value={telegramBotToken}
                   onChange={(e) => setTelegramBotToken(e.target.value)}
-                  placeholder="••••••••••••••••••••••"
+                  placeholder={telegramTokenMasked ? `Saved: ${telegramTokenMasked} — leave blank to keep` : '••••••••••••••••••••••'}
                   className={inputClass()}
                   disabled={!telegramEnabled}
                 />
@@ -428,8 +609,22 @@ export function SettingsPage() {
                   disabled={!telegramEnabled}
                 />
                 <p className="mt-1 text-xs font-body text-on-surface-variant/50">
-                  One Telegram chat ID per line.
+                  One Telegram chat ID per line. Empty means allow all.
                 </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSaveTelegram}
+                  disabled={telegramSaving}
+                  className="px-4 py-2 rounded text-sm font-body bg-primary-container text-on-primary-container hover:opacity-90 disabled:opacity-40 transition-opacity"
+                >
+                  {telegramSaving ? 'Saving…' : 'Save & Restart Bot'}
+                </button>
+                {telegramStatus && (
+                  <span className="text-xs font-body text-on-surface-variant/70">{telegramStatus}</span>
+                )}
               </div>
             </div>
           )}

@@ -2,10 +2,15 @@
 import asyncio
 import os
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from zeus.memory.search import MEMORY_SEARCH_TOP_K, format_context_block, get_profile_facts, search_memories
+
+QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "zeus_memories")
+ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "chris")
 
 ORACLE_VERSION = "0.1.0"
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
@@ -84,6 +89,29 @@ class MemoryHit(BaseModel):
 
 class MemorySearchResponse(BaseModel):
     results: list[MemoryHit]
+
+
+class MemoryEntry(BaseModel):
+    id: str
+    text: str
+    source: str
+    metadata: dict
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class MemoryListResponse(BaseModel):
+    entries: list[MemoryEntry]
+    next_offset: str | None = None
+    total_estimate: int | None = None
+
+
+class MemorySourcesResponse(BaseModel):
+    sources: list[str]
+
+
+class MemoryUpdateBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=8000)
 
 
 class IngestTriggerBody(BaseModel):
@@ -231,6 +259,157 @@ async def ingest_trigger(body: IngestTriggerBody, request: Request):
     total = sum(r.chunks_stored for r in results)
     labels = [r.source for r in results]
     return IngestTriggerResponse(status="ok", chunks_indexed=total, sources_run=labels)
+
+
+def _point_to_entry(point: dict) -> MemoryEntry:
+    payload = point.get("payload", {}) or {}
+    text = str(payload.get("data", "") or "").strip()
+    source = str(payload.get("source", "") or "unknown")
+    metadata = {
+        k: v for k, v in payload.items()
+        if k not in {"data", "hash", "user_id"}
+    }
+    return MemoryEntry(
+        id=str(point.get("id", "")),
+        text=text,
+        source=source,
+        metadata=metadata,
+        created_at=payload.get("created_at"),
+        updated_at=payload.get("updated_at"),
+    )
+
+
+async def _qdrant_post(client: httpx.AsyncClient, path: str, body: dict) -> dict:
+    url = f"{QDRANT_URL.rstrip('/')}{path}"
+    try:
+        resp = await client.post(url, json=body, timeout=10.0)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Qdrant request failed: {exc}") from exc
+    return resp.json()
+
+
+@router.get("/memory/list", response_model=MemoryListResponse)
+async def memory_list(
+    request: Request,
+    limit: int = 50,
+    offset: str | None = None,
+    source: str | None = None,
+):
+    """Browse stored memories via Qdrant scroll. Optional ``source`` payload filter."""
+    limit = max(1, min(200, limit))
+    client: httpx.AsyncClient = request.app.state.http_client
+
+    must: list[dict] = [{"key": "user_id", "match": {"value": ZEUS_USER_ID}}]
+    if source:
+        must.append({"key": "source", "match": {"value": source}})
+
+    body: dict = {
+        "limit": limit,
+        "with_payload": True,
+        "with_vector": False,
+        "filter": {"must": must},
+    }
+    if offset:
+        body["offset"] = offset
+
+    data = await _qdrant_post(
+        client, f"/collections/{QDRANT_COLLECTION}/points/scroll", body
+    )
+    result = data.get("result", {}) or {}
+    points = result.get("points", []) or []
+    entries = [_point_to_entry(p) for p in points]
+
+    total_estimate: int | None = None
+    if not offset and not source:
+        try:
+            info_resp = await client.get(
+                f"{QDRANT_URL.rstrip('/')}/collections/{QDRANT_COLLECTION}",
+                timeout=5.0,
+            )
+            if info_resp.status_code == 200:
+                total_estimate = int(
+                    info_resp.json().get("result", {}).get("points_count") or 0
+                )
+        except httpx.HTTPError:
+            pass
+
+    return MemoryListResponse(
+        entries=entries,
+        next_offset=str(result.get("next_page_offset")) if result.get("next_page_offset") else None,
+        total_estimate=total_estimate,
+    )
+
+
+@router.get("/memory/sources", response_model=MemorySourcesResponse)
+async def memory_sources(request: Request):
+    """Distinct ``source`` values for the current user. Used by the browser filter."""
+    client: httpx.AsyncClient = request.app.state.http_client
+    seen: set[str] = set()
+    offset: str | None = None
+    pages = 0
+    while pages < 20:
+        body: dict = {
+            "limit": 200,
+            "with_payload": {"include": ["source"]},
+            "with_vector": False,
+            "filter": {"must": [{"key": "user_id", "match": {"value": ZEUS_USER_ID}}]},
+        }
+        if offset:
+            body["offset"] = offset
+        data = await _qdrant_post(
+            client, f"/collections/{QDRANT_COLLECTION}/points/scroll", body
+        )
+        result = data.get("result", {}) or {}
+        for point in result.get("points", []) or []:
+            src = (point.get("payload", {}) or {}).get("source")
+            if src:
+                seen.add(str(src))
+        offset = result.get("next_page_offset")
+        if not offset:
+            break
+        pages += 1
+    return MemorySourcesResponse(sources=sorted(seen))
+
+
+@router.get("/memory/{memory_id}", response_model=MemoryEntry)
+async def memory_get(memory_id: str, request: Request) -> MemoryEntry:
+    client: httpx.AsyncClient = request.app.state.http_client
+    url = f"{QDRANT_URL.rstrip('/')}/collections/{QDRANT_COLLECTION}/points/{memory_id}"
+    try:
+        resp = await client.get(url, params={"with_payload": "true"}, timeout=5.0)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Qdrant request failed: {exc}") from exc
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Qdrant error: {resp.text}")
+    point = resp.json().get("result") or {}
+    return _point_to_entry(point)
+
+
+@router.patch("/memory/{memory_id}", response_model=MemoryEntry)
+async def memory_update(memory_id: str, body: MemoryUpdateBody, request: Request) -> MemoryEntry:
+    memory = getattr(request.app.state, "memory", None)
+    if memory is None:
+        raise HTTPException(status_code=503, detail="Memory client not initialized")
+    try:
+        await asyncio.to_thread(memory.update, memory_id=memory_id, data=body.text)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"mem0 update failed: {exc}") from exc
+    return await memory_get(memory_id, request)
+
+
+@router.delete("/memory/{memory_id}")
+async def memory_delete(memory_id: str, request: Request) -> dict:
+    memory = getattr(request.app.state, "memory", None)
+    if memory is None:
+        raise HTTPException(status_code=503, detail="Memory client not initialized")
+    try:
+        await asyncio.to_thread(memory.delete, memory_id=memory_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"mem0 delete failed: {exc}") from exc
+    return {"ok": True, "id": memory_id}
 
 
 @router.get("/context/profile", response_model=ProfileResponse)

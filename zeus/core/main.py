@@ -4,6 +4,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
@@ -12,12 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from zeus.api.main import router as oracle_router
+from zeus.bench.runner import BenchmarkRunner, load_results, save_results
 from zeus.core.admin import init_query_log
 from zeus.core.admin import router as admin_router
 from zeus.core.chat import router as chat_router
 from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.newsletter import router as newsletter_router
 from zeus.core.query import QueryEngine, _run_llm, _active_model_name, _chat_use_claude, _ollama_model, set_ollama_model
+from zeus.core.runtime_settings import RuntimeSettings
 from zeus.core.session_storage import SQLiteSessionStorage
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
@@ -100,10 +103,16 @@ async def lifespan(app: FastAPI):
     # Observability — query log ring buffer
     init_query_log(app)
 
-    # Telegram bridge (LAB-291) — optional, enabled via TELEGRAM_ENABLED
+    # Runtime settings (LAB-322) — JSON-backed overrides for env config.
+    app.state.runtime_settings = RuntimeSettings()
+
+    # Telegram bridge (LAB-291) — optional, enabled via runtime settings or env.
     app.state.telegram_bot = None
     try:
-        tg_bot = build_telegram_bot(app.state.query_engine)
+        tg_bot = build_telegram_bot(
+            app.state.query_engine,
+            overrides=app.state.runtime_settings.get_section("telegram"),
+        )
         if tg_bot is not None:
             await tg_bot.start()
             app.state.telegram_bot = tg_bot
@@ -290,12 +299,148 @@ async def get_active_model(request: Request) -> ActiveModelResponse:
     return ActiveModelResponse(provider=provider, model=model, gpu_available=gpu_available)
 
 
+class BenchmarkRunRequest(BaseModel):
+    models: list[str] | None = None  # None = all chat models
+
+
+_bench_lock = asyncio.Lock()
+_bench_state: dict[str, Any] = {"running": False, "models": [], "current": None, "completed": []}
+
+
+async def _bench_worker(models: list[str] | None) -> None:
+    runner = BenchmarkRunner(ollama_url=OLLAMA_URL)
+    try:
+        async with httpx.AsyncClient() as client:
+            target = models or await runner.list_models(client)
+        _bench_state["models"] = list(target)
+        _bench_state["completed"] = []
+
+        def on_progress(evt: dict[str, Any]) -> None:
+            if evt["event"] == "start":
+                _bench_state["current"] = evt["model"]
+            else:
+                _bench_state["current"] = None
+                _bench_state["completed"].append(evt["model"])
+                save_results([
+                    r for r in _scratch_results if r.model == evt["model"]
+                ])
+
+        _scratch_results = []
+        async with httpx.AsyncClient() as client:
+            for model in target:
+                on_progress({"event": "start", "model": model})
+                res = await runner.run_model(model, client=client)
+                _scratch_results.append(res)
+                save_results([res])
+                on_progress({"event": "done", "model": model, "result": res.to_dict()})
+    finally:
+        _bench_state["running"] = False
+        _bench_state["current"] = None
+
+
+@app.get("/models/benchmarks")
+async def get_benchmarks() -> dict[str, Any]:
+    payload = load_results()
+    payload["status"] = {
+        "running": _bench_state["running"],
+        "current": _bench_state["current"],
+        "queued": _bench_state["models"],
+        "completed": _bench_state["completed"],
+    }
+    return payload
+
+
+@app.post("/models/benchmarks/run")
+async def run_benchmarks(body: BenchmarkRunRequest) -> dict[str, Any]:
+    if _bench_lock.locked() or _bench_state["running"]:
+        raise HTTPException(status_code=409, detail="Benchmark already running")
+
+    async def _runner() -> None:
+        async with _bench_lock:
+            _bench_state["running"] = True
+            try:
+                await _bench_worker(body.models)
+            except Exception as exc:
+                import logging
+                logging.getLogger("zeus").exception("benchmark run failed: %s", exc)
+
+    asyncio.create_task(_runner())
+    return {"ok": True, "started": True}
+
+
 @app.post("/models/active", response_model=ActiveModelResponse)
 async def set_active_model(body: SetModelRequest) -> ActiveModelResponse:
     """Switch the active Ollama model at runtime (no restart needed)."""
     set_ollama_model(body.model)
     provider = "claude" if _chat_use_claude() else "ollama"
     return ActiveModelResponse(provider=provider, model=_active_model_name())
+
+
+async def _restart_telegram_bot(app: FastAPI) -> None:
+    """Tear down the existing telegram bot (if any) and rebuild from runtime settings."""
+    existing = getattr(app.state, "telegram_bot", None)
+    if existing is not None:
+        try:
+            await existing.stop()
+        except Exception as exc:
+            import logging
+            logging.getLogger("zeus").warning("telegram bot stop failed: %s", exc)
+        app.state.telegram_bot = None
+
+    overrides = app.state.runtime_settings.get_section("telegram")
+    tg_bot = build_telegram_bot(app.state.query_engine, overrides=overrides)
+    if tg_bot is None:
+        return
+    try:
+        await tg_bot.start()
+        app.state.telegram_bot = tg_bot
+    except Exception as exc:
+        import logging
+        logging.getLogger("zeus").warning("telegram bot start failed: %s", exc)
+
+
+class TelegramSettingsPatch(BaseModel):
+    enabled: bool | None = None
+    bot_token: str | None = None
+    allowed_chat_ids: list[int] | None = None
+    aegis_policy: str | None = None
+
+
+class SettingsPatch(BaseModel):
+    telegram: TelegramSettingsPatch | None = None
+
+
+def _mask_token(token: str | None) -> str | None:
+    if not token:
+        return None
+    if len(token) <= 8:
+        return "***"
+    return f"{token[:4]}…{token[-4:]}"
+
+
+@app.get("/admin/settings")
+async def get_settings(request: Request) -> dict:
+    rs: RuntimeSettings = request.app.state.runtime_settings
+    snap = rs.snapshot()
+    tg = dict(snap.get("telegram", {}))
+    if "bot_token" in tg:
+        tg["bot_token_masked"] = _mask_token(tg.pop("bot_token"))
+    return {"telegram": tg}
+
+
+@app.patch("/admin/settings")
+async def patch_settings(body: SettingsPatch, request: Request) -> dict:
+    rs: RuntimeSettings = request.app.state.runtime_settings
+    changed: list[str] = []
+
+    if body.telegram is not None:
+        updates = body.telegram.model_dump(exclude_none=True)
+        if updates:
+            rs.update_section("telegram", updates)
+            changed.append("telegram")
+            await _restart_telegram_bot(request.app)
+
+    return {"ok": True, "changed": changed}
 
 
 class TelegramStatusResponse(BaseModel):
