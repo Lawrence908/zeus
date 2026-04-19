@@ -315,7 +315,9 @@ async def create_task(body: TaskCreateRequest, request: Request) -> dict:
         for step in record.steps:
             result = await runner._execute_step(body.agent, step)
             record.results.append(result)
-            if result.status == "failed" and step.on_failure == "abort":
+            # Match TaskRunner.run: any terminal "failed" result stops the task.
+            # "skipped" results (on_failure="skip") are not failures.
+            if result.status == "failed":
                 record.status = TaskStatus.FAILED
                 record.elapsed_ms = (_time.monotonic() - t0) * 1000
                 return
@@ -352,3 +354,12 @@ async def get_task(task_id: str, request: Request) -> dict:
         if r.id == task_id:
             return r.model_dump()
     raise HTTPException(404, detail=f"Task not found: {task_id!r}")
+
+
+@router.get("/kairos/status")
+async def kairos_status(request: Request) -> dict:
+    """Report current state of the KAIROS daemon (LAB-330)."""
+    state = getattr(request.app.state, "kairos_state", None)
+    if state is None:
+        return {"enabled": False, "reason": "daemon not started"}
+    return state.snapshot()

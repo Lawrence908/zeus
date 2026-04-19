@@ -24,10 +24,14 @@ _FAILED_REPLY_RE = re.compile(
 from zeus.core.prompts import render as render_prompt
 from zeus.core.sessions import SessionManager, Turn
 from zeus.memory.search import (
+    KNOWLEDGE_SEARCH_TOP_K,
     MEMORY_SEARCH_TOP_K,
+    REFERENCE_SEARCH_TOP_K,
     format_context_block,
     get_profile_facts,
+    search_knowledge,
     search_memories,
+    search_reference,
 )
 from zeus.safety.policy_engine import aegis_enabled, evaluate_text
 
@@ -241,11 +245,122 @@ async def _run_llm_stream(
                     break
 
 
+# Sub-budget split within the retrieval third of the context window.
+# Phase 2 (LAB-NEW-C): reference layer is live; 10% of retrieval budget is
+# carved out of knowledge for kiwix + NOMAD snippets.
+_RETRIEVAL_SPLIT = {
+    "profile": 0.20,
+    "memory": 0.25,
+    "knowledge": 0.45,
+    "reference": 0.10,
+}
+
+
+async def _collect_retrieval_context(
+    *,
+    message: str,
+    retrieval_budget: int,
+    use_context: bool,
+) -> tuple[str, str, str, str, list[str]]:
+    """Fetch profile + memory + knowledge in parallel; format each as a labelled block.
+
+    Returns (profile_section, memory_section, knowledge_section, reference_section, sources).
+    Reference is a Phase 2 placeholder and always empty here.
+    """
+    prof_budget = max(128, int(retrieval_budget * _RETRIEVAL_SPLIT["profile"]))
+    mem_budget = max(128, int(retrieval_budget * _RETRIEVAL_SPLIT["memory"]))
+    know_budget = max(256, int(retrieval_budget * _RETRIEVAL_SPLIT["knowledge"]))
+    ref_budget = max(128, int(retrieval_budget * _RETRIEVAL_SPLIT["reference"]))
+
+    async def _mem_task() -> list[dict]:
+        if not use_context:
+            return []
+        return await asyncio.to_thread(
+            search_memories,
+            query=message,
+            user_id=ZEUS_USER_ID,
+            top_k=MEMORY_SEARCH_TOP_K,
+            namespaces=[],
+        )
+
+    async def _know_task() -> list[dict]:
+        if not use_context:
+            return []
+        return await asyncio.to_thread(
+            search_knowledge,
+            query=message,
+            user_id=ZEUS_USER_ID,
+            top_k=KNOWLEDGE_SEARCH_TOP_K,
+        )
+
+    async def _prof_task() -> list[str]:
+        return await asyncio.to_thread(
+            get_profile_facts, user_id=ZEUS_USER_ID, top_k=8
+        )
+
+    async def _ref_task() -> list[dict]:
+        if not use_context:
+            return []
+        try:
+            return await search_reference(message, top_k=REFERENCE_SEARCH_TOP_K)
+        except Exception as exc:
+            logger.warning("reference search failed: %s", exc)
+            return []
+
+    t_retrieve = time.monotonic()
+    facts, mem_results, know_results, ref_results = await asyncio.gather(
+        _prof_task(), _mem_task(), _know_task(), _ref_task()
+    )
+    _log_timing("retrieval.parallel", (time.monotonic() - t_retrieve) * 1000)
+
+    if facts:
+        profile_section = "\n".join(f"- {f}" for f in facts[:5])
+    else:
+        profile_section = "No profile facts loaded yet. Run iris ingest if needed."
+    # Crude profile char cap to stay under sub-budget (~4 chars/token).
+    prof_char_cap = prof_budget * 4
+    if len(profile_section) > prof_char_cap:
+        profile_section = profile_section[:prof_char_cap].rstrip() + "\n…"
+
+    memory_section = ""
+    sources: list[str] = []
+    if mem_results:
+        memory_section, _ = format_context_block(mem_results, max_tokens=mem_budget)
+        for mem in mem_results:
+            md = mem.get("metadata", {}) or {}
+            label = md.get("source_id") or md.get("source") or "unknown"
+            sources.append(f"memory:{label}")
+
+    knowledge_section = ""
+    if know_results:
+        knowledge_section, _ = format_context_block(
+            know_results, max_tokens=know_budget
+        )
+        for hit in know_results:
+            md = hit.get("metadata", {}) or {}
+            label = md.get("file") or md.get("source") or "knowledge"
+            sources.append(f"knowledge:{label}")
+
+    reference_section = ""
+    if ref_results:
+        reference_section, _ = format_context_block(
+            ref_results, max_tokens=ref_budget
+        )
+        for hit in ref_results:
+            md = hit.get("metadata", {}) or {}
+            label = md.get("title") or md.get("source") or "reference"
+            sources.append(f"reference:{md.get('source', 'unknown')}:{label}")
+
+    return profile_section, memory_section, knowledge_section, reference_section, sources
+
+
 def _build_system_prompt(
     *,
     profile_section: str,
     memory_section: str,
     conversation_section: str,
+    knowledge_section: str = "",
+    reference_section: str = "",
 ) -> str:
     """Render zeus/core/prompts/chat_system.md with the current runtime context.
 
@@ -258,6 +373,8 @@ def _build_system_prompt(
         provider="Anthropic Claude" if _chat_use_claude() else "Ollama (local)",
         profile_section=profile_section.strip() or "(No profile facts loaded yet.)",
         memory_section=memory_section.strip() or "(No retrieved memories for this query.)",
+        knowledge_section=knowledge_section.strip() or "(No knowledge hits for this query.)",
+        reference_section=reference_section.strip() or "(No reference hits — kiwix/NOMAD returned nothing or are unreachable.)",
         conversation_section=conversation_section.strip() or "(No prior turns in this session.)",
     )
 
@@ -280,9 +397,12 @@ def _build_reflection_prompt(original: str, failed_reply: str, attempt: int) -> 
 
 
 class QueryEngine:
-    def __init__(self, memory: object, session_manager: SessionManager) -> None:
-        self.memory = memory
+    def __init__(self, session_manager: SessionManager, memory: object | None = None) -> None:
+        # `memory` is accepted for backwards compatibility with callers still
+        # passing the old mem0 client; it's unused — MemoryStore is a singleton
+        # accessed via get_memory_store() inside the retrieval helpers.
         self.sessions = session_manager
+        self.memory = memory
 
     async def query(
         self,
@@ -309,37 +429,17 @@ class QueryEngine:
         memory_token_budget = budget // 3
         conversation_token_budget = budget - memory_token_budget
 
-        memory_section = ""
-        sources: list[str] = []
-        if use_context:
-            t_search = time.monotonic()
-            results = await asyncio.to_thread(
-                search_memories,
-                memory=self.memory,
-                query=message,
-                user_id=ZEUS_USER_ID,
-                top_k=MEMORY_SEARCH_TOP_K,
-                namespaces=[],
-            )
-            _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
-            if results:
-                t_fmt = time.monotonic()
-                memory_section, _ = format_context_block(
-                    results, max_tokens=memory_token_budget
-                )
-                _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
-                for mem in results:
-                    sources.append(mem.get("metadata", {}).get("source", "unknown"))
-
-        t_prof = time.monotonic()
-        facts = await asyncio.to_thread(
-            get_profile_facts, memory=self.memory, user_id=ZEUS_USER_ID, top_k=8
+        (
+            profile_section,
+            memory_section,
+            knowledge_section,
+            reference_section,
+            sources,
+        ) = await _collect_retrieval_context(
+            message=message,
+            retrieval_budget=memory_token_budget,
+            use_context=use_context,
         )
-        _log_timing("get_profile_facts", (time.monotonic() - t_prof) * 1000)
-        if facts:
-            profile_section = "\n".join(f"- {f}" for f in facts[:5])
-        else:
-            profile_section = "No profile facts loaded yet. Run iris ingest if needed."
 
         t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
@@ -351,6 +451,8 @@ class QueryEngine:
             profile_section=profile_section,
             memory_section=memory_section,
             conversation_section=conversation_section,
+            knowledge_section=knowledge_section,
+            reference_section=reference_section,
         )
         user_prompt = f"User: {message}\nAssistant:"
         t_llm = time.monotonic()
@@ -427,37 +529,17 @@ class QueryEngine:
         memory_token_budget = budget // 3
         conversation_token_budget = budget - memory_token_budget
 
-        memory_section = ""
-        sources: list[str] = []
-        if use_context:
-            t_search = time.monotonic()
-            results = await asyncio.to_thread(
-                search_memories,
-                memory=self.memory,
-                query=message,
-                user_id=ZEUS_USER_ID,
-                top_k=MEMORY_SEARCH_TOP_K,
-                namespaces=[],
-            )
-            _log_timing("mem0.search_memories", (time.monotonic() - t_search) * 1000)
-            if results:
-                t_fmt = time.monotonic()
-                memory_section, _ = format_context_block(
-                    results, max_tokens=memory_token_budget
-                )
-                _log_timing("format_context_block", (time.monotonic() - t_fmt) * 1000)
-                for mem in results:
-                    sources.append(mem.get("metadata", {}).get("source", "unknown"))
-
-        t_prof = time.monotonic()
-        facts = await asyncio.to_thread(
-            get_profile_facts, memory=self.memory, user_id=ZEUS_USER_ID, top_k=8
+        (
+            profile_section,
+            memory_section,
+            knowledge_section,
+            reference_section,
+            sources,
+        ) = await _collect_retrieval_context(
+            message=message,
+            retrieval_budget=memory_token_budget,
+            use_context=use_context,
         )
-        _log_timing("get_profile_facts", (time.monotonic() - t_prof) * 1000)
-        if facts:
-            profile_section = "\n".join(f"- {f}" for f in facts[:5])
-        else:
-            profile_section = "No profile facts loaded yet. Run iris ingest if needed."
 
         t_conv = time.monotonic()
         conversation_section = await self.sessions.get_context_window(
@@ -469,12 +551,16 @@ class QueryEngine:
             profile_section=profile_section,
             memory_section=memory_section,
             conversation_section=conversation_section,
+            knowledge_section=knowledge_section,
+            reference_section=reference_section,
         )
         user_prompt = f"User: {message}\nAssistant:"
 
         t_llm = time.monotonic()
         current_prompt = user_prompt
-        # Collect first stream fully to classify
+        aegis_on = aegis_enabled()
+        # Stream incrementally when Aegis is disabled; buffer when enabled so
+        # we can evaluate the full reply before emitting.
         parts: list[str] = []
         async for chunk in _run_llm_stream(
             system=system,
@@ -482,7 +568,10 @@ class QueryEngine:
             max_tokens=max_tokens,
         ):
             parts.append(chunk)
+            if not aegis_on:
+                yield chunk
         reply = "".join(parts)
+        streamed_live = not aegis_on
 
         # Reflection loop for streaming
         for attempt in range(2, MAX_REFLECT + 1):
@@ -497,6 +586,8 @@ class QueryEngine:
             await asyncio.sleep(backoff)
             current_prompt = _build_reflection_prompt(user_prompt, reply, attempt)
             parts = []
+            # Retry streams are buffered: we need the full text to re-check
+            # _is_empty_or_failed_reply, and the reply is emitted once below.
             async for chunk in _run_llm_stream(
                 system=system,
                 user_prompt=current_prompt,
@@ -504,17 +595,18 @@ class QueryEngine:
             ):
                 parts.append(chunk)
             reply = "".join(parts)
+            streamed_live = False
 
         _log_timing("llm.stream_total", (time.monotonic() - t_llm) * 1000)
         # Aegis on final reply only
-        if aegis_enabled():
+        if aegis_on:
             outcome = evaluate_text(reply, policy_name=None)
             if outcome.status == "rejected":
                 reply = outcome.message or "This response was blocked by safety policy."
             else:
                 reply = outcome.text
             yield reply
-        else:
+        elif not streamed_live:
             yield reply
         latency_ms = int((time.monotonic() - t0) * 1000)
         turn = Turn(
