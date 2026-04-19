@@ -1,0 +1,408 @@
+{
+  "summary": {
+    "n_queries": 30,
+    "hit@1": 0.6,
+    "hit@5": 0.8667,
+    "hit@10": 0.9333,
+    "mrr@10": 0.71,
+    "config": {
+      "ZEUS_KNOWLEDGE_HYBRID": "0",
+      "ZEUS_KNOWLEDGE_RERANK": "0",
+      "ZEUS_EMBED_MODEL": "nomic-embed-text:v1.5"
+    }
+  },
+  "per_query": [
+    {
+      "query": "What is the Zeus project?",
+      "keywords": [
+        "zeus",
+        "assistant",
+        "homelab"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 10,
+      "top1_source": "markdown",
+      "top1_path": "MCP SERVER.md"
+    },
+    {
+      "query": "How does Zeus handle voice input and output?",
+      "keywords": [
+        "orpheus",
+        "tts",
+        "stt",
+        "whisper"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "MAGIC PAGES"
+    },
+    {
+      "query": "Aegis safety policies and guardrails",
+      "keywords": [
+        "aegis",
+        "policy",
+        "safety",
+        "nemoclaw"
+      ],
+      "first_rank": 3,
+      "rr": 0.3333,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "!Homelab/Atlas/docs/PROXMOX_SYSTEM_INSTRUCTION.md"
+    },
+    {
+      "query": "What embedding model does Zeus use?",
+      "keywords": [
+        "nomic",
+        "embed",
+        "768"
+      ],
+      "first_rank": 3,
+      "rr": 0.3333,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "Frontend Backend DB Design"
+    },
+    {
+      "query": "Ruflo agent orchestration",
+      "keywords": [
+        "ruflo",
+        "agent",
+        "swarm"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "!Homelab/context-pack/How to use these skills.md"
+    },
+    {
+      "query": "How do stars form from a solar nebula?",
+      "keywords": [
+        "star",
+        "nebula",
+        "solar"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "Archive/ASTR 112/Midterm answered.md"
+    },
+    {
+      "query": "Early galaxies and collisional events",
+      "keywords": [
+        "galaxies",
+        "collisional",
+        "ellipticals"
+      ],
+      "first_rank": 3,
+      "rr": 0.3333,
+      "n_hits": 10,
+      "top1_source": "markdown",
+      "top1_path": "11. Galaxies.md"
+    },
+    {
+      "query": "Copernicus Brahe Kepler heliocentric model",
+      "keywords": [
+        "copernicus",
+        "kepler",
+        "brahe"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "Archive/ASTR 312/Test Prep/Quiz 3.md"
+    },
+    {
+      "query": "Binary stars and stellar groupings",
+      "keywords": [
+        "binary",
+        "stellar",
+        "star"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "Archive/ASTR 112/07. Stars.md"
+    },
+    {
+      "query": "Steps to solve a definite integral",
+      "keywords": [
+        "integral",
+        "antiderivative",
+        "bounds"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "Archive/MATH 122/Integration Steps.md"
+    },
+    {
+      "query": "Proof step summaries for lemmas and theorems",
+      "keywords": [
+        "lemma",
+        "theorem",
+        "proof"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "Archive/MATH223/Steps.md"
+    },
+    {
+      "query": "Atlas physical network interfaces",
+      "keywords": [
+        "atlas",
+        "eno1",
+        "networking"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "!Homelab/Atlas/docs/02-proxmox-setup.md"
+    },
+    {
+      "query": "Hephaestus fresh server directory structure",
+      "keywords": [
+        "hephaestus",
+        "github",
+        "directory"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "!Homelab/Hephaestus/Prompts/Hephaestus/6.fresh_server.md"
+    },
+    {
+      "query": "Caddy proxy diagnostics troubleshooting",
+      "keywords": [
+        "caddy",
+        "proxy",
+        "diagnostics"
+      ],
+      "first_rank": 5,
+      "rr": 0.2,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "!Homelab/Hephaestus/n8n/Patchrick/3.2 Patchrick Target URL Monitoring.md"
+    },
+    {
+      "query": "ZFS pool RAIDZ2 mount setup",
+      "keywords": [
+        "zfs",
+        "pool",
+        "raidz2"
+      ],
+      "first_rank": 2,
+      "rr": 0.5,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "NAS Setup ZFS RAIDZ2"
+    },
+    {
+      "query": "SSH fail2ban hardening",
+      "keywords": [
+        "fail2ban",
+        "ssh",
+        "systemctl"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "!Homelab/Hephaestus/SSH.md"
+    },
+    {
+      "query": "Gmail OAuth trigger for rent receipts",
+      "keywords": [
+        "gmail",
+        "oauth",
+        "rent"
+      ],
+      "first_rank": 2,
+      "rr": 0.5,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "PropertyManagement - ARCH"
+    },
+    {
+      "query": "InboxCast personalized inbox summary",
+      "keywords": [
+        "inboxcast",
+        "summary",
+        "inbox"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "obsidian",
+      "top1_path": "Archive/CSCI 265 SW Eng/1 - Intro.md"
+    },
+    {
+      "query": "Azure VM xfce4 session setup",
+      "keywords": [
+        "azure",
+        "xfce4",
+        "session"
+      ],
+      "first_rank": 3,
+      "rr": 0.3333,
+      "n_hits": 10,
+      "top1_source": "markdown",
+      "top1_path": "2.Flight plan.md"
+    },
+    {
+      "query": "WSL update in PowerShell",
+      "keywords": [
+        "wsl",
+        "powershell",
+        "update"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "AVL Tree Code Issues"
+    },
+    {
+      "query": "Portfolio of tools I have built",
+      "keywords": [
+        "portfolio",
+        "tools",
+        "platforms"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "Portfolio Content Creation"
+    },
+    {
+      "query": "Resume for software developer data scientist student",
+      "keywords": [
+        "resume",
+        "software",
+        "developer"
+      ],
+      "first_rank": 2,
+      "rr": 0.5,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "Tech Writing Course Assistance"
+    },
+    {
+      "query": "C floating point addition function",
+      "keywords": [
+        "floating",
+        "fp_number",
+        "add_floating_point"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "C Project Code Assistance"
+    },
+    {
+      "query": "Team Arena PlayerNFT Linear checklist",
+      "keywords": [
+        "playernft",
+        "linear",
+        "checklist"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "Asbestos Abatement Checklist"
+    },
+    {
+      "query": "Lulu webhook email order integration",
+      "keywords": [
+        "lulu",
+        "webhook",
+        "order"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "Email Integration for Orders"
+    },
+    {
+      "query": "Plato Republic summary life lessons",
+      "keywords": [
+        "plato",
+        "republic",
+        "lessons"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "Plato Republic Summary Insights"
+    },
+    {
+      "query": "AI deception risks ethical dilemma",
+      "keywords": [
+        "deception",
+        "ethical",
+        "dilemma"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "AI Deception Risks Solutions"
+    },
+    {
+      "query": "Physical Intelligence robotics research",
+      "keywords": [
+        "physical intelligence",
+        "robots",
+        "robotics"
+      ],
+      "first_rank": 1,
+      "rr": 1.0,
+      "n_hits": 10,
+      "top1_source": "newsletter",
+      "top1_path": "tldr"
+    },
+    {
+      "query": "Amazon Leo in-flight antenna vs Starlink",
+      "keywords": [
+        "amazon",
+        "leo",
+        "antenna",
+        "starlink"
+      ],
+      "first_rank": 8,
+      "rr": 0.125,
+      "n_hits": 10,
+      "top1_source": "markdown",
+      "top1_path": "10-25-23.md"
+    },
+    {
+      "query": "Add Telegram integration feature",
+      "keywords": [
+        "telegram",
+        "integration"
+      ],
+      "first_rank": 7,
+      "rr": 0.1429,
+      "n_hits": 10,
+      "top1_source": "chatgpt",
+      "top1_path": "Calculus 2 Integral Help"
+    }
+  ]
+}
