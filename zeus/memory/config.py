@@ -1,9 +1,22 @@
-# zeus/memory/config.py — Mnemosyne configuration
-# Builds mem0 config that switches LLM/embedder based on ZEUS_ENV
+# zeus/memory/config.py — Mnemosyne configuration and token-usage tracker.
+#
+# mem0 has been removed (April 2026). This module used to construct the mem0
+# client; it's now reduced to the thread-safe TokenUsage accumulator that
+# `zeus/ingest/run.py` still imports for the summary table.
+#
+# Ingest-time extraction tokens are now written to the SQLite usage log by
+# `zeus/core/small_llm.py`. The TokenUsage tracker here is a per-run counter
+# rebuilt from the small_llm usage rows stamped during the ingest window.
+from __future__ import annotations
+
 import os
+import sqlite3
 import threading
+import time
+from contextlib import closing
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 @dataclass
@@ -26,216 +39,35 @@ class TokenUsage:
         return self.input_tokens + self.output_tokens
 
 
-# Module-level tracker — reset per ingest run via reset_token_usage().
 _token_usage = TokenUsage()
+_run_started_at: float = time.time()
 
 
 def get_token_usage() -> TokenUsage:
-    return _token_usage
+    """Return a TokenUsage snapshot summed from small_llm usage rows since the
+    last reset. Falls back to an empty counter if the usage DB is unavailable."""
+    since_iso = datetime.fromtimestamp(_run_started_at, tz=timezone.utc).isoformat()
+    usage_db = Path(os.getenv("ZEUS_SMALL_LLM_USAGE_DB", "zeus/data/small_llm_usage.db"))
+    snapshot = TokenUsage()
+    if not usage_db.exists():
+        return snapshot
+    try:
+        with closing(sqlite3.connect(str(usage_db))) as conn:
+            cur = conn.execute(
+                "SELECT COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0), COUNT(*) "
+                "FROM usage WHERE ts >= ?",
+                (since_iso,),
+            )
+            row = cur.fetchone() or (0, 0, 0)
+    except sqlite3.Error:
+        return snapshot
+    snapshot.input_tokens = int(row[0] or 0)
+    snapshot.output_tokens = int(row[1] or 0)
+    snapshot.llm_calls = int(row[2] or 0)
+    return snapshot
 
 
 def reset_token_usage() -> None:
-    global _token_usage
-    _token_usage = TokenUsage()
-
-
-def get_memory_config() -> dict[str, Any]:
-    """Return mem0 configuration dict based on environment and provider override.
-
-    Default provider selection:
-      - dev  -> Claude API
-      - prod -> Ollama
-
-    Optional override:
-      - ZEUS_LLM=claude forces Claude in any environment
-      - ZEUS_LLM=ollama forces Ollama in any environment
-
-    Embeddings always use Ollama so vectors remain compatible across environments.
-    """
-    env = os.getenv("ZEUS_ENV", "dev")
-    llm_override = os.getenv("ZEUS_LLM", "").strip().lower()
-
-    qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-    qdrant_collection = os.getenv("QDRANT_COLLECTION", "zeus_memories")
-    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11435")
-    embed_model = os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text")
-
-    base_config: dict[str, Any] = {
-        "vector_store": {
-            "provider": "qdrant",
-            "config": {
-                "url": qdrant_url,
-                "collection_name": qdrant_collection,
-                "embedding_model_dims": 768,
-            },
-        },
-        "embedder": {
-            "provider": "ollama",
-            "config": {
-                "model": embed_model,
-                "ollama_base_url": ollama_url,
-            },
-        },
-        "version": "v1.1",
-    }
-
-    if llm_override and llm_override not in {"claude", "ollama"}:
-        raise ValueError(
-            "ZEUS_LLM must be one of: 'claude', 'ollama', or unset."
-        )
-
-    if llm_override:
-        provider = llm_override
-    else:
-        provider = "ollama" if env == "prod" else "claude"
-
-    claude_model = os.getenv(
-        "ZEUS_CLAUDE_MODEL",
-        os.getenv("ZEUS_DEV_MODEL", "claude-sonnet-4-6"),
-    )
-    ollama_model = os.getenv(
-        "ZEUS_OLLAMA_MODEL",
-        os.getenv("ZEUS_PROD_MODEL", "qwen2.5:7b-instruct"),
-    )
-
-    if provider == "ollama":
-        base_config["llm"] = {
-            "provider": "ollama",
-            "config": {
-                "model": ollama_model,
-                "ollama_base_url": ollama_url,
-                "temperature": 0.1,
-                "max_tokens": 2048,
-            },
-        }
-    else:
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            raise ValueError(
-                "ANTHROPIC_API_KEY required when using Claude "
-                "(ZEUS_ENV=dev default or ZEUS_LLM=claude override)."
-            )
-        base_config["llm"] = {
-            "provider": "anthropic",
-            "config": {
-                "model": claude_model,
-                "api_key": api_key,
-                "temperature": 0.1,
-                "max_tokens": 2048,
-            },
-        }
-
-    return base_config
-
-
-_patched = False
-_embed_patched = False
-
-
-def _patch_ollama_embedding() -> None:
-    """Patch mem0's OllamaEmbedding to set a connect/read timeout on the
-    underlying httpx client, preventing indefinite hangs when Ollama is
-    overloaded or unresponsive.
-
-    Controlled by OLLAMA_EMBED_TIMEOUT_SEC (default: 120).
-    Set to 0 to disable the patch (no timeout).
-    """
-    global _embed_patched
-    if _embed_patched:
-        return
-    _embed_patched = True
-
-    raw = os.getenv("OLLAMA_EMBED_TIMEOUT_SEC", "120").strip()
-    try:
-        timeout_sec = float(raw)
-    except ValueError:
-        timeout_sec = 120.0
-    if timeout_sec <= 0:
-        return
-
-    try:
-        from mem0.embeddings.ollama import OllamaEmbedding
-        from ollama import Client
-    except ImportError:
-        return
-
-    _orig_init = OllamaEmbedding.__init__
-
-    def _init_with_timeout(self, config=None):  # type: ignore[override]
-        _orig_init(self, config)
-        self.client = Client(
-            host=self.config.ollama_base_url,
-            timeout=timeout_sec,
-        )
-
-    OllamaEmbedding.__init__ = _init_with_timeout  # type: ignore[method-assign]
-
-
-def _patch_anthropic_llm():
-    """Patch mem0's Anthropic LLM for two things:
-
-    1. Strip top_p so only temperature is sent (claude-sonnet-4-6 rejects both).
-    2. Intercept API responses to accumulate token usage stats.
-    """
-    global _patched
-    if _patched:
-        return
-    _patched = True
-
-    try:
-        from mem0.llms.anthropic import AnthropicLLM
-    except ImportError:
-        return
-
-    _orig_params = AnthropicLLM._get_common_params
-
-    def _patched_params(self, **kwargs):
-        params = _orig_params(self, **kwargs)
-        params.pop("top_p", None)
-        return params
-
-    AnthropicLLM._get_common_params = _patched_params
-
-    _orig_generate = AnthropicLLM.generate_response
-
-    def _tracked_generate(self, messages, response_format=None, tools=None,
-                          tool_choice="auto", **kwargs):
-        system_message = ""
-        filtered_messages = []
-        for message in messages:
-            if message["role"] == "system":
-                system_message = message["content"]
-            else:
-                filtered_messages.append(message)
-
-        params = self._get_supported_params(messages=messages, **kwargs)
-        params.update({
-            "model": self.config.model,
-            "messages": filtered_messages,
-            "system": system_message,
-        })
-        if tools:
-            params["tools"] = tools
-            params["tool_choice"] = tool_choice
-
-        response = self.client.messages.create(**params)
-
-        if hasattr(response, "usage") and response.usage:
-            _token_usage.record(
-                input_tok=getattr(response.usage, "input_tokens", 0),
-                output_tok=getattr(response.usage, "output_tokens", 0),
-            )
-
-        return response.content[0].text
-
-    AnthropicLLM.generate_response = _tracked_generate
-
-
-def get_memory_client():
-    """Initialize and return a configured mem0 Memory instance."""
-    from mem0 import Memory
-
-    _patch_anthropic_llm()
-    _patch_ollama_embedding()
-    config = get_memory_config()
-    return Memory.from_config(config)
+    """Mark a new ingest window. get_token_usage() sums rows logged after this."""
+    global _run_started_at
+    _run_started_at = time.time()
