@@ -1,48 +1,26 @@
-# Zeus vs Ruflo vs Squad
+# Where Zeus borrows from other agent frameworks
 
-This document compares Zeus against Ruflo and Squad and highlights what Zeus should implement next.
+Quick reference for the patterns Zeus explicitly lifted from other open-source agent frameworks, and what it keeps unique. This doc is historical context, not a feature matrix: the current source of truth for shipped behavior is [architecture.md](architecture.md) and the [Linear ticket plan](../../docs/ZEUS_LINEAR_TICKET_PLAN.md).
 
-## Feature Matrix
+## Borrowed patterns
 
-| Capability | Zeus (current) | Ruflo | Squad | Zeus Gap / Action |
-|---|---|---|---|---|
-| Agent orchestration runtime | YAML contracts only | Full coordinator + topologies + workflows | Coordinator + router + fan-out | Build Python runtime + coordinator + event bus |
-| Inter-agent communication | Planned via FastAPI bus | Message bus + worker services | Event bus + typed tools | Implement bus adapter and routing primitives |
-| Safety/policy layer | Designed (Aegis), not implemented | Security tooling and policy modules | HookPipeline with pre/post policy checks | Implement hook pipeline and `AegisFilter` |
-| Voice interface | Detailed spec only | Not a focus | Not a focus | Implement Orpheus end-to-end (core differentiator) |
-| Memory architecture | Strong: mem0 + Qdrant + ingest | Hybrid memory modules available | File-native memory in `.squad` | Add session memory, consolidation, scheduled ingest |
-| Text chat UX | None | Chat UI in separate package | Interactive shell + remote bridge | Add minimal web chat for development and fallback |
-| MCP support | None | First-class MCP server/client | MCP-aware templates/integration | Add Zeus MCP server tools |
-| Observability | Smoke test script | Perf tooling + targets | Telemetry + monitoring modules | Add query logs, ingest metrics, admin dashboard |
-| Session continuity | None | Partial conversation concepts | Session store + resume flow | Add session model and rolling summaries |
-| Deployment maturity | Compose + runbook | Multiple deployment paths | CLI/runtime workflows | Keep current Compose path; add sidecars gradually |
+| From | Pattern | Where it lives in Zeus |
+|------|---------|------------------------|
+| Ruflo v3.5 | MCP-first tool integration | `zeus/mcp/` (FastMCP over Zeus Core HTTP) |
+| Ruflo v3.5 | YAML-defined agent manifests | `zeus/orchestration/agents/*.yaml` loaded by `runtime.py` |
+| Squad | Pre/post hook pipeline around tool calls | `zeus/orchestration/hooks.py` + `zeus/safety/integration.py` |
+| Squad | Session persistence and resumable interactions | `zeus/core/sessions.py` (in-memory or SQLite) |
+| Claude Code | Tool-first loops over chat-first reasoning | `zeus_*` MCP tools; Kairos observe/decide/act |
+| Claude Code | Reflection on empty or failed replies | 3-attempt retry in `QueryEngine.query()` |
 
-## What Zeus Should Borrow
+## Intentional differences
 
-### From Ruflo
+- **Voice-first orchestration.** Orpheus pipeline (wake, STT, chat, TTS) is a first-class path, not a bolt-on.
+- **Personal-memory-first design.** Three labelled blocks in the system prompt (Profile, Memories, Knowledge, Reference) with sub-budgeted retrieval. Bulk docs never go through LLM fact extraction.
+- **Hand-rolled data plane.** `MemoryStore`, `KnowledgeStore`, `small_llm_call` router all own their Qdrant and provider boundaries directly; no mem0, no LiteLLM, no LangChain.
+- **Local-first prod.** Olympus (RTX 3080, 10 GB) runs Qwen2.5-7B via Ollama for chat; small-LLM router has Ollama as the local-fallback last hop.
+- **Privacy-tier gate.** Every `small_llm_call` declares `min_privacy_tier`; Gemini free tier is excluded from the chain because it trains on input.
 
-- Modular orchestration shape (runtime, bus, plugins, workers)
-- MCP-first integration model for tool interoperability
-- Workflow-driven execution with explicit dependencies
+## Prioritized work pointer
 
-### From Squad
-
-- Policy enforcement pattern (before/after hook pipeline)
-- Session persistence and resumable interactions
-- Practical operator UX for interactive use and status inspection
-
-## What Zeus Should Keep Unique
-
-- Voice-first architecture (wake word -> STT -> context -> LLM -> TTS)
-- Personal memory-first design (ingest + mem0 + Qdrant tuned for one user)
-- Local-first production path on Olympus hardware constraints
-
-## Prioritized Implementation Order
-
-1. Finish Sprints 1-4 already defined in `roadmap.md`
-2. Build lightweight orchestration runtime (Sprint 5)
-3. Add sessions and conversation continuity (Sprint 6)
-4. Add text chat interface for dev and fallback UX (Sprint 7)
-5. Add MCP server for external assistant interoperability (Sprint 8)
-6. Add observability and continuous ingest automation (Sprint 9)
-7. Expand ingest source adapters (Sprint 10)
+The authoritative sprint and ticket plan is [docs/ZEUS_LINEAR_TICKET_PLAN.md](../../docs/ZEUS_LINEAR_TICKET_PLAN.md). Current-sprint goals live in [roadmap.md](roadmap.md).

@@ -1,4 +1,4 @@
-# Phaos — Voice State WebSocket Protocol
+# Phaos: Voice State WebSocket Protocol
 
 Real-time events from Orpheus (voice pipeline) to browser / WebXR clients for the **Phaos** visualization layer.
 

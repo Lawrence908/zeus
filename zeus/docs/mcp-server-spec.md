@@ -1,106 +1,85 @@
-# Zeus MCP Server Spec
+# Zeus MCP Server
 
-## Goal
+Expose Zeus memory, knowledge, and ingest trigger as MCP tools so external assistants (Cursor, Claude Desktop, any MCP client) can query and write through the same HTTP surface that Core uses internally.
 
-Expose Zeus capabilities as MCP tools so external assistants (Cursor, Claude clients, other MCP consumers) can query and write Zeus memory safely.
+Ground truth: [zeus/mcp/server.py](../mcp/server.py), [zeus/mcp/tools.py](../mcp/tools.py).
 
-## Runtime Shape
+## Runtime shape
 
 - Python MCP server process: `python -m zeus.mcp.server`
-- Calls Zeus Core / Oracle HTTP endpoints internally
-- Optional direct memory write path for trusted tools only
+- FastMCP transport. Tool handlers are thin wrappers over Zeus Core HTTP (`ZEUS_CORE_URL`, default `http://127.0.0.1:8203`).
+- Write tools are gated by `ZEUS_MCP_ALLOW_WRITE=true`.
 
-## Tool Catalog (v1)
+## Tool catalog
+
+| Tool | Proxies | Purpose |
+|------|---------|---------|
+| `zeus_query` | `POST /context/query` | Grounded context lookup: runs QueryEngine retrieval fan-out and returns the rendered context block plus sources |
+| `zeus_profile` | `GET /context/profile` | Stable user profile summary from MemoryStore identity / preference facts |
+| `zeus_memory_search` | `POST /memory/search` | Raw MemoryStore search, top-k hits with scores |
+| `zeus_remember` | `POST /memory/add` | Writes a new memory (requires `ZEUS_MCP_ALLOW_WRITE=true`) |
+| `zeus_ingest_trigger` | `POST /ingest/trigger` | Kick off an ingest run for a named source |
 
 ### `zeus_query`
 
-Natural language context lookup.
-
-**Input**
-- `query: string`
-- `top_k: integer` (default `5`)
-- `max_tokens: integer` (default `1024`)
-
-**Output**
-- `context: string`
-- `sources: string[]`
-- `token_estimate: integer`
+Input: `query: str`, `top_k: int = 8`, `max_tokens: int = 1024`
+Output: `{"context": str, "sources": [str], "token_estimate": int}`
 
 ### `zeus_profile`
 
-Return stable user profile summary.
+Input: none
+Output: `{"profile": str, "updated_at": str}`
 
-**Input**
-- none
+### `zeus_memory_search`
 
-**Output**
-- `profile: string`
-- `updated_at: string`
+Input: `query: str`, `limit: int = 5`
+Output: `{"results": [{"text": str, "score": float, "payload": {...}}]}`
 
 ### `zeus_remember`
 
-Store new memory text with metadata.
+Input: `text: str`, `namespace: str = "general"`, `tags: list[str] | None`
+Output: `{"memory_id": str, "status": str}`
 
-**Input**
-- `text: string`
-- `namespace: string` (default `general`)
-- `tags: string[]` (optional)
+### `zeus_ingest_trigger`
 
-**Output**
-- `memory_id: string`
-- `status: string`
+Input: `source: str = "all"`
+Output: `{"source": str, "status": str}`
 
-## Request Path
+## Request path
 
 ```mermaid
 flowchart TD
-  mcpClient["MCPClient"] --> mcpServer["ZeusMCPServer"]
-  mcpServer --> authCheck["ToolPolicyCheck"]
-  authCheck --> oracleRoute["OracleAndCoreHTTPCalls"]
-  oracleRoute --> mcpServer
+  mcpClient["MCP client"] --> mcpServer["zeus.mcp.server (FastMCP)"]
+  mcpServer --> tools["zeus.mcp.tools.* (httpx)"]
+  tools --> core["Zeus Core HTTP (8203)"]
+  core --> tools
+  tools --> mcpServer
   mcpServer --> mcpClient
 ```
 
-## Security Policy
+Aegis runs inside Zeus Core on every HTTP hop (pre-hook validates tool arguments, post-hook filters output). The MCP server itself does no extra filtering beyond what Core already enforces.
 
-- Tool allowlist by client identity
-- `zeus_remember` disabled by default for unknown clients
-- Input validation on all tool arguments
-- Output filtered by Aegis policy before returning
+## Security
+
+- Tool writes are off by default; flip `ZEUS_MCP_ALLOW_WRITE=true` to enable `zeus_remember` and `zeus_ingest_trigger`.
+- Transport: stdio by default (recommended for Cursor / Claude Desktop). Bind only over trusted sockets.
+- `ZEUS_CORE_URL` should point at a local interface; do not expose Zeus Core without a separate auth layer (see LAB-150).
+- Aegis policy on the server side is selected by `ZEUS_AEGIS_POLICY`.
 
 ## Config
 
-Environment:
-- `ZEUS_CORE_URL` (default `http://localhost:8000`)
-- `ZEUS_MCP_BIND_HOST` (default `127.0.0.1`)
-- `ZEUS_MCP_BIND_PORT` (optional transport-dependent)
-- `ZEUS_MCP_ALLOW_WRITE` (`false` by default)
+| Env | Default | Purpose |
+|-----|---------|---------|
+| `ZEUS_CORE_URL` | `http://127.0.0.1:8203` | Zeus Core base URL |
+| `ZEUS_MCP_ALLOW_WRITE` | `false` | Enable `zeus_remember` and `zeus_ingest_trigger` |
 
-## Error Contract
+## Error contract
 
-Tool failures return MCP errors with:
-- `code`
-- `message`
-- `details.request_id`
+Tool failures return structured MCP errors with `code`, `message`, and `details.request_id` / `details.correlation_id` forwarded from Zeus Core.
 
-## Compatibility Targets
-
-- Cursor MCP client config
-- Claude Desktop MCP config
-- CLI-driven MCP invocation for local scripts
-
-## Acceptance Criteria
-
-- Client can call `zeus_query` and receive context
-- Client can call `zeus_profile` and receive profile summary
-- `zeus_remember` obeys write policy toggle and logs writes
-- Invalid arguments return useful structured errors
-
-## Client configuration snippets
+## Client configuration
 
 ### Claude Desktop / Cursor (stdio)
-
-Example configuration (adjust `cwd` to your Zeus repo path):
 
 ```json
 {
@@ -108,15 +87,22 @@ Example configuration (adjust `cwd` to your Zeus repo path):
     "zeus": {
       "command": "python",
       "args": ["-m", "zeus.mcp.server"],
-      "cwd": "/home/chris/zeus"
+      "cwd": "/home/chris/zeus",
+      "env": {
+        "ZEUS_CORE_URL": "http://127.0.0.1:8203",
+        "ZEUS_MCP_ALLOW_WRITE": "false"
+      }
     }
   }
 }
 ```
 
-### Environment variables
+Adjust `cwd` to your Zeus checkout.
 
-Common settings:
+## Acceptance
 
-- `ZEUS_CORE_URL` (default in code: `http://127.0.0.1:8203`)
-- `ZEUS_MCP_ALLOW_WRITE=false` (default; set `true` to enable `zeus_remember`)
+- Client can call `zeus_query` and receive grounded context with sources.
+- `zeus_profile` returns a non-empty profile summary.
+- `zeus_remember` 403s when `ZEUS_MCP_ALLOW_WRITE=false`; 200s with a memory id when enabled.
+- `zeus_ingest_trigger` kicks off the source and returns a status code.
+- Invalid arguments return structured MCP errors.

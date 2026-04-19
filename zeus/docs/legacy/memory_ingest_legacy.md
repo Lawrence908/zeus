@@ -1,32 +1,34 @@
+> **Legacy (March 2026).** Preserved for decision history only. Superseded by [docs/memory-architecture-plan.md](../../../docs/memory-architecture-plan.md), [zeus/docs/ingest-guide.md](../ingest-guide.md), and [zeus/memory/store.py](../../memory/store.py). All mem0 references are historical; Zeus now uses a hand-rolled MemoryStore + KnowledgeStore split.
+
 🗄️
 ZEUS
 Data Ingestion & Memory Playbook
 
-This document covers how Zeus ingests, processes, and stores your personal data to build a persistent, evolving AI knowledge base — your "second brain" that grows smarter with every interaction.
+This document covers how Zeus ingests, processes, and stores your personal data to build a persistent, evolving AI knowledge base, your "second brain" that grows smarter with every interaction.
 
 1. The Strategy: RAG + mem0 Together
 KEY DISTINCTION	RAG retrieves from static knowledge (your documents). mem0 stores evolving facts from conversations. Zeus uses BOTH: RAG for what you've written, mem0 for what Zeus learns about you over time.
 
-Your existing personal data (ChatGPT history, .md files, context-packs) feeds the RAG pipeline — it becomes the static knowledge base. Every Zeus conversation adds to mem0 — preferences, decisions, patterns. Over months, Zeus stops needing you to re-explain context.
+Your existing personal data (ChatGPT history, .md files, context-packs) feeds the RAG pipeline, it becomes the static knowledge base. Every Zeus conversation adds to mem0, preferences, decisions, patterns. Over months, Zeus stops needing you to re-explain context.
 
-The Zeus Context API (successor to your context-pack API) exposes both layers over a single HTTP interface — other tools can query it just like your current context-pack setup.
+The Zeus Context API (successor to your context-pack API) exposes both layers over a single HTTP interface, other tools can query it just like your current context-pack setup.
 
 2. Data Sources & Ingestion Phases
 
 Phase	Timeline	Data Sources
-Phase 1 — Seed	Immediately	ChatGPT export (JSON) .md context files from server Existing context-pack data Dev project notes & READMEs
-Phase 2 — Grow	Weeks 2–4	Email (IMAP, privacy-filtered) Calendar events (key metadata only) Browser bookmarks (curated) Job application history
-Phase 3 — Live	Ongoing	All new Zeus conversations (auto-stored via mem0) Project files as created/updated Watch vitals (if wearable) New .md files added to server stores
+Phase 1, Seed	Immediately	ChatGPT export (JSON) .md context files from server Existing context-pack data Dev project notes & READMEs
+Phase 2, Grow	Weeks 2–4	Email (IMAP, privacy-filtered) Calendar events (key metadata only) Browser bookmarks (curated) Job application history
+Phase 3, Live	Ongoing	All new Zeus conversations (auto-stored via mem0) Project files as created/updated Watch vitals (if wearable) New .md files added to server stores
 
 3. Memory Architecture
 Zeus uses mem0's hybrid datastore architecture. Different memory types are stored in the optimal storage backend:
 
 Memory Type	Storage	What Zeus Stores Here
-Episodic	Vector (Qdrant)	What happened — conversations, events, decisions made
-Semantic	Vector (Qdrant)	What you know — facts, preferences, expertise, projects
-Relational	Graph (mem0g)	Who/what connects to what — people, projects, tools, skills
-Procedural	KV Store	How things are done — workflows, templates, code patterns
-Temporal	KV + metadata	When things happened — timestamps, recency weighting
+Episodic	Vector (Qdrant)	What happened, conversations, events, decisions made
+Semantic	Vector (Qdrant)	What you know, facts, preferences, expertise, projects
+Relational	Graph (mem0g)	Who/what connects to what, people, projects, tools, skills
+Procedural	KV Store	How things are done, workflows, templates, code patterns
+Temporal	KV + metadata	When things happened, timestamps, recency weighting
 
 MEM0 + OLLAMA	mem0 uses an LLM to extract key facts from conversations. During dev: Claude API. During prod: Ollama (Qwen2.5-7B) on the 3080. This keeps memory extraction entirely local and private.
 
@@ -41,21 +43,21 @@ Every source goes through the same stages:
 •	Load: Read raw file or API response
 •	Clean: Strip metadata noise, normalize encoding, remove duplicates
 •	Chunk: Split into ~512 token segments with 64 token overlap
-•	Hash: SHA-256 per chunk — skip if already in Qdrant (deduplication)
+•	Hash: SHA-256 per chunk, skip if already in Qdrant (deduplication)
 •	Embed: nomic-embed-text or bge-m3 via Ollama
 •	Store: Upsert into Qdrant with payload metadata
 •	Tag: source, date, topic_category, confidence, privacy_level
 •	Index: Update mem0 with any entity-level facts extracted
 
 4.2 ChatGPT Export Parser
-The ChatGPT export is a JSON file (conversations.json) containing your entire history. This is the richest data source — years of your thinking, questions, and problem-solving patterns.
+The ChatGPT export is a JSON file (conversations.json) containing your entire history. This is the richest data source, years of your thinking, questions, and problem-solving patterns.
 
 # zeus/ingest/sources/chatgpt.py
 # Input:  conversations.json (from ChatGPT Settings → Export)
 # Output: chunks in Qdrant + entity facts in mem0
 
 Key processing decisions:
-•	Only index YOUR messages (user role), not ChatGPT responses — you want YOUR knowledge patterns, not generic AI output
+•	Only index YOUR messages (user role), not ChatGPT responses, you want YOUR knowledge patterns, not generic AI output
 •	Exception: include assistant responses in topic threads where you clearly agreed or saved the content
 •	Date-tag each conversation for temporal weighting (recent = higher weight)
 •	Auto-categorize by conversation title into topic clusters (dev, career, projects, ideas, etc.)
@@ -110,13 +112,13 @@ Response:
 }
 
 6. Privacy & Data Governance
-PRINCIPLE	Zeus only stores what you control. All data stays on your hardware. NemoClaw OpenShell enforces this at the runtime level — agents cannot exfiltrate data to unauthorized destinations.
+PRINCIPLE	Zeus only stores what you control. All data stays on your hardware. NemoClaw OpenShell enforces this at the runtime level, agents cannot exfiltrate data to unauthorized destinations.
 
 Privacy Levels (tag on every chunk)
-•	public — general knowledge, shareable
-•	personal — your content, local only, never sent to cloud without explicit trigger
-•	sensitive — PII, health data, financial info — encrypted at rest, mem0 graph excluded
-•	private — not indexed at all, excluded from all queries
+•	public, general knowledge, shareable
+•	personal, your content, local only, never sent to cloud without explicit trigger
+•	sensitive, PII, health data, financial info, encrypted at rest, mem0 graph excluded
+•	private, not indexed at all, excluded from all queries
 
 Data Excluded by Default
 •	Banking and financial account data
@@ -125,11 +127,11 @@ Data Excluded by Default
 •	Messages from contacts who haven't consented to being part of your AI index
 
 Retention & Decay
-•	mem0 supports automatic decay — stale memories lose weight over time
+•	mem0 supports automatic decay, stale memories lose weight over time
 •	Manual purge: /memory/delete endpoint for removing specific facts
 •	Full reset: nuke Qdrant collection + mem0 DB and re-ingest from scratch
 
-7. Getting Started — Ingest Quickstart
+7. Getting Started, Ingest Quickstart
 Step-by-step to get your data into Zeus for the first time:
 
 1.	Get ChatGPT export: ChatGPT → Settings → Data Controls → Export → wait for email
