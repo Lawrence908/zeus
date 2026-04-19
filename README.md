@@ -1,232 +1,247 @@
-# Zeus — Personal AI Assistant System
+# Zeus: Personal AI Assistant System
 
-A self-hosted, voice-first, privacy-preserving AI assistant built from proven open-source components. Runs on consumer GPUs (RTX 3080 production, RTX 5080 dev/test).
+A self-hosted, voice-first, privacy-preserving AI assistant built from proven open-source components. Runs on consumer GPUs (RTX 3080 production, RTX 5080 dev) and keeps all data and computation on your own hardware.
 
-**Status:** Foundation complete (2026-03-25). Text chat and session continuity shipped. Data ingestion pipeline in progress. [View development plan](docs/zeus_linear_ticket_plan.md).
+**Status (2026-04-18):** Foundation, memory + knowledge + reference retrieval, text chat, Telegram bot, MCP server, benchmarks, and Aegis safety layer are live. Voice pipeline is scaffolded; Kairos background daemon is opt-in. Olympus production deploy pending.
+
+> Docs map: [`docs/INDEX.md`](docs/INDEX.md). Project brief: [`CLAUDE.md`](CLAUDE.md). Ticket plan: [`docs/ZEUS_LINEAR_TICKET_PLAN.md`](docs/ZEUS_LINEAR_TICKET_PLAN.md).
 
 ---
 
 ## Vision
 
-Zeus is a personal knowledge engine that knows you. It ingests your data (ChatGPT conversations, markdown files, emails), remembers context across sessions, and answers questions about your own information with voice and text interfaces. Unlike cloud assistants, everything stays on your hardware.
+Zeus is a personal knowledge engine that knows you. It ingests your data (markdown notes, Obsidian vault, ChatGPT exports, newsletters, bookmarks), remembers context across sessions, and answers questions over a three-layer retrieval architecture. Unlike cloud assistants, everything stays on your hardware.
 
-**Key principles:**
-- Privacy-first: All data and computation remain on your server
-- Voice-native: Conversational interaction is primary, text is fallback
-- Modular: Swap components without rewriting the orchestration
-- Extensible: Add new data sources and agents via structured interfaces
+Principles:
+
+- **Privacy-first.** All data stays local. PII-bearing LLM calls are gated to providers with strict retention guarantees; free tiers that train on input are excluded.
+- **Voice-native.** Wake word to STT to LLM to TTS runs as a streaming host-native pipeline. Text and Telegram are first-class fallbacks.
+- **Modular.** Swap a component (chat LLM, embedder, reranker, storage backend) without rewriting orchestration.
+- **Tool-first.** Agents call concrete tools (MCP) with Aegis validation on every call.
 
 ---
 
 ## Architecture
 
+```text
+              ┌─────────────────────────────────────────────┐
+              │           Zeus Core (FastAPI, 8203)         │
+              │  chat · oracle · admin · orchestration ·    │
+              │  voice-state · newsletter · benchmarks      │
+              └─────────────────────────────────────────────┘
+                 │              │                │         │
+          ┌──────┴──────┐  ┌────┴─────┐   ┌──────┴──────┐ ┌┴────────┐
+          │ QueryEngine │  │  Iris    │   │  Kairos     │ │ MCP     │
+          │ retrieval + │  │  ingest  │   │  daemon     │ │ server  │
+          │ reflection  │  │ pipeline │   │ (optional)  │ │ FastMCP │
+          └──────┬──────┘  └────┬─────┘   └──────┬──────┘ └─────────┘
+                 │              │                │
+     ┌───────────┼──────────────┼────────────────┘
+     │           │              │
+┌────┴────┐ ┌────┴──────┐ ┌────┴──────┐ ┌──────────────┐
+│ Profile │ │ Memories  │ │ Knowledge │ │ Reference    │
+│ facts   │ │ (curated) │ │ (bulk)    │ │ (live proxy) │
+└────┬────┘ └────┬──────┘ └────┬──────┘ └──────┬───────┘
+     │          │              │               │
+     └────┬─────┘              │          kiwix / NOMAD
+          ▼                    ▼
+    Qdrant `zeus_memories`    Qdrant `zeus_knowledge`
+    (MemoryStore,             (KnowledgeStore, dense +
+     bi-temporal, LLM-         BM25 RRF hybrid, optional
+     extracted facts)          BGE-reranker-v2-m3)
+          │                    │
+          └──────┬─────────────┘
+                 ▼
+          Ollama (nomic-embed-text 768d + chat model)
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Zeus Core (FastAPI)                  │
-│          HTTP router + session management               │
-└─────────────────────────────────────────────────────────┘
-        ↓              ↓              ↓
-    ┌───────┐     ┌────────┐    ┌──────────┐
-    │ Iris  │     │ Oracle │    │ Orpheus  │
-    │(Ingest)    │(Context)    │(Voice)   │
-    └───────┘     └────────┘    └──────────┘
-        ↓              ↓              ↓
-    ┌───────────────────────────────────────┐
-    │        Mnemosyne (Memory Layer)       │
-    │  mem0 + Qdrant vector DB + KV store   │
-    └───────────────────────────────────────┘
-        ↓              ↓
-    ┌──────────┐  ┌──────────┐
-    │ Qdrant   │  │ Ollama   │
-    │(Vector)  │  │(LLM)     │
-    └──────────┘  └──────────┘
-```
 
-### Subsystems (Greek naming convention)
+Voice: openWakeWord → WhisperLiveKit STT → QueryEngine → Voicebox + LuxTTS. Phaos publishes voice-state to a React orb via WebSocket.
 
-| Subsystem | Role | Status |
-|-----------|------|--------|
-| **zeus** | Main orchestration entry point | ✓ Core wired |
-| **mnemosyne** | Memory layer (search, storage, retrieval) | ▶ Implementing retrieval quality |
-| **iris** | Data ingest pipeline (sources → chunks → embed → store) | ▶ ChatGPT, Markdown done; Email next |
-| **orpheus** | Voice interface (STT, TTS, wake word) | ⧬ Architecture defined, not yet coded |
-| **aegis** | Safety layer (policy enforcement, privacy filtering) | ⧬ Config templates exist |
-| **olympians** | Agent swarm (Ruflo v3.5 orchestration) | ⧬ Config exists, spike pending |
-| **oracle** | Context API (structured context serving) | ✓ Full REST API implemented |
-| **olympus** | Production server (RTX 3080) | ⧬ Deployment pipeline TBD |
+Full subsystem map: [`zeus/docs/architecture.md`](zeus/docs/architecture.md).
 
-### Tech Stack
+### Subsystems (Greek naming)
+
+| Name | Role | State |
+|------|------|-------|
+| **zeus** | Main orchestration, FastAPI bus | Live |
+| **mnemosyne** | Memory layer (`MemoryStore`, `zeus_memories`) | Live |
+| **library / knowledge** | Bulk RAG (`KnowledgeStore`, `zeus_knowledge`) | Live |
+| **reference** | Live proxy for kiwix and NOMAD | Live |
+| **iris** | Ingest pipeline, per-source routing | Live |
+| **oracle** | Context API (`/context/query`, `/context/profile`, `/memory/*`) | Live |
+| **orpheus** | Voice interface (wake, STT, TTS) | Scaffolded; needs end-to-end validation |
+| **phaos** | Voice-state visualization (WebSocket + Three.js orb in React) | Live |
+| **aegis** | Safety layer (YAML policies + bus pre/post hooks) | Live |
+| **olympians** | Ruflo agent swarm | YAML manifests + runtime wired |
+| **kairos** | Background observe-decide-act daemon | Shipped, off by default |
+| **olympus** | Production server (RTX 3080) | Deploy pending; daedalus hosts today |
+
+### Tech stack
 
 | Layer | Component | Why |
 |-------|-----------|-----|
-| Orchestration | Ruflo v3.5 | Claude Code native, no framework lock-in |
-| Vector DB | Qdrant | Self-hosted, scalable, namespace-aware |
-| Memory | mem0 | Unified API for hybrid storage (vector + graph + KV) |
-| HTTP API | FastAPI | Async-first, validated schemas, auto-docs |
-| Embeddings | nomic-embed-text (Ollama) | Fast, good quality, self-hosted |
-| Dev LLM | Claude API (Sonnet 4.6) | Rapid iteration during development |
-| Prod LLM | Qwen2.5-7B-Instruct Q4_K_M | Fits 10GB VRAM, solid instruction-following |
-| STT | WhisperLiveKit | Real-time, streaming-capable |
-| TTS | Voicebox → LuxTTS | 150x realtime speed, voice cloning |
-| Wake Word | openWakeWord | CPU-efficient, always-on detection |
-| Container | Docker Compose | Reproducible multi-service setup |
+| Orchestration | Ruflo v3.5 manifests + Zeus `AgentRuntime` | Claude Code native, no framework lock-in |
+| Vector DB | Qdrant 1.15+ | Self-hosted, native BM25 sparse vectors, RRF fusion |
+| Memory | `zeus/memory/store.py` (`MemoryStore`) | Hand-rolled; replaced mem0 in April 2026 |
+| Knowledge | `zeus/memory/library.py` (`KnowledgeStore`) | Dense + BM25 hybrid, optional BGE-reranker |
+| Small-task LLM | `zeus/core/small_llm.py` | Provider router with privacy-tier gate and daily USD cap |
+| Chat LLM (dev) | Claude Sonnet 4.6 via Anthropic API | Best quality during iteration |
+| Chat LLM (prod) | Ollama `qwen2.5:7b-instruct` Q4_K_M | Fits 10 GB VRAM on the 3080 |
+| Embeddings | `nomic-embed-text:v1.5` via Ollama | 768-dim cosine, fast, self-hosted |
+| HTTP API | FastAPI on port 8203 | Async-first, validated schemas |
+| MCP | `zeus/mcp/server.py` (FastMCP) | Zeus memory exposed to Cursor / Claude Desktop |
+| STT | WhisperLiveKit | Real-time, streaming, SimulStreaming |
+| TTS | Voicebox REST + LuxTTS | 150x realtime, voice cloning |
+| Wake word | openWakeWord | CPU, always-on |
+| Frontend | Vite + React + `@react-three/fiber` | SPA chat + settings + Phaos orb |
+| Container | Docker Compose | Qdrant + Ollama + Whisper + Zeus Core |
 
 ---
 
-## Current Status
+## Current status
 
-### ✓ Complete
-- **Project 0 (Foundation):** Repo structure, core FastAPI bus, Qdrant+Ollama health checks, service wiring
-- **Project 1 (Text Chat + Sessions):** Session layer (`core/sessions.py`), text chat UI (`core/chat.py`), WebSocket plumbing
-- **Ingest Sources:** ChatGPT export parser, Markdown file walker, context-pack migration
-- **Context API:** Full REST interface (`/context/query`, `/memory/search`, `/ingest/trigger`, `/status`)
-- **Query Engine:** Text-in → semantic search → LLM → response pipeline
+**Live:**
 
-### ▶ In Progress
-- **Retrieval Quality:** mem0 integration complete, eval harness and tuning pending
-- **Ruflo Spike:** Validating Ruflo v3.5 before committing Project 5 architecture
-- **Email Ingest:** IMAP parser not yet implemented
+- Foundation, compose stack, `compose.override.yaml` dev bind-mount pattern
+- Memory layer (`MemoryStore`) with bi-temporal payloads and LLM fact extraction via `small_llm_call`
+- Knowledge layer (`KnowledgeStore`) with hybrid dense + BM25 RRF retrieval and optional BGE-reranker
+- Reference layer (kiwix + NOMAD HTTP proxies)
+- QueryEngine retrieval fan-out with sub-budgeted context blocks
+- Small-LLM router (Gemini paid, Groq, OpenRouter, Anthropic Haiku, Ollama) with daily USD cap
+- Text chat + SSE streaming + sessions (in-memory or SQLite)
+- Telegram bot with allow-list, Aegis filter, plain-text replies, runtime hot-restart
+- MCP server: `zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_memory_search`, `zeus_ingest_trigger`
+- Aegis policy engine with pre + post bus hooks
+- Agent runtime, bus, hooks, `TaskRunner`, correlation IDs
+- Kairos daemon (off by default, read-only tool allowlist)
+- Ingest sources: context_pack, markdown, obsidian, chatgpt, email, newsletter, bookmarks, git, gcal
+- Benchmarks module with per-host JSON persistence and UI surface
+- React SPA for chat, settings, agents, orb
 
-### ⧬ Not Started
-- **Privacy/Governance (Aegis):** Policy templates exist, enforcement layer not wired
-- **Voice Pipeline (Orpheus):** STT, TTS, wake word components not integrated
-- **Agent Swarm (Olympians):** Ruflo config exists pending spike validation
-- **Production Deployment:** Docker stack for always-on service mode
-- **Observability:** Metrics collection and admin dashboard
+**Near-term:**
 
-[Full roadmap with 90 tickets across 8 projects](docs/zeus_linear_ticket_plan.md).
+- Olympus deploy (daedalus is the current always-on host)
+- Retrieval eval extension with labelled Profile vs Knowledge ground truth
+- End-to-end voice latency validation on the 3080
+- Kairos observability surfaces
+
+Full ticket-level roadmap: [`docs/ZEUS_LINEAR_TICKET_PLAN.md`](docs/ZEUS_LINEAR_TICKET_PLAN.md).
 
 ---
 
-## Project Structure
+## Repository layout
 
-```
+```text
+docs/             # Ops runbooks, Linear plan, memory-architecture plan, INDEX.md
+compose.yaml
+compose.override.yaml   # Dev bind-mount of ./zeus into zeus-core
 zeus/
-├── core/                    # FastAPI entry point, router, session layer
-│   ├── main.py             # App initialization, route setup
-│   ├── sessions.py         # Multi-turn session continuity
-│   ├── chat.py             # Text chat routes + static UI
-│   ├── query.py            # Query handler (text → search → LLM → response)
-│   └── voice_ws.py         # WebSocket for voice state streaming
-├── api/                     # Oracle: Context API (semantic search)
-│   └── main.py             # REST endpoints for context retrieval
-├── memory/                  # Mnemosyne: mem0 + Qdrant integration
-│   ├── config.py           # mem0 client setup
-│   └── search.py           # Token-budgeted retrieval helpers
-├── ingest/                  # Iris: Data ingestion pipeline
-│   ├── pipeline.py         # Chunk → embed → store orchestration
-│   ├── run.py              # CLI for triggering ingest
-│   └── sources/            # Source-specific parsers
-│       ├── chatgpt.py      # ChatGPT conversations.json parser
-│       ├── markdown.py     # .md file walker with heading-aware chunking
-│       └── context_pack.py # Legacy context-pack migration
-├── voice/                   # Orpheus: STT, TTS, wake word (not yet coded)
-│   └── state.py            # Voice-state protocol + WebSocket publisher
-├── safety/                  # Aegis: Policy enforcement (templates only)
-│   └── __init__.py
-├── orchestration/           # Ruflo config + agent definitions
-│   ├── ruflo.yaml          # Swarm orchestration config
-│   └── agents/             # YAML definitions for task agents
-├── models/                  # Ollama configs, prompt templates
-├── docs/                    # Architecture docs, guides
-└── docker-compose.yaml     # Multi-service stack (Qdrant + Ollama + Zeus)
+  core/           # FastAPI main, chat, admin, query, sessions, voice_ws, small_llm, runtime_settings, newsletter, bench-API
+  core/prompts/   # chat_system.md, memory_extract.md (ZEUS_PROMPT_RELOAD=1 for hot reload)
+  core/static/    # admin.html, chat.html, viz/, newsletters.html, app/ (built React SPA)
+  orchestration/  # runtime.py, bus.py, hooks.py, daemon.py, ruflo.yaml, agents/*.yaml
+  memory/         # store.py, library.py, reference.py, reranker.py, search.py, eval.py, _embed.py, config.py
+  ingest/         # pipeline.py, run.py, config.py, config.yaml, sources/*, scheduler.py
+  voice/          # state.py, stt.py, tts.py, wake.py, pipeline.py
+  safety/         # policy_engine.py, integration.py, policies/*.yaml
+  api/            # Oracle: context + profile + memory search
+  mcp/            # server.py, tools.py
+  bench/          # runner.py, __main__.py
+  integrations/telegram/   # bot.py
+  frontend/       # Vite + React + TypeScript SPA
+  docs/           # Subsystem and product specs (see docs/INDEX.md)
+  data/           # Raw exports, processed chunks, SQLite DBs (all gitignored)
+tests/            # retrieval_eval.py + baselines
 ```
 
 ---
 
-## Getting Started
+## Getting started
 
-### Explore the Codebase
+### Prerequisites
 
-Start with the **architecture overview**:
-- [`CLAUDE.md`](CLAUDE.md) — Full system design, naming convention, dev workflow
-- [`docs/zeus_linear_ticket_plan.md`](docs/zeus_linear_ticket_plan.md) — Feature roadmap and status by project
-
-Quick orientation by subsystem:
-- **Session continuity:** `zeus/core/sessions.py` (multi-turn state; tune with `ZEUS_CONTEXT_MAX_TOKENS` / `ZEUS_SESSION_*` — see `CLAUDE.md`)
-- **Query engine:** `zeus/core/query.py` (search + LLM orchestration)
-- **Data ingestion:** `zeus/ingest/sources/` (source adapters)
-- **Memory layer:** `zeus/memory/config.py` and `memory/search.py`
-- **REST API:** `zeus/api/main.py` (semantic search endpoints)
-
-### Run Locally
-
-**Prerequisites:**
-- Docker & Docker Compose
+- Docker and Docker Compose
 - Python 3.11+
-- `.env` file (see `.env.example` if present)
+- NVIDIA Container Toolkit (for GPU-backed Ollama and Whisper)
+- `.env` populated from [`.env.example`](.env.example). At minimum: `ANTHROPIC_API_KEY` for dev, or none for all-local Ollama.
 
-**Start services:**
+### Start services
+
 ```bash
 docker compose up -d
+docker compose ps
+curl http://localhost:8203/status | jq
 ```
 
-This brings up:
-- **Qdrant** (vector DB) on port 6333
-- **Ollama** (local LLM) on port 11434
-- **Zeus Core** (API bus) on port 8203
+Brings up Qdrant (6333), Ollama (11435), WhisperLiveKit (9090), and Zeus Core (8203).
 
-**Test health:**
+### First ingest
+
 ```bash
-curl http://localhost:8203/status
+# Curated profile sources (memory layer, LLM fact extraction)
+docker exec zeus-core python -m zeus.ingest.run --target memory
+
+# Bulk sources (knowledge layer, raw embed)
+docker exec zeus-core python -m zeus.ingest.run --target knowledge
 ```
 
-**Access text chat:**
-Open `http://localhost:8203/` in your browser.
+Per-source routing lives in [`zeus/ingest/config.yaml`](zeus/ingest/config.yaml). See [`zeus/docs/ingest-guide.md`](zeus/docs/ingest-guide.md) for priority order and [`zeus/docs/ingest-paths.md`](zeus/docs/ingest-paths.md) for raw-data layout.
 
-**Ingest data:**
+### Chat
+
+- Web: open `http://localhost:8203/` (React SPA).
+- Telegram: set `TELEGRAM_ENABLED=1` plus token and allow-list; bot starts in the FastAPI lifespan.
+- MCP: point Cursor or Claude Desktop at `python -m zeus.mcp.server`. See [`zeus/docs/mcp-server-spec.md`](zeus/docs/mcp-server-spec.md).
+
+### Run the benchmark suite
+
 ```bash
-# Prepare ChatGPT export at ./data/raw/chatgpt/conversations.json
-python -m zeus.ingest.run --source chatgpt
+docker exec zeus-core python -m zeus.bench
 ```
+
+Writes per-model tok/s + TTFT + prompt-eval to `zeus/data/benchmarks.json`; results show up in the Settings UI. Measured on the 3080: `qwen2.5:7b-instruct` 119 tok/s, `llama3.1:8b-instruct` 113 tok/s, `qwen3:8b` 100 tok/s. Full context in [`zeus/docs/model-comparison.md`](zeus/docs/model-comparison.md).
 
 ---
 
-## Key Concepts
+## Key concepts
 
-### Greek Naming Convention
+**Three-layer retrieval.** `QueryEngine._collect_retrieval_context()` runs profile, memory, knowledge, and reference lookups in parallel and renders them as labelled blocks in the system prompt. Sub-budgets: profile 20%, memory 25%, knowledge 45%, reference 10%, all under `ZEUS_CONTEXT_MAX_TOKENS` (default 6144). The other 2/3 of the context budget is the session block.
 
-All subsystems use Greek mythology names. This is **intentional and required** for consistency across docs, code, configs, and PRs. See `CLAUDE.md` for the full glossary and rationale.
+**Two LLM layers.** `_run_llm()` is the chat path (Claude in dev, Ollama in prod, 3-attempt reflection). `small_llm_call()` is the batch / structured-output path (fact extraction, titles, classifiers) with a privacy-tier gate and a daily USD cap. LiteLLM is forbidden (March 2026 supply-chain attack).
 
-### Environment Modes
+**Environment modes.**
 
-Zeus supports two modes controlled by `ZEUS_ENV`:
+| Mode | Chat LLM | Hardware | Use case |
+|------|----------|----------|----------|
+| `dev` | Claude Sonnet 4.6 | RTX 5080 tower or daedalus | Rapid iteration |
+| `prod` | Ollama `qwen2.5:7b-instruct` | RTX 3080 (Olympus) | Always-on |
 
-| Mode | LLM | Hardware | Use Case |
-|------|-----|----------|----------|
-| `dev` | Claude API (Sonnet 4.6) | RTX 5080 tower | Rapid iteration, debugging |
-| `prod` | Ollama (Qwen2.5-7B Q4_K_M) | RTX 3080 server | Always-on deployment |
+Switch via `ZEUS_ENV` and optionally `ZEUS_LLM`. See [`zeus/docs/deployment.md`](zeus/docs/deployment.md).
 
-Switch via `.env` file. All services detect and configure themselves.
+**Session continuity.** `SessionManager` in `zeus/core/sessions.py`. In-memory by default; set `ZEUS_SESSION_BACKEND=sqlite` to persist to `zeus/data/sessions.db`. Rolling summary fires at `ZEUS_SESSION_SUMMARY_AT_TURNS` (default 200), keeping the last `ZEUS_SESSION_KEEP_RAW_TURNS` (default 150) as raw turns. See [`zeus/docs/sessions-spec.md`](zeus/docs/sessions-spec.md).
 
-### Session Continuity
-
-Sessions persist multi-turn state with rolling summaries. Each message is append-only. By default the process uses in-memory session storage (sessions are lost on restart); swap in a durable `SessionStorage` when ready. Context size is tuned with `ZEUS_CONTEXT_MAX_TOKENS` and related `ZEUS_SESSION_*` variables (see `.env.example`). See `zeus/core/sessions.py` and `CLAUDE.md`.
-
-### Data Ingestion Flow
-
-```
-Source (ChatGPT JSON, .md files, etc.)
-  ↓ [Parser]
-Chunks (headings, context windows)
-  ↓ [Embedding]
-Vectors (nomic-embed-text via Ollama)
-  ↓ [mem0 Integration]
-Qdrant namespaces (one per source type)
-```
+**Aegis safety.** Every autonomous code path passes through the policy engine. `aegis_bus_pre_hook` validates tool arguments; `aegis_bus_post_hook` filters LLM output. Policies live in `zeus/safety/policies/`. Optional NemoClaw + OpenShell host sandbox for OS-level isolation: [`docs/nemoclaw-ops.md`](docs/nemoclaw-ops.md).
 
 ---
 
-## Development Workflow
+## Development workflow
 
-**Active development on RTX 5080 tower** (16GB VRAM, fast iteration).
-**Production deployment to RTX 3080 server** (10GB VRAM, stable, always-on).
+Dev on the 5080 tower or daedalus; `compose.override.yaml` bind-mounts `./zeus` read-only into `zeus-core` so pure-Python edits take effect with a container restart. Production hosts do not apply the override; they run a baked image.
 
-1. Create feature branch: `git checkout -b chrislawrencedev/LAB-XXX-description`
-2. Iterate locally with `docker compose up` (uses Claude API in dev mode)
-3. Write and run tests
-4. Submit PR with link to Linear ticket
-5. Merge to `main` (always deployable to production)
+1. Create a feature branch: `git checkout -b chrislawrencedev/LAB-XXX-description`
+2. Iterate locally with `docker compose up -d`
+3. Run tests: `pytest` + `python -m zeus.memory.eval` for retrieval
+4. Run `python -m zeus.bench` if you touched model config
+5. Open a PR linked to the Linear ticket
+6. Merge to `main` (always deployable)
+
+Docs freshness is enforced by a git pre-commit hook:
+
+```bash
+ln -sf ../../scripts/check-docs.sh .git/hooks/pre-commit
+```
+
+It fails the commit on forbidden package tokens (`mem0ai`, `litellm`) outside historical framing and on any `.md` file under `docs/` or `zeus/docs/` that isn't listed in `docs/INDEX.md`. Emdashes in prose are reported as warnings.
 
 ---
 
@@ -234,40 +249,22 @@ Qdrant namespaces (one per source type)
 
 | Document | Purpose |
 |----------|---------|
-| [`CLAUDE.md`](CLAUDE.md) | Complete system design, code standards, orchestration guidelines |
-| [`docs/zeus_linear_ticket_plan.md`](docs/zeus_linear_ticket_plan.md) | Feature roadmap, current status, dependencies |
-| [`docs/SYSTEM_PROMPT.md`](docs/SYSTEM_PROMPT.md) | Ruflo agent system prompt template |
-
----
-
-## Future: Open Source Roadmap
-
-Zeus is currently a personal project. If it becomes public or open-source, this README will expand with:
-
-- **Installation Guide:** Detailed setup for different hardware (consumer GPUs, servers, clouds)
-- **Configuration Guide:** Tuning memory size, retrieval quality, LLM parameters
-- **Data Import Guide:** Standard format for contributing new data sources
-- **Contribution Guide:** How to add agents, safety policies, or subsystems
-- **Troubleshooting:** Common issues and solutions
-- **Performance Tuning:** Optimization for different hardware targets
-
-For now, the focus is shipping core functionality and validating the architecture on real personal data.
+| [`docs/INDEX.md`](docs/INDEX.md) | Map of every doc with audience tags |
+| [`CLAUDE.md`](CLAUDE.md) | Primary project brief for humans and AI collaborators |
+| [`docs/ZEUS_LINEAR_TICKET_PLAN.md`](docs/ZEUS_LINEAR_TICKET_PLAN.md) | Ticket-level roadmap |
+| [`docs/SYSTEM_PROMPT.md`](docs/SYSTEM_PROMPT.md) | AI-collaborator bootstrap prompt |
+| [`docs/memory-architecture-plan.md`](docs/memory-architecture-plan.md) | Three-layer memory plan + migration runbook |
+| [`docs/nemoclaw-ops.md`](docs/nemoclaw-ops.md) | NemoClaw + OpenShell operational runbook |
+| [`zeus/docs/architecture.md`](zeus/docs/architecture.md) | Subsystem map |
+| [`zeus/docs/deployment.md`](zeus/docs/deployment.md) | Deployment runbook |
+| [`zeus/docs/model-comparison.md`](zeus/docs/model-comparison.md) | Measured tok/s and VRAM fit per model |
 
 ---
 
 ## License
 
-Personal project. No license specified yet. If released publicly, will likely use MIT or similar permissive open-source license.
+Personal project. No license specified. If released publicly, likely MIT or similar permissive.
 
 ---
 
-## Questions?
-
-- **Architecture decisions?** See `CLAUDE.md` → "Key Decisions" section
-- **Feature status?** See `docs/zeus_linear_ticket_plan.md` for roadmap
-- **Code style?** See `CLAUDE.md` → "Code Standards"
-- **How to contribute?** Create a branch and link to a Linear ticket (if you have access)
-
----
-
-*Last updated: 2026-03-25 | Zeus on GitHub: (TBD)*
+*Last updated: 2026-04-18.*

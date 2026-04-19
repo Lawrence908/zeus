@@ -16,6 +16,12 @@ services:
   zeus-core:
     volumes:
       - ./zeus:/app/zeus:ro
+      # Writable data dir so docker cp (OAuth tokens, bookmarks.html, etc.)
+      # and per-source state survives restarts without poking the named volume.
+      - ./zeus/data:/app/zeus/data
+      # Obsidian vault (LiveSync headless mirror) — read-only ingest input.
+      - /home/chris/data/headless-obsidian-vault:/home/chris/data/headless-obsidian-vault:ro
     environment:
       # Don't write .pyc files into the read-only bind mount.
       - PYTHONDONTWRITEBYTECODE=1
+      - OBSIDIAN_VAULT_PATH=/home/chris/data/headless-obsidian-vault
