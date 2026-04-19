@@ -1,4 +1,4 @@
-# docs/nemoclaw-ops.md — NemoClaw + OpenClaw Operational Runbook
+# docs/nemoclaw-ops.md: NemoClaw + OpenClaw Operational Runbook
 
 For Zeus homelab on daedalus (Ubuntu 24.04, RTX 3080). Access from Apollo via SSH tunnel. NemoClaw alpha (0.0.16+), Mar 2026.
 
@@ -17,14 +17,14 @@ Apollo (workstation)                    daedalus (RTX 3080 server)
 
 **Single Ollama runtime (current homelab):** **zeus-ollama** (`compose.yaml`, host port **11435** → container **11434**). Zeus Core and NemoClaw inference both target this instance when the OpenShell provider base URL points at it.
 
-**OpenShell provider name (example):** `ollama-local` with `OPENAI_BASE_URL=http://<daedalus-LAN-IP>:11435/v1` — the name is arbitrary; rename to `zeus-ollama` if you prefer consistency with the container.
+**OpenShell provider name (example):** `ollama-local` with `OPENAI_BASE_URL=http://<daedalus-LAN-IP>:11435/v1`, the name is arbitrary; rename to `zeus-ollama` if you prefer consistency with the container.
 
 Zeus Aegis (in-process YAML regex on LLM outputs) and NemoClaw/OpenShell (OS-level sandbox
-enforcement) are complementary layers — no overlap. See `zeus/safety/policy_engine.py`.
+enforcement) are complementary layers, no overlap. See `zeus/safety/policy_engine.py`.
 
 ---
 
-## SSH Aliases (Apollo — add to ~/.bashrc or ~/.bash_aliases)
+## SSH Aliases (Apollo: add to ~/.bashrc or ~/.bash_aliases)
 
 ```bash
 # --- NemoClaw SSH tunnels (Apollo → daedalus) ---
@@ -41,13 +41,13 @@ alias nemoui='xdg-open http://127.0.0.1:18789/ 2>/dev/null || echo "Open http://
 After adding, run `source ~/.bashrc` (or restart shell).
 
 Usage:
-1. `nemotunnel` (runs in foreground — Ctrl+C to stop; or add `&` to background)
+1. `nemotunnel` (runs in foreground, Ctrl+C to stop; or add `&` to background)
 2. In another terminal: `nemoui` or open `http://127.0.0.1:18789/` in browser
 3. First time: append `#token=<gateway-token>` to the URL
 
 ---
 
-## Server Aliases (daedalus — add to ~/.bashrc or ~/.bash_aliases)
+## Server Aliases (daedalus: add to ~/.bashrc or ~/.bash_aliases)
 
 ```bash
 # --- NemoClaw sandbox management ---
@@ -128,7 +128,7 @@ Merge these keys into the existing `gateway` block:
 **Verify:** Open `http://127.0.0.1:18789/` from Apollo. Debug tab should show Health: green.
 
 Known blockers: [NVIDIA/NemoClaw#739](https://github.com/NVIDIA/NemoClaw/issues/739),
-[#759](https://github.com/NVIDIA/NemoClaw/issues/759) — `openclaw.json` is root-owned.
+[#759](https://github.com/NVIDIA/NemoClaw/issues/759), `openclaw.json` is root-owned.
 Workaround you already applied:
 ```bash
 docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant -- \
@@ -139,14 +139,14 @@ docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant --
 
 ## Phase 2: Align Ollama Inference (Zeus Ollama on 11435)
 
-**Current layout:** one Ollama — **zeus-ollama** on host port **11435**. There is no separate host
+**Current layout:** one Ollama, **zeus-ollama** on host port **11435**. There is no separate host
 daemon on `11434` unless you install it; `ollama list` on the host may be talking to
 `OLLAMA_HOST` pointing at 11435.
 
 ### DNS vs LAN IP gotchas
 
 - **`host.openshell.internal`** resolves **inside the sandbox**. `openshell inference set` runs
-  endpoint verification from the **host**, where that name often does not resolve — verification
+  endpoint verification from the **host**, where that name often does not resolve, verification
   can time out even when inference works from the sandbox.
 - Use the daedalus **LAN IP** in `OPENAI_BASE_URL` for provider create (example below), or pass
   **`--no-verify`** to `openshell inference set` if verification fails spuriously.
@@ -182,7 +182,7 @@ openshell inference get
 # Expect: Route inference.local → provider ollama-local → qwen2.5:7b-instruct
 ```
 
-`nemoclaw my-assistant status` may still show **unknown** model/provider — gateway routing is what
+`nemoclaw my-assistant status` may still show **unknown** model/provider, gateway routing is what
 matters. See [NemoClaw#759](https://github.com/NVIDIA/NemoClaw/issues/759).
 
 If the sandbox gets **403** to `host.openshell.internal:11435`, apply **Phase 5** custom policy
@@ -199,8 +199,8 @@ OOM or churn; prefer one Ollama or stagger workloads.
 ## Phase 2b: OpenClaw `api` field (Ollama vs Responses API)
 
 OpenClaw **2026.3.x** may set `models.providers.inference.api` to **`openai-responses`**. That
-makes the gateway use **`POST /v1/responses`**. **Ollama does not implement the Responses API** —
-only **`/v1/chat/completions`** — so requests **time out** and logs show
+makes the gateway use **`POST /v1/responses`**. **Ollama does not implement the Responses API** ,
+only **`/v1/chat/completions`**: so requests **time out** and logs show
 `path=/v1/responses` / `upstream unavailable`.
 
 **Fix:** In `/sandbox/.openclaw/openclaw.json`, set:
@@ -215,7 +215,7 @@ only **`/v1/chat/completions`** — so requests **time out** and logs show
 }
 ```
 
-(Adjust nesting to match your file — key path is `models.providers.inference.api`.)
+(Adjust nesting to match your file, key path is `models.providers.inference.api`.)
 
 **Valid `api` values** (OpenClaw gateway; use exact strings):
 
@@ -224,7 +224,7 @@ only **`/v1/chat/completions`** — so requests **time out** and logs show
 
 For Ollama behind an OpenAI-compatible base URL, use **`openai-completions`** or **`ollama`**.
 
-**Do not** set `"api": "openai"` alone — validation expects one of the strings above.
+**Do not** set `"api": "openai"` alone, validation expects one of the strings above.
 
 **Patch in sandbox** (`nemoclaw my-assistant connect`):
 
@@ -265,12 +265,12 @@ Access: `http://127.0.0.1:18789/` (append `#token=<value>` if first session).
 | Instances | Connected devices | Browser session, paired nodes |
 | Sessions | Active sessions | Per-session verbose/thinking overrides, delete (no confirm!) |
 | Channels | WhatsApp/Telegram/Discord | QR login, per-channel config (skip if not using messaging) |
-| Config | Edit `openclaw.json` | **Set allowedOrigins here** — hit Save, verify in Debug |
+| Config | Edit `openclaw.json` | **Set allowedOrigins here**: hit Save, verify in Debug |
 | Cron Jobs | Scheduled tasks | Add/run/enable/disable, run history |
 | Skills | OpenClaw skills | Enable/disable, install from ClaHub |
 | Nodes | Device nodes | Mobile pairing, capabilities |
 | Debug | Health + events | Status snapshots, manual RPC calls, inference test |
-| Logs | Gateway log tail | Filter, export — watch for policy denials and EACCES |
+| Logs | Gateway log tail | Filter, export, watch for policy denials and EACCES |
 
 ---
 
@@ -342,7 +342,7 @@ openshell policy set my-assistant --policy ~/.nemoclaw/policy-zeus.yaml --wait
 
 For static changes, edit `nemoclaw-blueprint/policies/openclaw-sandbox.yaml` and re-onboard.
 
-The `allowed_ips: [172.17.0.1]` (Docker bridge) is critical — without it the sandbox gets 403.
+The `allowed_ips: [172.17.0.1]` (Docker bridge) is critical, without it the sandbox gets 403.
 Credit: [WilliamD's DGX Spark playbook](https://forums.developer.nvidia.com/t/openshell-openclaw-sglang-comfyui/364781).
 
 npm policy deny fix: the `npm_registry` preset only allows `openclaw` and `npm` binaries.
@@ -382,7 +382,7 @@ cat "$src" | docker exec -i openshell-cluster-nemoclaw \
   su -s /bin/bash sandbox -c "cat > ${dst}"
 ```
 
-### Phase 6 Backup — First Run Notes
+### Phase 6 Backup: First Run Notes
 
 First backup completed **2026-03-29 03:37:00** to `~/.nemoclaw/backups/20260329_033700/`.
 
@@ -394,10 +394,10 @@ Note: `nemo-backup` shell function was not in `~/.bashrc`. Used inline script in
 | `SOUL.md` / `IDENTITY.md` / `AGENTS.md` | ✅ | workspace files backed up individually |
 | `policy_active.yaml` | ✅ | `openshell policy get my-assistant --full` |
 | `sandboxes.json` | ✅ | from `~/.nemoclaw/sandboxes.json` on host |
-| `memory/main.sqlite` | — | not applicable (no mem0 memory yet) |
-| `credentials/` | — | empty, non-fatal |
-| `devices/` | — | no paired devices, non-fatal |
-| full `workspace/` tar | — | `openshell sandbox upload` has SSH tar 255 bug; files backed individually |
+| `memory/main.sqlite` | N/A | not applicable (no mem0 memory yet) |
+| `credentials/` | N/A | empty, non-fatal |
+| `devices/` | N/A | no paired devices, non-fatal |
+| full `workspace/` tar | N/A | `openshell sandbox upload` has SSH tar 255 bug; files backed individually |
 
 **Backup script** (add to `~/.bashrc` as `nemo-backup` or run inline):
 ```bash
@@ -448,7 +448,7 @@ workaround (see Phase 6 above). After upload, restart the OpenClaw gateway insid
 run a quick chat test ("what model are you?") to confirm context reduction is working.
 
 **Workspace file limits (confirmed, NVIDIA forums thread 364781):** Workspace markdown has limited
-direct impact on model tool-dispatch. OpenClaw has no documented system prompt override — behavior
+direct impact on model tool-dispatch. OpenClaw has no documented system prompt override, behavior
 control relies on session context and reasoning flags, not workspace files. Built-in tools
 (Memory Search) fire below the workspace layer and cannot be suppressed via AGENTS.md. Practical
 fix for tool-heavy loops is a model upgrade to 14B+. qwen2.5:7b measured at **53 tok/s** on the
@@ -460,9 +460,9 @@ fix for tool-heavy loops is a model upgrade to 14B+. qwen2.5:7b measured at **53
 
 When Health goes offline or WebSocket disconnects:
 
-1. `nemo-status` — check sandbox state
-2. `nemo-term` — OpenShell TUI, look for errors
-3. `nemo-fwdlist` — verify port forward is active
+1. `nemo-status`, check sandbox state
+2. `nemo-term`, OpenShell TUI, look for errors
+3. `nemo-fwdlist`, verify port forward is active
 4. Check SSH tunnel is alive on Apollo
 5. Browser DevTools → Network → WS tab → look for disconnects
 6. Re-establish forward: `nemo-fwd`
@@ -487,9 +487,9 @@ docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant --
 
 ### Python in Sandbox
 
-- `urllib.request` is **blocked** — use `subprocess.run(["curl", ...])` instead
-- Provider env vars are NOT expanded inside the sandbox — inject secrets as files
-- Variables don't persist between separate `exec bash` calls — read inline with `$(cat file)`
+- `urllib.request` is **blocked**: use `subprocess.run(["curl", ...])` instead
+- Provider env vars are NOT expanded inside the sandbox, inject secrets as files
+- Variables don't persist between separate `exec bash` calls, read inline with `$(cat file)`
 
 ### Inference routing to wrong endpoint
 
@@ -499,7 +499,7 @@ docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant --
 - **Cause:** `openclaw.json` has `"api": "openai-responses"` while the backend is Ollama (no
   Responses API).
 - **Fix:** Set `models.providers.inference.api` to **`openai-completions`** (or **`ollama`**),
-  restart the OpenClaw gateway — see **Phase 2b**.
+  restart the OpenClaw gateway, see **Phase 2b**.
 
 ### TLS handshake EOF on `inference.local`
 
@@ -517,13 +517,13 @@ docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant --
 - OpenClaw version pinned in Dockerfile: [#739](https://github.com/NVIDIA/NemoClaw/issues/739)
 - `nemoclaw logs` may not work: [#253](https://github.com/NVIDIA/NemoClaw/issues/253)
 - `dangerouslyDisableDeviceAuth` reverse proxy bug: [#563](https://github.com/NVIDIA/NemoClaw/issues/563)
-- `openshell sandbox upload` SSH tar exit 255 — use kubectl stdin pipe
+- `openshell sandbox upload` SSH tar exit 255, use kubectl stdin pipe
 - No standalone token rotation command
 - Session corruption with consecutive user messages (no assistant reply between them)
 
 ---
 
-## Next session — continuation prompt (copy-paste)
+## Next session: continuation prompt (copy-paste)
 
 Use this to resume NemoClaw / OpenClaw work in a new chat. Repo: **zeus** on daedalus; runbook:
 **`docs/nemoclaw-ops.md`** (this file).
@@ -557,6 +557,6 @@ Use the repo and nemoclaw-ops.md; do not run git commands for me (give me comman
 - [NVIDIA NemoClaw Monitoring](https://docs.nvidia.com/nemoclaw/latest/monitoring/monitor-sandbox-activity.html)
 - [NVIDIA NemoClaw Switch Inference](https://docs.nvidia.com/nemoclaw/latest/inference/switch-inference-providers.html)
 - [WilliamD DGX Spark Playbook (NVIDIA Forums)](https://forums.developer.nvidia.com/t/openshell-openclaw-sglang-comfyui/364781)
-- [NemoClaw#739 — allowedOrigins + Dockerfile pin](https://github.com/NVIDIA/NemoClaw/issues/739)
-- [NemoClaw#759 — openclaw.json permissions](https://github.com/NVIDIA/NemoClaw/issues/759)
+- [NemoClaw#739, allowedOrigins + Dockerfile pin](https://github.com/NVIDIA/NemoClaw/issues/739)
+- [NemoClaw#759, openclaw.json permissions](https://github.com/NVIDIA/NemoClaw/issues/759)
 - [OpenClaw Control UI Audit](https://github.com/openclaw/openclaw/issues/38420)
