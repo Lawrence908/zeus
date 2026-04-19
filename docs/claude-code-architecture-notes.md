@@ -21,7 +21,7 @@ The weights, training data, and core model architecture are proprietary. What is
 
 **Key takeaway:**
 
-> The moat isn’t the model — it’s the orchestration layer ([Medium][3])
+> The moat isn’t the model, it’s the orchestration layer ([Medium][3])
 
 ---
 
@@ -201,14 +201,14 @@ Now do THIS:
 
 ---
 
-## Step 1 — Build a real agent loop
+## Step 1: Build a real agent loop
 
 * Not chat-based
 * Task-based execution engine
 
 ---
 
-## Step 2 — Add tool layer
+## Step 2: Add tool layer
 
 Minimum viable:
 
@@ -222,7 +222,7 @@ Minimum viable:
 
 ---
 
-## Step 3 — Add memory system
+## Step 3: Add memory system
 
 * SQLite or JSON + embeddings
 * Summarize after each task
@@ -230,7 +230,7 @@ Minimum viable:
 
 ---
 
-## Step 4 — Add planner + executor split
+## Step 4: Add planner + executor split
 
 ```text
 User request
@@ -246,7 +246,7 @@ Reflection (LLM)
 
 ---
 
-## Step 5 — Add retry + validation
+## Step 5: Add retry + validation
 
 * Code runs?
 * Output correct?
