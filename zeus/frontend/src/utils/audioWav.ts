@@ -1,4 +1,4 @@
-// zeus/frontend/src/lib/audioWav.ts — Audio conversion utilities for voice chat
+// zeus/frontend/src/utils/audioWav.ts — Audio conversion utilities for voice chat
 // Stub: full implementation will arrive with Orpheus voice pipeline integration
 
 /**
