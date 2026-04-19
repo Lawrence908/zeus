@@ -143,14 +143,9 @@ async def query_context(body: ContextQuery, request: Request):
     The context string is ready to inject into an LLM system prompt:
         system_prompt += f"\\n\\n## Personal Context\\n{context_response.context}"
     """
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
     try:
         results = await asyncio.to_thread(
             search_memories,
-            memory,
             body.query,
             "chris",
             body.top_k,
@@ -165,9 +160,10 @@ async def query_context(body: ContextQuery, request: Request):
     context, token_estimate = format_context_block(results, max_tokens=body.max_tokens)
     sources: list[ContextSource] = []
     for mem in results:
+        md = mem.get("metadata", {}) or {}
         sources.append(ContextSource(
             memory_id=mem.get("id", ""),
-            source=mem.get("metadata", {}).get("source", "unknown"),
+            source=md.get("source_id") or md.get("source") or "unknown",
             relevance=float(mem.get("score") or 0.0),
         ))
 
@@ -183,7 +179,7 @@ def _raw_memory_hits(rows: list[dict]) -> list[MemoryHit]:
     for m in rows:
         md = m.get("metadata", {}) or {}
         text = str(m.get("memory", "") or "").strip()
-        src = str(md.get("source", "") or "unknown")
+        src = str(md.get("source_id") or md.get("source") or "unknown")
         out.append(
             MemoryHit(
                 id=str(m.get("id", "") or ""),
@@ -198,11 +194,7 @@ def _raw_memory_hits(rows: list[dict]) -> list[MemoryHit]:
 
 @router.post("/memory/search", response_model=MemorySearchResponse)
 async def memory_search_raw(body: MemorySearchBody, request: Request):
-    """Raw mem0 hits for MCP / debugging (no formatted context block)."""
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
+    """Raw memory hits for MCP / debugging (no formatted context block)."""
     k = body.top_k if body.top_k is not None else body.limit
     if k is None:
         k = MEMORY_SEARCH_TOP_K
@@ -210,7 +202,6 @@ async def memory_search_raw(body: MemorySearchBody, request: Request):
     try:
         rows = await asyncio.to_thread(
             search_memories,
-            memory,
             body.query,
             "chris",
             k,
@@ -224,11 +215,7 @@ async def memory_search_raw(body: MemorySearchBody, request: Request):
 
 @router.post("/ingest/trigger", response_model=IngestTriggerResponse)
 async def ingest_trigger(body: IngestTriggerBody, request: Request):
-    """Run Iris ingest for one source (or all). Uses app.state.memory."""
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
+    """Run Iris ingest for one source (or all). Writes to MemoryStore / KnowledgeStore."""
     src = (body.source or "all").strip().lower()
     if src not in _TRIGGER_SOURCE_CHOICES:
         raise HTTPException(
@@ -253,7 +240,6 @@ async def ingest_trigger(body: IngestTriggerBody, request: Request):
         sources,
         chunk_size=INGEST_CHUNK_SIZE,
         dry_run=False,
-        memory=memory,
         ingest_ui="plain",
     )
     total = sum(r.chunks_stored for r in results)
@@ -263,11 +249,13 @@ async def ingest_trigger(body: IngestTriggerBody, request: Request):
 
 def _point_to_entry(point: dict) -> MemoryEntry:
     payload = point.get("payload", {}) or {}
-    text = str(payload.get("data", "") or "").strip()
+    # MemoryStore payload key is "text" (KnowledgeStore-aligned); fall back to
+    # mem0's legacy "data" for any pre-migration points that still linger.
+    text = str(payload.get("text") or payload.get("data") or "").strip()
     source = str(payload.get("source", "") or "unknown")
     metadata = {
         k: v for k, v in payload.items()
-        if k not in {"data", "hash", "user_id"}
+        if k not in {"text", "data", "hash", "user_id"}
     }
     return MemoryEntry(
         id=str(point.get("id", "")),
@@ -390,41 +378,80 @@ async def memory_get(memory_id: str, request: Request) -> MemoryEntry:
 
 @router.patch("/memory/{memory_id}", response_model=MemoryEntry)
 async def memory_update(memory_id: str, body: MemoryUpdateBody, request: Request) -> MemoryEntry:
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
+    from zeus.memory.store import get_memory_store
+
+    store = get_memory_store()
     try:
-        await asyncio.to_thread(memory.update, memory_id=memory_id, data=body.text)
+        await asyncio.to_thread(store.update, memory_id, body.text)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"mem0 update failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"memory update failed: {exc}") from exc
     return await memory_get(memory_id, request)
 
 
 @router.delete("/memory/{memory_id}")
 async def memory_delete(memory_id: str, request: Request) -> dict:
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
+    from zeus.memory.store import get_memory_store
+
+    store = get_memory_store()
     try:
-        await asyncio.to_thread(memory.delete, memory_id=memory_id)
+        await asyncio.to_thread(store.delete, memory_id)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"mem0 delete failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"memory delete failed: {exc}") from exc
     return {"ok": True, "id": memory_id}
+
+
+class MemoryAddBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=8000)
+    source: str = Field("manual", description="Source label: manual, chat, kairos, ...")
+    source_id: str | None = Field(None, description="Stable dedupe key; defaults to uuid")
+    extract_facts: bool = Field(
+        False,
+        description="If True, route through small_llm_call for LLM fact extraction",
+    )
+
+
+class MemoryAddResponse(BaseModel):
+    status: str
+    added: int
+    skipped: int
+    raw_fallbacks: int
+    errors: list[str]
+
+
+@router.post("/memory/add", response_model=MemoryAddResponse)
+async def memory_add(body: MemoryAddBody) -> MemoryAddResponse:
+    """Add a memory item. Used by the MCP `zeus_remember` tool and manual UI."""
+    import uuid
+
+    from zeus.memory.store import get_memory_store
+
+    store = get_memory_store()
+    source_id = body.source_id or f"{body.source}:{uuid.uuid4()}"
+    try:
+        result = await store.add_text(
+            body.text,
+            source=body.source,
+            source_id=source_id,
+            user_id=ZEUS_USER_ID,
+            extract_facts=body.extract_facts,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"memory add failed: {exc}") from exc
+    return MemoryAddResponse(
+        status="ok" if result.added > 0 else "empty",
+        added=result.added,
+        skipped=result.skipped,
+        raw_fallbacks=result.raw_fallbacks,
+        errors=result.errors,
+    )
 
 
 @router.get("/context/profile", response_model=ProfileResponse)
 async def get_profile(request: Request):
-    """
-    Return stable facts about the user — used as baseline system prompt context.
-
-    In Sprint 0 this is a stub. Sprint 1 will populate it from mnemosyne
-    after the first ingest run.
-    """
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
-    facts = await asyncio.to_thread(get_profile_facts, memory, "chris", 8)
+    """Return stable facts about the user — baseline system prompt context."""
+    facts = await asyncio.to_thread(get_profile_facts, "chris", 8)
     if not facts:
         return ProfileResponse(
             user_id="chris",

@@ -79,15 +79,10 @@ async def metrics(request: Request) -> dict[str, Any]:
 @router.get("/ingest/stats")
 async def ingest_stats(request: Request) -> dict[str, Any]:
     """Return Qdrant collection statistics for all collections."""
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        return {"error": "memory client not initialised"}
-
     try:
-        # mem0 wraps Qdrant — reach through to the underlying client
-        qdrant = _get_qdrant_client(memory)
-        if qdrant is None:
-            return {"error": "qdrant client not accessible"}
+        from zeus.memory.store import get_memory_store
+
+        qdrant = get_memory_store()._client  # noqa: SLF001 — admin-only reach-through
 
         collections_resp = qdrant.get_collections()
         collection_names = [c.name for c in collections_resp.collections]
@@ -149,14 +144,3 @@ async def admin_query_log_clear(request: Request) -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _get_qdrant_client(memory):
-    """Try to extract the raw qdrant_client from the mem0 client."""
-    # mem0 stores it at memory.vector_store.client or similar paths
-    for attr in ("vector_store", "_vector_store"):
-        vs = getattr(memory, attr, None)
-        if vs is not None:
-            for inner in ("client", "_client", "qdrant_client"):
-                c = getattr(vs, inner, None)
-                if c is not None:
-                    return c
-    return None
