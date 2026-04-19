@@ -25,7 +25,7 @@ from zeus.core.session_storage import SQLiteSessionStorage
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
 from zeus.integrations.telegram import build_telegram_bot
-from zeus.memory.config import get_memory_client
+from zeus.memory.store import get_memory_store
 from zeus.orchestration.bus import router as orchestration_router
 from zeus.orchestration.hooks import build_default_registry, bus_metrics
 from zeus.orchestration.runtime import AgentRuntime
@@ -71,7 +71,12 @@ async def check_service(client: httpx.AsyncClient, name: str, url: str) -> Servi
 async def lifespan(app: FastAPI):
     app.state.boot_time = BOOT_TIME
     app.state.http_client = httpx.AsyncClient()
-    app.state.memory = get_memory_client()
+    app.state.memory_store = get_memory_store()
+    # Legacy alias: a few old call sites still reference app.state.memory.
+    # Pointing it at the MemoryStore keeps those working until they're updated;
+    # real mem0 semantics (.search/.add/.update/.delete) are provided by the
+    # MemoryStore class directly.
+    app.state.memory = app.state.memory_store
     app.state.voice_hub = VoiceStateHub()
     session_backend = os.getenv("ZEUS_SESSION_BACKEND", "memory").lower()
     if session_backend == "sqlite":
@@ -82,10 +87,7 @@ async def lifespan(app: FastAPI):
         storage = InMemoryStorage()
     session_manager = SessionManager(storage, llm_fn=_run_llm)
     app.state.session_manager = session_manager
-    app.state.query_engine = QueryEngine(
-        memory=app.state.memory,
-        session_manager=session_manager,
-    )
+    app.state.query_engine = QueryEngine(session_manager=session_manager)
 
     # Agent runtime — load YAML definitions, start auto_start agents
     app.state.zeus_bus_url = ZEUS_BUS_URL
@@ -120,18 +122,31 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger("zeus").warning("telegram bot failed to start: %s", exc)
 
-    # Scheduled ingest (APScheduler)
-    # Sources are empty by default; populate via INGEST_* env vars or CLI.
-    # The scheduler still runs on schedule — it just skips if no sources are wired.
+    # KAIROS background agent daemon (LAB-330). Default OFF.
+    app.state.kairos_daemon = None
+    app.state.kairos_state = None
+    app.state.kairos_task = None
+    if os.getenv("ZEUS_KAIROS_ENABLED", "0").strip() in ("1", "true", "yes", "on"):
+        try:
+            from zeus.orchestration.daemon import build_default_kairos_daemon
+
+            kairos_daemon, kairos_state = build_default_kairos_daemon(llm_fn=_run_llm)
+            app.state.kairos_daemon = kairos_daemon
+            app.state.kairos_state = kairos_state
+            app.state.kairos_task = asyncio.create_task(kairos_daemon.run_forever())
+        except Exception as exc:
+            import logging
+            logging.getLogger("zeus").warning("kairos daemon failed to start: %s", exc)
+
+    # Scheduled ingest (APScheduler). Consolidator removed with mem0 — idempotent
+    # re-ingest is now handled by MemoryStore.delete_by_source() / KnowledgeStore.
     app.state.ingest_scheduler = None
     try:
         from zeus.ingest.pipeline import IngestPipeline
         from zeus.ingest.scheduler import build_scheduler
-        from zeus.memory.consolidate import MemoryConsolidator
 
-        ingest_pipeline = IngestPipeline(sources=[], memory=app.state.memory)
-        consolidator = MemoryConsolidator(app.state.memory)
-        scheduler = build_scheduler(ingest_pipeline, consolidator)
+        ingest_pipeline = IngestPipeline(sources=[])
+        scheduler = build_scheduler(ingest_pipeline)
         scheduler.start()
         app.state.ingest_scheduler = scheduler
     except Exception as exc:
@@ -139,6 +154,17 @@ async def lifespan(app: FastAPI):
         logging.getLogger("zeus").warning("scheduler not started: %s", exc)
 
     yield
+
+    kairos_task = getattr(app.state, "kairos_task", None)
+    kairos_daemon = getattr(app.state, "kairos_daemon", None)
+    if kairos_task is not None and kairos_daemon is not None:
+        try:
+            kairos_daemon.stop_event.set()
+            await asyncio.wait_for(kairos_task, timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            kairos_task.cancel()
+        except Exception:
+            pass
 
     ingest_scheduler = getattr(app.state, "ingest_scheduler", None)
     if ingest_scheduler is not None:
@@ -152,14 +178,6 @@ async def lifespan(app: FastAPI):
             pass
 
     await app.state.http_client.aclose()
-
-    mem = getattr(app.state, "memory", None)
-    close_fn = getattr(mem, "close", None) if mem is not None else None
-    if callable(close_fn):
-        try:
-            close_fn()
-        except Exception:
-            pass
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -453,7 +471,17 @@ class TelegramStatusResponse(BaseModel):
 @app.get("/integrations/telegram/status", response_model=TelegramStatusResponse)
 async def telegram_status(request: Request) -> TelegramStatusResponse:
     bot = getattr(request.app.state, "telegram_bot", None)
-    enabled = os.getenv("TELEGRAM_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    env_enabled = os.getenv("TELEGRAM_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    runtime_settings = getattr(request.app.state, "runtime_settings", None)
+    if runtime_settings is not None:
+        telegram_section = runtime_settings.get_section("telegram") or {}
+        enabled = bool(telegram_section.get("enabled", env_enabled))
+    else:
+        enabled = env_enabled
+    # A live, running bot is the ground truth — reflect it even if the flag
+    # above disagrees (e.g. runtime override applied but file not reloaded).
+    if bot is not None and getattr(bot, "running", False):
+        enabled = True
     if bot is None:
         return TelegramStatusResponse(enabled=enabled, connected=False)
     return TelegramStatusResponse(

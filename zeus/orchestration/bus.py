@@ -177,6 +177,8 @@ async def bus_call(body: BusCallRequest, request: Request) -> BusCallResponse:
         correlation_id, body.method, body.target_agent, body.endpoint, timeout_s,
     )
 
+    import time as _time
+    call_start = _time.monotonic()
     try:
         if body.method.upper() == "POST":
             resp = await client.post(url, json=body.payload, timeout=timeout_s)
@@ -187,6 +189,7 @@ async def bus_call(body: BusCallRequest, request: Request) -> BusCallResponse:
 
         resp.raise_for_status()
         data: dict[str, Any] = resp.json()
+        latency_ms = (_time.monotonic() - call_start) * 1000
 
         # Run post-hooks
         if hooks is not None:
@@ -199,6 +202,7 @@ async def bus_call(body: BusCallRequest, request: Request) -> BusCallResponse:
                     "response_data": data,
                     "safety_policy": target.definition.safety_policy,
                     "response_status": resp.status_code,
+                    "latency_ms": latency_ms,
                     "correlation_id": correlation_id,
                 }
             )
