@@ -79,6 +79,8 @@ def _walk_files_matching_name(
 class MarkdownSource:
     """Ingest .md files from one or more glob patterns."""
 
+    target: str = "knowledge"
+
     def __init__(
         self,
         globs: list[str],

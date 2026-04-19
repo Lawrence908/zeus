@@ -99,6 +99,8 @@ class RawNewsletter:
 
 
 class NewsletterSource:
+    target: str = "knowledge"
+
     def __init__(
         self,
         *,

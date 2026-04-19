@@ -1,5 +1,6 @@
 # zeus/ingest/pipeline.py — Iris ingest pipeline
-# Takes raw documents from a source, chunks them, and stores them via mem0.
+# Takes raw documents from a source, chunks them, and stores them via MemoryStore
+# (curated facts with LLM extraction) or KnowledgeStore (raw chunks).
 # Sources are pluggable — each implements the IngestSource protocol.
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ if TYPE_CHECKING:
 
 from zeus.ingest.privacy import classify_chunk
 from zeus.ingest.types import Chunk
-from zeus.memory.config import get_memory_client
+from zeus.memory.library import KnowledgeChunk, KnowledgeStore, get_knowledge_store
+from zeus.memory.store import AddResult, MemoryStore, get_memory_store
 
 logger = logging.getLogger("iris")
 
@@ -127,26 +129,97 @@ class IngestResult:
     chunks_stored: int
     errors: list[str] = field(default_factory=list)
     elapsed_sec: float = 0.0
-    mem0_ops: dict[str, int] = field(default_factory=lambda: {
-        "ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0,
+    target: str = "memory"
+    memory_ops: dict[str, int] = field(default_factory=lambda: {
+        "ADDED": 0, "SKIPPED": 0, "RAW_FALLBACKS": 0, "EXTRACTIONS": 0,
+    })
+    knowledge_ops: dict[str, int] = field(default_factory=lambda: {
+        "ADD": 0, "SKIP": 0, "ERROR": 0,
     })
 
 
-def _tally_mem0_result(result: dict, ops: dict[str, int]) -> None:
-    """Count ADD/UPDATE/DELETE/NONE events from mem0.add() return value."""
-    for item in result.get("results", []):
-        event = item.get("event", "NONE").upper()
-        if event in ops:
-            ops[event] += 1
+def _tally_memory_result(result: AddResult, ops: dict[str, int]) -> None:
+    """Accumulate MemoryStore AddResult into per-source counters."""
+    ops["ADDED"] += result.added
+    ops["SKIPPED"] += result.skipped
+    ops["RAW_FALLBACKS"] += result.raw_fallbacks
+    ops["EXTRACTIONS"] += result.extraction_attempts
 
 
-def _resolve_memory(dry_run: bool, injected: Any | None) -> Any | None:
-    """Return mem0 client for live ingest, or None for dry_run / missing client."""
+def _resolve_memory(dry_run: bool, injected: MemoryStore | None) -> MemoryStore | None:
+    """Return MemoryStore for live ingest, or None for dry_run."""
     if dry_run:
         return None
     if injected is not None:
         return injected
-    return get_memory_client()
+    return get_memory_store()
+
+
+def _resolve_knowledge(
+    dry_run: bool, injected: KnowledgeStore | None
+) -> KnowledgeStore | None:
+    """Return KnowledgeStore for live ingest, or None for dry_run."""
+    if dry_run:
+        return None
+    if injected is not None:
+        return injected
+    return get_knowledge_store()
+
+
+def _chunk_to_knowledge(chunk: Chunk, privacy_level: str) -> KnowledgeChunk:
+    """Map a pipeline Chunk (mem0-shaped) onto a KnowledgeChunk for raw RAG store."""
+    src_label = chunk.source or "unknown"
+    if ":" in src_label:
+        source_kind, source_path = src_label.split(":", 1)
+    else:
+        source_kind, source_path = src_label, ""
+    md = dict(chunk.metadata or {})
+    chunk_index = int(md.pop("section", 0) or 0)
+    md["privacy_level"] = privacy_level
+    return KnowledgeChunk(
+        text=chunk.text,
+        source=source_kind,
+        source_id=src_label,
+        source_path=source_path,
+        chunk_index=chunk_index,
+        user_id=chunk.user_id,
+        metadata=md,
+    )
+
+
+async def _store_chunk_memory(
+    store: MemoryStore, chunk: Chunk, privacy_level: str
+) -> AddResult:
+    """Route a chunk through MemoryStore's LLM fact-extraction path."""
+    src_label = chunk.source or "unknown"
+    if ":" in src_label:
+        source_kind, _source_path = src_label.split(":", 1)
+    else:
+        source_kind = src_label
+    metadata = {
+        **chunk.metadata,
+        "privacy_level": privacy_level,
+    }
+    return await store.add_text(
+        chunk.text,
+        source=source_kind,
+        source_id=src_label,
+        user_id=chunk.user_id,
+        extract_facts=True,
+        metadata=metadata,
+    )
+
+
+def _store_chunk_knowledge(
+    store: KnowledgeStore, chunk: Chunk, privacy_level: str
+) -> None:
+    """Blocking knowledge upsert. Raises on failure so the retry loop can catch it."""
+    kc = _chunk_to_knowledge(chunk, privacy_level)
+    result = store.add_chunks([kc])
+    if result.errors:
+        raise RuntimeError(result.errors[0])
+    if result.added == 0:
+        raise RuntimeError(f"knowledge store accepted 0 chunks (skipped={result.skipped})")
 
 
 def _use_rich_progress(ingest_ui: Literal["auto", "rich", "plain"]) -> bool:
@@ -162,22 +235,23 @@ async def run_ingest(
     chunk_size: int = 512,
     dry_run: bool = False,
     *,
-    memory: Any | None = None,
+    memory: MemoryStore | None = None,
+    knowledge: KnowledgeStore | None = None,
     ingest_ui: Literal["auto", "rich", "plain"] = "auto",
     console: Console | None = None,
 ) -> list[IngestResult]:
     """
     Run the full ingest pipeline for all provided sources.
 
-    dry_run=True chunks and logs without writing to mem0.
-    This is useful for previewing what will be ingested.
-
-    ingest_ui: "rich" forces a spinner + live line per chunk; "plain" logs each
-    chunk at INFO; "auto" uses rich only when stderr is a TTY (scheduler/CI
-    stays on plain logging). Pass console when using Rich logging + progress
-    together so output does not garble.
+    dry_run=True chunks and logs without writing to MemoryStore / KnowledgeStore.
     """
-    memory = _resolve_memory(dry_run, memory)
+    memory_store: MemoryStore | None = None
+    knowledge_store: KnowledgeStore | None = None
+    targets = {getattr(s, "target", "memory") for s in sources}
+    if "memory" in targets:
+        memory_store = _resolve_memory(dry_run, memory)
+    if "knowledge" in targets:
+        knowledge_store = _resolve_knowledge(dry_run, knowledge)
     results: list[IngestResult] = []
     use_progress = _use_rich_progress(ingest_ui)
     progress_cm = nullcontext(None)
@@ -209,17 +283,23 @@ async def run_ingest(
 
         for source in sources:
             source_name = type(source).__name__
+            source_target = getattr(source, "target", "memory")
             stored = 0
             errors: list[str] = []
             total = 0
-            ops: dict[str, int] = {"ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0}
+            mem_ops: dict[str, int] = {
+                "ADDED": 0, "SKIPPED": 0, "RAW_FALLBACKS": 0, "EXTRACTIONS": 0,
+            }
+            k_ops: dict[str, int] = {"ADD": 0, "SKIP": 0, "ERROR": 0}
             t_start = time.monotonic()
 
-            logger.info("iris: starting ingest from %s", source_name)
+            logger.info(
+                "iris: starting ingest from %s → %s", source_name, source_target
+            )
             if progress is not None and task_id is not None:
                 progress.update(
                     task_id,
-                    description=f"{source_name} · chunk 0 · starting…",
+                    description=f"{source_name} [{source_target}] · chunk 0 · starting…",
                 )
 
             async for chunk in source.chunks():
@@ -250,17 +330,23 @@ async def run_ingest(
 
                 while True:
                     try:
-                        mem0_result = await asyncio.to_thread(
-                            memory.add,
-                            messages=[{"role": "user", "content": chunk.text}],
-                            user_id=chunk.user_id,
-                            metadata={
-                                **chunk.metadata,
-                                "source": chunk.source,
-                                "privacy_level": privacy_level.value,
-                            },
-                        )
-                        _tally_mem0_result(mem0_result, ops)
+                        if source_target == "knowledge":
+                            await asyncio.to_thread(
+                                _store_chunk_knowledge,
+                                knowledge_store,
+                                chunk,
+                                privacy_level.value,
+                            )
+                            k_ops["ADD"] += 1
+                        else:
+                            if memory_store is None:
+                                raise RuntimeError("memory target selected but no MemoryStore configured")
+                            mem_result = await _store_chunk_memory(
+                                memory_store, chunk, privacy_level.value
+                            )
+                            _tally_memory_result(mem_result, mem_ops)
+                            if mem_result.errors:
+                                errors.extend(mem_result.errors)
                         stored += 1
                         chunk_dt = time.monotonic() - chunk_t0
                         snippet = (
@@ -363,13 +449,17 @@ async def run_ingest(
                         await asyncio.sleep(sleep_s)
 
             elapsed = time.monotonic() - t_start
+            if source_target == "knowledge" and errors:
+                k_ops["ERROR"] += len(errors)
             result = IngestResult(
                 source=source_name,
                 chunks_processed=total,
                 chunks_stored=stored,
                 errors=errors,
                 elapsed_sec=elapsed,
-                mem0_ops=ops,
+                target=source_target,
+                memory_ops=mem_ops,
+                knowledge_ops=k_ops,
             )
             results.append(result)
             logger.info(
@@ -398,7 +488,7 @@ class IngestPipeline:
         chunk_size: int = 512,
         dry_run: bool = False,
         *,
-        memory: Any | None = None,
+        memory: MemoryStore | None = None,
     ) -> None:
         self._sources = list(sources)
         self._chunk_size = chunk_size

@@ -89,6 +89,8 @@ class BookmarksSource:
     Env var: BOOKMARKS_EXPORT_PATH
     """
 
+    target: str = "knowledge"
+
     def __init__(
         self,
         export_path: str | Path | None = None,

@@ -34,6 +34,8 @@ class ChatGPTSource:
       Message = { "author": {"role": str}, "content": {"content_type": str, "parts": list} }
     """
 
+    target: str = "knowledge"
+
     def __init__(
         self,
         path: str | Path,

@@ -143,6 +143,57 @@ def _fmt_duration(seconds: float) -> str:
     return f"{minutes}m {secs}s"
 
 
+def _apply_config_overrides(sources: list, ingest_cfg) -> list:
+    """Apply target overrides from zeus/ingest/config.yaml onto built sources.
+
+    Each source class has a class-level ``target`` default from task D; the
+    config file is allowed to override it per-source. Also rejects Phase 2-only
+    targets (reference) since the pipeline does not yet handle them.
+    """
+    if ingest_cfg is None:
+        return sources
+    # Class name → config key (lowercase without the "Source" suffix, with
+    # a couple of special cases that don't follow the pattern).
+    CLASS_TO_KEY = {
+        "ContextPackSource": "context_pack",
+        "MarkdownSource": "markdown",
+        "ChatGPTSource": "chatgpt",
+        "ObsidianSource": "obsidian",
+        "EmailSource": "email",
+        "NewsletterSource": "newsletter",
+        "BookmarksSource": "bookmarks",
+        "GitSource": "git",
+        "GoogleCalendarSource": "gcal",
+        "DocsSource": "docs",
+    }
+    for source in sources:
+        key = CLASS_TO_KEY.get(type(source).__name__)
+        if not key:
+            continue
+        src_cfg = ingest_cfg.sources.get(key)
+        if src_cfg is None:
+            continue
+        src_cfg.reject_if_phase2_only(key)
+        source.target = src_cfg.target
+    return sources
+
+
+def _filter_sources_by_target(sources: list, target_filter: str) -> list:
+    """--target {memory,knowledge,both} keeps only sources routed to the chosen layer."""
+    if target_filter in ("both", "all", ""):
+        return sources
+    kept = [s for s in sources if getattr(s, "target", "memory") == target_filter]
+    dropped = [type(s).__name__ for s in sources if s not in kept]
+    if dropped:
+        logger.info(
+            "iris: --target=%s filter dropped %s source(s): %s",
+            target_filter,
+            len(dropped),
+            ", ".join(dropped),
+        )
+    return kept
+
+
 def build_sources(args, *, cli_mode: bool = True) -> list:
     """Construct IngestSource instances from CLI args.
 
@@ -159,6 +210,7 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
     from zeus.ingest.sources.bookmarks import BookmarksSource
     from zeus.ingest.sources.chatgpt import ChatGPTSource
     from zeus.ingest.sources.context_pack import ContextPackSource
+    from zeus.ingest.sources.docs import DocsSource
     from zeus.ingest.sources.email import EmailSource
     from zeus.ingest.sources.gcal import GoogleCalendarSource
     from zeus.ingest.sources.git import GitSource
@@ -304,6 +356,22 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
                 )
             )
 
+    if args.source in ("docs", "all"):
+        repo_root = args.path or "."
+        if not Path(repo_root, "CLAUDE.md").is_file():
+            if args.source == "docs":
+                fail_hard(f"docs: CLAUDE.md not found under {repo_root}; pass --path <repo-root>")
+            logger.warning("skipping docs, no CLAUDE.md under %s", repo_root)
+        else:
+            sources.append(
+                DocsSource(
+                    repo_root=repo_root,
+                    chunk_size=args.chunk_size,
+                    chunk_overlap=args.chunk_overlap,
+                    user_id=args.user_id,
+                )
+            )
+
     if args.source in ("newsletter", "all"):
         try:
             nl_cfg = NewsletterSource.from_env()
@@ -349,11 +417,15 @@ def build_sources_for_trigger(
         git_max_commits=500,
         gcal_days_back=90,
         gcal_days_forward=30,
+        config=None,
+        no_config=False,
+        target="both",
     )
     return build_sources(args, cli_mode=False)
 
 
 async def main(args, *, log_console: object | None = None) -> None:
+    from zeus.ingest.config import DEFAULT_CONFIG_PATH, load_ingest_config
     from zeus.ingest.pipeline import run_ingest
     from zeus.memory.config import get_token_usage, reset_token_usage
 
@@ -361,7 +433,37 @@ async def main(args, *, log_console: object | None = None) -> None:
         os.environ["ZEUS_LLM"] = args.llm
         logger.info("iris: LLM override → %s", args.llm)
 
+    ingest_cfg = None
+    if not args.no_config:
+        cfg_path = args.config or DEFAULT_CONFIG_PATH
+        try:
+            ingest_cfg = load_ingest_config(cfg_path)
+            logger.info("iris: loaded routing config from %s", cfg_path)
+        except FileNotFoundError:
+            if args.config:
+                logger.error("iris: --config file not found: %s", cfg_path)
+                sys.exit(1)
+            logger.info(
+                "iris: no %s found; using class-level source targets", cfg_path
+            )
+        except Exception as exc:
+            logger.error("iris: failed to load ingest config: %s", exc)
+            sys.exit(1)
+
     sources = build_sources(args)
+    sources = _apply_config_overrides(sources, ingest_cfg)
+    sources = _filter_sources_by_target(sources, args.target)
+
+    if not sources:
+        logger.error(
+            "iris: no sources remain after applying --target=%s filter", args.target
+        )
+        sys.exit(1)
+
+    routing = ", ".join(
+        f"{type(s).__name__}→{getattr(s, 'target', 'memory')}" for s in sources
+    )
+    logger.info("iris: routing — %s", routing)
 
     mode = "DRY RUN" if args.dry_run else "LIVE"
     llm_label = args.llm or os.getenv("ZEUS_LLM", "auto")
@@ -425,7 +527,7 @@ def _print_summary(
 
 def _print_summary_plain(results, args, llm_label, wall_elapsed, start_ts, tokens):
     total_processed = total_stored = total_errors = 0
-    total_ops: dict[str, int] = {"ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0}
+    total_ops: dict[str, int] = {"ADDED": 0, "SKIPPED": 0, "RAW_FALLBACKS": 0, "EXTRACTIONS": 0}
 
     print()
     print("┌─────────────────────────────────────────────────────────┐")
@@ -441,8 +543,8 @@ def _print_summary_plain(results, args, llm_label, wall_elapsed, start_ts, token
               f"({rate:.2f} chunks/s)")
 
         ops_parts = []
-        for op in ("ADD", "UPDATE", "DELETE", "NONE"):
-            count = r.mem0_ops.get(op, 0)
+        for op in ("ADDED", "SKIPPED", "RAW_FALLBACKS", "EXTRACTIONS"):
+            count = r.memory_ops.get(op, 0)
             if count > 0:
                 ops_parts.append(f"{count} {op}")
             total_ops[op] += count
@@ -494,7 +596,7 @@ def _print_summary_rich(results, args, llm_label, wall_elapsed, start_ts, tokens
     from rich.table import Table
 
     total_processed = total_stored = total_errors = 0
-    total_ops: dict[str, int] = {"ADD": 0, "UPDATE": 0, "DELETE": 0, "NONE": 0}
+    total_ops: dict[str, int] = {"ADDED": 0, "SKIPPED": 0, "RAW_FALLBACKS": 0, "EXTRACTIONS": 0}
 
     console = Console(highlight=False)
     table = Table(show_header=True, header_style="bold cyan", expand=True)
@@ -510,8 +612,8 @@ def _print_summary_rich(results, args, llm_label, wall_elapsed, start_ts, tokens
         status_style = "green" if not r.errors else "yellow"
         rate = r.chunks_stored / r.elapsed_sec if r.elapsed_sec > 0 else 0
         ops_parts = []
-        for op in ("ADD", "UPDATE", "DELETE", "NONE"):
-            count = r.mem0_ops.get(op, 0)
+        for op in ("ADDED", "SKIPPED", "RAW_FALLBACKS", "EXTRACTIONS"):
+            count = r.memory_ops.get(op, 0)
             if count > 0:
                 ops_parts.append(f"{count} {op}")
             total_ops[op] += count
@@ -601,9 +703,10 @@ Examples:
     p.add_argument(
         "--source",
         choices=["context_pack", "markdown", "chatgpt", "email",
-                 "obsidian", "git", "gcal", "bookmarks", "newsletter", "all"],
+                 "obsidian", "git", "gcal", "bookmarks", "newsletter",
+                 "docs", "all"],
         default="all",
-        help="Which source type to ingest (default: all — includes zeus/data/raw/context_pack.md)",
+        help="Which source type to ingest (default: all, includes zeus/data/raw/context_pack.md and project docs)",
     )
     p.add_argument(
         "--path",
@@ -671,6 +774,22 @@ Examples:
         type=int,
         default=30,
         help="Days forward to fetch Google Calendar events (default: 30)",
+    )
+    p.add_argument(
+        "--config",
+        default=None,
+        help="Path to ingest config YAML (default: zeus/ingest/config.yaml)",
+    )
+    p.add_argument(
+        "--no-config",
+        action="store_true",
+        help="Ignore zeus/ingest/config.yaml; use class-level source targets only",
+    )
+    p.add_argument(
+        "--target",
+        choices=["memory", "knowledge", "both"],
+        default="both",
+        help="Only run sources routed to this layer (default: both)",
     )
     p.add_argument(
         "--verbose",

@@ -9,6 +9,8 @@ from zeus.ingest.sources.markdown import _HEADING_SPLIT_RE, _strip_frontmatter
 class ContextPackSource:
     """Ingest a single hand-curated context_pack.md with high-priority metadata."""
 
+    target: str = "memory"
+
     def __init__(
         self,
         path: str | Path = "zeus/data/raw/context_pack.md",
