@@ -26,6 +26,17 @@ def _matches_namespaces(memory_item: dict, namespaces: list[str]) -> bool:
     return False
 
 
+def _unwrap_mem0_results(raw: object) -> list[dict]:
+    """mem0 ≥ 0.1.x returns ``{"results": [...]}``; older versions returned a bare list."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        inner = raw.get("results")
+        if isinstance(inner, list):
+            return inner
+    return []
+
+
 def search_memories(
     memory,
     query: str,
@@ -35,9 +46,7 @@ def search_memories(
 ) -> list[dict]:
     """Search mem0 and apply lightweight namespace filtering."""
     k = MEMORY_SEARCH_TOP_K if top_k is None else max(1, min(20, top_k))
-    results = memory.search(query=query, user_id=user_id, limit=k)
-    if not isinstance(results, list):
-        return []
+    results = _unwrap_mem0_results(memory.search(query=query, user_id=user_id, limit=k))
 
     namespace_filters = namespaces or []
     filtered = [item for item in results if _matches_namespaces(item, namespace_filters)]
@@ -99,9 +108,7 @@ def get_profile_facts(memory, user_id: str, top_k: int = 8) -> list[str]:
     """
     q = "stable profile facts identity goals preferences current projects"
     fetch_n = max(top_k * 2, 8)
-    raw = memory.search(query=q, user_id=user_id, limit=fetch_n)
-    if not isinstance(raw, list):
-        raw = []
+    raw = _unwrap_mem0_results(memory.search(query=q, user_id=user_id, limit=fetch_n))
     preferred = [m for m in raw if _matches_namespaces(m, ["context_pack"])]
     fallback = [m for m in raw if not _matches_namespaces(m, ["context_pack"])]
 

@@ -81,7 +81,7 @@ Closing this spike should establish whether **Ruflo owns** multi-step swarm sema
   - **LAB-61 (mem0 Integration & Retrieval Quality)**: mem0 client + retrieval helpers exist (`zeus/memory/config.py`, `zeus/memory/search.py`), but quality eval harness / tuning loop isn’t represented as a dedicated suite yet. **Orchestration alignment:** add sub-scope or child work for **retrieval after summarization** and **execution-log / task summaries** in memory (short-term session vs long-term vector vs structured execution trail). Cross-link: **Backlog** *Mnemosyne: task execution log + rolling summaries*; **Project 7** LAB-144.
   - **LAB-56 (Privacy & Data Governance / Aegis)**: **in-process Aegis** is present (`zeus/safety/policy_engine.py`, YAML under `zeus/safety/policies/`, optional `ZEUS_AEGIS_ENABLED` / `ZEUS_AEGIS_POLICY` / `NEMOCLAW_POLICY` per `.env.example`). Chat, streaming chat, voice text responses, and `/orchestration/call` outputs can be filtered by policy. **Still open** on this ticket: privacy level tagging, PII scanning across ingest, deduplication strategy, collection versioning—see ticket scope. **Orchestration alignment:** **input validation**, **tool argument checks**, and **defensive execution** (no blind tool runs). Cross-link: **Backlog** *Aegis: tool argument verification + execution guardrails*; **Project 7** LAB-145–146; **Project 10** LAB-326 (bus pre-hook + `evaluate_payload`).
 - **Not started (no code present yet)**:
-  - **LAB-64 (Email Ingest)**: no email source/parser found under `zeus/ingest/sources/`.
+  - **LAB-64 (Email Ingest)**: General email ingest (starred/sent) not started. Newsletter-specific email ingest shipped via LAB-336.
 
 | Parent | Title                                | Labels             | Subs |
 | ------ | ------------------------------------ | ------------------ | ---- |
@@ -122,6 +122,30 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 `run_ingest()` calls `get_memory_client()` internally on every scheduled run, creating a fresh mem0/Qdrant client each time instead of reusing `app.state.memory`. Adds connection overhead and complicates clean shutdown.
 
 **Fix:** Add optional `memory` param to `IngestPipeline.__init__` and thread it through to `run_ingest`. In `main.py` lifespan, pass `memory=app.state.memory` when constructing the pipeline. Gate on **Project 6**.
+
+### LAB-336 — Newsletter Digest System ✅
+**Status (9 Apr 2026): Shipped** — merged via PR #22.
+**Files:** `zeus/ingest/sources/newsletter.py`, `zeus/core/newsletter.py`, `zeus/core/static/newsletters.html`, `tests/test_newsletter.py` (44 tests)
+
+IMAP fetch → LLM summarization → optional TTS audio → web UI. Uses `IngestSource` protocol, `_run_llm()` for env-aware Claude/Ollama, `VoiceboxTTS.synthesize()`, `asyncio.to_thread()` for blocking IMAP.
+
+| Sub | Title | Status | Notes |
+|-----|-------|--------|-------|
+| LAB-337 | Newsletter IMAP Fetch + Parse | ✅ Done | `zeus/ingest/sources/newsletter.py` |
+| LAB-338 | Newsletter Summarization Endpoint | ✅ Done | `POST /api/newsletter/digest` |
+| LAB-339 | Newsletter TTS Audio Generation | ✅ Done | Voicebox WAV, `/api/newsletter/audio/` |
+| LAB-340 | Newsletter Web UI Page | ✅ Done | `/newsletters` route, dark/light theme |
+| LAB-341 | Newsletter Schedule Skeleton + Manifest | ✅ Done | JSON manifest at `zeus/data/newsletters/` |
+
+**Extension tickets (deferred):**
+
+| Sub | Title | Priority | Notes |
+|-----|-------|----------|-------|
+| LAB-342 | Newsletter Qdrant Ingest — Wire chunks() into Mnemosyne | Medium | Store summaries + raw content in Qdrant for retrieval; cross-link LAB-61 |
+| LAB-343 | Newsletter Scheduled Digests via KAIROS | Low | `NewsletterObservationSource` for KAIROS daemon; depends on LAB-330 |
+| LAB-344 | Newsletter Multi-Source Aggregated Digest | Low | Theme-grouped bullets, source attribution, dedup overlapping stories |
+
+**Dependencies:** LAB-342 is self-contained. LAB-343 requires LAB-330 (KAIROS). LAB-344 is self-contained (prompt + model + UI changes only).
 
 
 ## Project 3 — Voice Loop
@@ -381,13 +405,14 @@ Vite `outDir → zeus/core/static/app/`. `main.py`: mount `/assets`, add SPA cat
 **Sub-issues:** LAB-311 (Vite outDir + asset mount), LAB-312 (SPA catch-all), LAB-313 (API preservation + redirects), LAB-314 (deployment docs)
 
 ### LAB-291 — Telegram Bot Backend
-**Files:** `zeus/integrations/telegram/` (new), `zeus/core/main.py` (lifespan), `.env.example` · **Priority:** Normal · **Blocks:** LAB-292
+**Status (14 Apr 2026):** **Shipped** on `frontend-improvements`. End-to-end working in prod: Chris messages the bot, QueryEngine runs, grounded reply comes back in plain text. Files: `zeus/integrations/telegram/{__init__,bot}.py` (new), `zeus/core/main.py` (lifespan + `/integrations/telegram/status`), `.env.example`, `requirements.txt`.
 
-`python-telegram-bot` async bot in `zeus/integrations/telegram/bot.py`. Each Telegram `chat_id` → persistent Zeus session keyed `telegram:{chat_id}` with `metadata.source = "telegram"`. Allowed-list guard (`TELEGRAM_ALLOWED_CHAT_IDS`). All outgoing responses pass through `AegisPolicyEngine`. Bot starts/stops in FastAPI lifespan. New endpoint: `GET /integrations/telegram/status`.
+Delivered beyond the original scope:
+- `markdown_to_plaintext()` stripper in `bot.py` — Telegram replies go out as clean plain text (code fences unwrapped, bold/italic removed, links rewritten as `text (url)`, list markers to `•`). Avoids MarkdownV2 parse failures from LLM output.
+- Diagnostic logging: every incoming update is logged at INFO with `chat_id`/`user`/`text`, disallowed chats log at WARNING so drops are visible in docker logs.
+- Runtime hot-restart: the bot can be rebuilt in-place from `PATCH /admin/settings` without a zeus-core restart.
 
-**Env vars:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS`, `TELEGRAM_ENABLED`
-
-**Sub-issues:** LAB-315 (module scaffold), LAB-316 (bot.py + allowed-list), LAB-317 (session mapping), LAB-318 (lifespan + env vars), LAB-319 (Aegis safety hook)
+**Sub-issues (all Done):** LAB-315 (module scaffold), LAB-316 (bot.py + allowed-list), LAB-317 (session mapping), LAB-318 (lifespan + env vars), LAB-319 (Aegis safety hook)
 
 ### LAB-292 — Telegram Frontend Integration
 **Files:** `zeus/frontend/src/components/SourceBadge.tsx`, `src/components/TelegramStatus.tsx` · **Priority:** Normal
@@ -397,11 +422,19 @@ Vite `outDir → zeus/core/static/app/`. `main.py`: mount `/assets`, add SPA cat
 **Sub-issues:** LAB-320 (SourceBadge), LAB-321 (TelegramStatus + endpoint), LAB-322 (Settings Telegram section)
 
 ### LAB-293 — React Settings Page
-**Files:** `zeus/frontend/src/pages/SettingsPage.tsx` · **Priority:** Normal
+**Status (14 Apr 2026):** Partially shipped. Settings page layout and sections (Model, Aegis, Telegram, Sessions, Voice, Appearance) exist on `frontend-improvements`. Runtime settings now persist server-side:
 
-`/settings` two-column layout (nav sidebar + content pane). Sections: Model (dev/prod toggle), Aegis (policy selector from `GET /safety/policies`), Telegram (see LAB-292), Sessions (auto-summarize, window size), Appearance (theme, orb size). New `PATCH /settings` FastAPI endpoint for runtime state overrides; UI prefs to `localStorage`.
+- `zeus/core/runtime_settings.py` — JSON-backed `RuntimeSettings` store at `zeus/data/runtime_settings.json` (under `ZEUS_RUNTIME_SETTINGS_PATH`), thread-safe, section-scoped, survives rebuilds via the `zeus_data` volume.
+- `GET /admin/settings` returns runtime settings with `bot_token` replaced by `bot_token_masked`.
+- `PATCH /admin/settings` merges a `{telegram: {...}}` section, persists, and calls `_restart_telegram_bot(app)` so changes take effect in-place.
+- Settings page hydrates from `GET /admin/settings` on mount and writes back on the Telegram section's **Save & Restart Bot** button. Token never leaves the server — UI shows a masked placeholder like `Saved: abcd…wxyz — leave blank to keep`.
+- Model section shows live **benchmarks** (see LAB-363 below): tok/s next to each model, `Run Benchmarks` button, polling while a run is in progress.
 
-**Sub-issues:** LAB-323 (layout + scaffold), LAB-324 (Model + Aegis sections), LAB-325 (Sessions prefs + PATCH /settings)
+Files: `zeus/core/main.py`, `zeus/core/runtime_settings.py`, `zeus/frontend/src/pages/SettingsPage.tsx`.
+
+**Sub-issues:** LAB-323 (layout + scaffold), LAB-324 (Model + Aegis sections), LAB-325 (Sessions prefs + PATCH /settings).
+
+**Still open:** wiring the Aegis policy dropdown to a `PATCH /admin/settings {aegis: {...}}` section, and moving the Sessions prefs off localStorage onto the runtime store.
 
 ---
 
@@ -560,6 +593,52 @@ How: LAB-330 KAIROS is the implementation. Resource gates: `KAIROS_MAX_ACTIONS_P
 
 ---
 
+## Recent deliveries on `frontend-improvements` (April 2026)
+
+Tickets shipped in this branch that are not yet reflected in their original project summaries:
+
+### LAB-361 — Mnemosyne retrieval bug (URGENT, Done)
+**Files:** `zeus/memory/search.py` · **Priority:** Urgent · **Parent:** LAB-61
+
+mem0 ≥ 0.1.x changed `Memory.search()` to return `{"results": [...]}` instead of a bare list. `search_memories()` had `if not isinstance(results, list): return []`, so every retrieval silently dropped to empty — Telegram and chat both replied "I don't have that in memory" even though Qdrant had 396 points with `user_id=chris`. Same bug in `get_profile_facts()`. Fix: `_unwrap_mem0_results()` handles both shapes. Verified end-to-end: `POST /memory/search "will allow OpenSSH in ufw"` → score 0.9654, `GET /context/profile` → 8 facts.
+
+No data was lost; the Qdrant volume was intact throughout.
+
+### LAB-363 — `zeus.bench` local model benchmarking (In Progress, mostly shipped)
+**Files:** `zeus/bench/{__init__,runner,__main__}.py` (new), `zeus/core/main.py`, `zeus/frontend/src/pages/SettingsPage.tsx` · **Priority:** Medium · **Linked:** `zeus/docs/model-comparison.md`
+
+New `zeus/bench/` module that measures real tok/s, TTFT, and prompt-eval rate for every Ollama chat model on the current host using native `/api/generate` streaming response fields (`eval_count` / `eval_duration`). Suite: short / medium / long prompts at 16 / 200 / 600 max tokens, warm-up pass, `keep_alive=10m` to prevent cold-reload TTFT spikes. Persists to `zeus/data/benchmarks.json` (in the `zeus_data` volume).
+
+Backend: `GET /models/benchmarks` (results + run status), `POST /models/benchmarks/run` (background asyncio task, 409 if already running, persists each result as it finishes).
+
+Frontend: **Run Benchmarks** button in Settings → Model, tok/s shown inline next to each model in cyan with TTFT / prompt-eval tok/s in the tooltip, 2s polling while a run is in progress, `benchmarking…` badge on the current model.
+
+CLI: `docker exec zeus-core python -m zeus.bench [models...] -v`.
+
+**Measured on olympus (RTX 3080 10 GB + 112 GB host RAM, ~90–100 GB to the zeus VM):**
+
+| Model | Gen tok/s | TTFT | Fits VRAM? |
+|---|---:|---:|---|
+| `qwen2.5:7b-instruct` | **119.4** | 304 ms | ✅ |
+| `llama3.1:8b-instruct-q4_K_M` | 112.7 | 351 ms | ✅ |
+| `qwen3:8b` | 100.3 | 274 ms | ✅ (thinking mode = longer replies) |
+| `gpt-oss:20b` | 0.8 | 6.6 s | ❌ CPU offload |
+| `qwen2.5:32b` | 0.1 | 15.8 s | ❌ heavy CPU offload |
+
+Confirmed: **112 GB host RAM does not rescue models that exceed VRAM.** The 32B run sat at 0.1 tok/s and took 13 min for the long prompt. Only interactive-usable models on the 3080 are the 7–8B class. Active model set to `qwen2.5:7b-instruct` via `POST /models/active`.
+
+**Follow-ups:** per-host comparison view (3080 vs future 5080 tower), grounded-answer quality eval tied to `tests/retrieval_eval.py`, benchmark history (currently only the latest run per model is stored).
+
+### Dev ergonomics — `compose.override.yaml`
+**Files:** `compose.override.yaml` (new) · Not ticketed
+
+Auto-loaded docker-compose overlay that bind-mounts `./zeus:/app/zeus:ro` into `zeus-core` and sets `PYTHONDONTWRITEBYTECODE=1`. Lets pure-Python edits (server modules and one-shot CLI scripts like `zeus.bench`) take effect with a container restart (or no restart at all for `docker exec` scripts) instead of requiring a full ~6-minute image rebuild. Should be renamed or excluded from the prod deploy path on olympus, where the baked image is the source of truth.
+
+### Collateral — Telegram plain-text formatter
+See LAB-291 notes above. Not a new ticket.
+
+---
+
 ## Key Dependencies
 
 - **LAB-48 (Context API)** blocks Projects 3, 4, 5, 6, 7, 8
@@ -576,4 +655,7 @@ How: LAB-330 KAIROS is the implementation. Resource gates: `KAIROS_MAX_ACTIONS_P
 - **LAB-328 (Tool Pack)** blocks LAB-330 (KAIROS needs tools to act with)
 - **LAB-329 (Session Persistence)** blocks LAB-291 (Telegram sessions need persistence) and LAB-330 (KAIROS memory continuity across restarts)
 - **LAB-330 (KAIROS)** depends on LAB-332 (TaskRunner), LAB-328 (tool pack), LAB-329 (session persistence)
+- **LAB-342 (Newsletter Qdrant Ingest)** — self-contained; wires existing `chunks()` into digest flow
+- **LAB-343 (Newsletter Scheduled Digests)** depends on LAB-330 (KAIROS daemon)
+- **LAB-344 (Newsletter Multi-Source Aggregation)** — self-contained; prompt + model + UI only
 

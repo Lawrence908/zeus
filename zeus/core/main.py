@@ -4,6 +4,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
@@ -12,19 +13,23 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from zeus.api.main import router as oracle_router
+from zeus.bench.runner import BenchmarkRunner, load_results, save_results
 from zeus.core.admin import init_query_log
 from zeus.core.admin import router as admin_router
 from zeus.core.chat import router as chat_router
 from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.newsletter import router as newsletter_router
-from zeus.core.query import QueryEngine, _run_llm
+from zeus.core.query import QueryEngine, _run_llm, _active_model_name, _chat_use_claude, _ollama_model, set_ollama_model
+from zeus.core.runtime_settings import RuntimeSettings
+from zeus.core.session_storage import SQLiteSessionStorage
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
-from zeus.memory.config import get_memory_client
+from zeus.integrations.telegram import build_telegram_bot
+from zeus.memory.store import get_memory_store
 from zeus.orchestration.bus import router as orchestration_router
-from zeus.orchestration.hooks import build_default_registry
+from zeus.orchestration.hooks import build_default_registry, bus_metrics
 from zeus.orchestration.runtime import AgentRuntime
-from zeus.safety.integration import register_aegis_bus_post_hook
+from zeus.safety.integration import register_aegis_bus_pre_hook, register_aegis_bus_post_hook
 from zeus.voice.state import VoiceStateHub
 
 ZEUS_VERSION = "0.1.0"
@@ -66,15 +71,23 @@ async def check_service(client: httpx.AsyncClient, name: str, url: str) -> Servi
 async def lifespan(app: FastAPI):
     app.state.boot_time = BOOT_TIME
     app.state.http_client = httpx.AsyncClient()
-    app.state.memory = get_memory_client()
+    app.state.memory_store = get_memory_store()
+    # Legacy alias: a few old call sites still reference app.state.memory.
+    # Pointing it at the MemoryStore keeps those working until they're updated;
+    # real mem0 semantics (.search/.add/.update/.delete) are provided by the
+    # MemoryStore class directly.
+    app.state.memory = app.state.memory_store
     app.state.voice_hub = VoiceStateHub()
-    storage = InMemoryStorage()
+    session_backend = os.getenv("ZEUS_SESSION_BACKEND", "memory").lower()
+    if session_backend == "sqlite":
+        db_path = os.getenv("ZEUS_SESSION_DB_PATH", "zeus/data/sessions.db")
+        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+        storage = SQLiteSessionStorage(db_path)
+    else:
+        storage = InMemoryStorage()
     session_manager = SessionManager(storage, llm_fn=_run_llm)
     app.state.session_manager = session_manager
-    app.state.query_engine = QueryEngine(
-        memory=app.state.memory,
-        session_manager=session_manager,
-    )
+    app.state.query_engine = QueryEngine(session_manager=session_manager)
 
     # Agent runtime — load YAML definitions, start auto_start agents
     app.state.zeus_bus_url = ZEUS_BUS_URL
@@ -84,24 +97,56 @@ async def lifespan(app: FastAPI):
     app.state.agent_runtime = runtime
 
     orch_hooks = build_default_registry()
+    register_aegis_bus_pre_hook(orch_hooks)
     register_aegis_bus_post_hook(orch_hooks)
     app.state.orchestration_hooks = orch_hooks
+    app.state.bus_metrics = bus_metrics
 
     # Observability — query log ring buffer
     init_query_log(app)
 
-    # Scheduled ingest (APScheduler)
-    # Sources are empty by default; populate via INGEST_* env vars or CLI.
-    # The scheduler still runs on schedule — it just skips if no sources are wired.
+    # Runtime settings (LAB-322) — JSON-backed overrides for env config.
+    app.state.runtime_settings = RuntimeSettings()
+
+    # Telegram bridge (LAB-291) — optional, enabled via runtime settings or env.
+    app.state.telegram_bot = None
+    try:
+        tg_bot = build_telegram_bot(
+            app.state.query_engine,
+            overrides=app.state.runtime_settings.get_section("telegram"),
+        )
+        if tg_bot is not None:
+            await tg_bot.start()
+            app.state.telegram_bot = tg_bot
+    except Exception as exc:
+        import logging
+        logging.getLogger("zeus").warning("telegram bot failed to start: %s", exc)
+
+    # KAIROS background agent daemon (LAB-330). Default OFF.
+    app.state.kairos_daemon = None
+    app.state.kairos_state = None
+    app.state.kairos_task = None
+    if os.getenv("ZEUS_KAIROS_ENABLED", "0").strip() in ("1", "true", "yes", "on"):
+        try:
+            from zeus.orchestration.daemon import build_default_kairos_daemon
+
+            kairos_daemon, kairos_state = build_default_kairos_daemon(llm_fn=_run_llm)
+            app.state.kairos_daemon = kairos_daemon
+            app.state.kairos_state = kairos_state
+            app.state.kairos_task = asyncio.create_task(kairos_daemon.run_forever())
+        except Exception as exc:
+            import logging
+            logging.getLogger("zeus").warning("kairos daemon failed to start: %s", exc)
+
+    # Scheduled ingest (APScheduler). Consolidator removed with mem0 — idempotent
+    # re-ingest is now handled by MemoryStore.delete_by_source() / KnowledgeStore.
     app.state.ingest_scheduler = None
     try:
         from zeus.ingest.pipeline import IngestPipeline
         from zeus.ingest.scheduler import build_scheduler
-        from zeus.memory.consolidate import MemoryConsolidator
 
-        ingest_pipeline = IngestPipeline(sources=[], memory=app.state.memory)
-        consolidator = MemoryConsolidator(app.state.memory)
-        scheduler = build_scheduler(ingest_pipeline, consolidator)
+        ingest_pipeline = IngestPipeline(sources=[])
+        scheduler = build_scheduler(ingest_pipeline)
         scheduler.start()
         app.state.ingest_scheduler = scheduler
     except Exception as exc:
@@ -110,19 +155,29 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    kairos_task = getattr(app.state, "kairos_task", None)
+    kairos_daemon = getattr(app.state, "kairos_daemon", None)
+    if kairos_task is not None and kairos_daemon is not None:
+        try:
+            kairos_daemon.stop_event.set()
+            await asyncio.wait_for(kairos_task, timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            kairos_task.cancel()
+        except Exception:
+            pass
+
     ingest_scheduler = getattr(app.state, "ingest_scheduler", None)
     if ingest_scheduler is not None:
         ingest_scheduler.shutdown(wait=False)
 
-    await app.state.http_client.aclose()
-
-    mem = getattr(app.state, "memory", None)
-    close_fn = getattr(mem, "close", None) if mem is not None else None
-    if callable(close_fn):
+    tg_bot = getattr(app.state, "telegram_bot", None)
+    if tg_bot is not None:
         try:
-            close_fn()
+            await tg_bot.stop()
         except Exception:
             pass
+
+    await app.state.http_client.aclose()
 
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -175,6 +230,265 @@ async def status(request: Request) -> StatusResponse:
         environment=ZEUS_ENV,
         uptime_seconds=round(time.time() - boot, 1),
         services=[qdrant, ollama],
+    )
+
+
+# ------------------------------------------------------------------
+# Model management endpoints
+# ------------------------------------------------------------------
+
+
+class ModelInfo(BaseModel):
+    name: str
+    size: int | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    modified_at: str | None = None
+    family: str | None = None
+
+
+class ModelsListResponse(BaseModel):
+    provider: str  # "ollama" | "claude"
+    models: list[ModelInfo]
+
+
+class ActiveModelResponse(BaseModel):
+    provider: str
+    model: str
+    gpu_available: bool | None = None
+
+
+class SetModelRequest(BaseModel):
+    model: str
+
+
+@app.get("/models", response_model=ModelsListResponse)
+async def list_models(request: Request) -> ModelsListResponse:
+    """List models available in Ollama (pulled to the container)."""
+    client: httpx.AsyncClient = request.app.state.http_client
+    ollama_url = f"{OLLAMA_URL.rstrip('/')}/api/tags"
+    try:
+        resp = await client.get(ollama_url, timeout=5.0)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return ModelsListResponse(provider="ollama", models=[])
+
+    models: list[ModelInfo] = []
+    for m in data.get("models", []):
+        details = m.get("details", {})
+        models.append(ModelInfo(
+            name=m.get("name", ""),
+            size=m.get("size"),
+            parameter_size=details.get("parameter_size"),
+            quantization_level=details.get("quantization_level"),
+            modified_at=m.get("modified_at"),
+            family=details.get("family"),
+        ))
+    return ModelsListResponse(provider="ollama", models=models)
+
+
+@app.get("/models/active", response_model=ActiveModelResponse)
+async def get_active_model(request: Request) -> ActiveModelResponse:
+    """Return the currently active model and provider."""
+    provider = "claude" if _chat_use_claude() else "ollama"
+    model = _active_model_name()
+
+    # Check GPU status from Ollama
+    gpu_available: bool | None = None
+    if provider == "ollama":
+        client: httpx.AsyncClient = request.app.state.http_client
+        try:
+            resp = await client.get(f"{OLLAMA_URL.rstrip('/')}/api/ps", timeout=3.0)
+            if resp.status_code == 200:
+                ps_data = resp.json()
+                running = ps_data.get("models", [])
+                for rm in running:
+                    # If any model is using a GPU layer, GPU is available
+                    details = rm.get("details", {})
+                    size_vram = rm.get("size_vram", 0)
+                    gpu_available = size_vram > 0
+                    break
+                if not running:
+                    gpu_available = None  # no models loaded yet, unknown
+        except Exception:
+            pass
+
+    return ActiveModelResponse(provider=provider, model=model, gpu_available=gpu_available)
+
+
+class BenchmarkRunRequest(BaseModel):
+    models: list[str] | None = None  # None = all chat models
+
+
+_bench_lock = asyncio.Lock()
+_bench_state: dict[str, Any] = {"running": False, "models": [], "current": None, "completed": []}
+
+
+async def _bench_worker(models: list[str] | None) -> None:
+    runner = BenchmarkRunner(ollama_url=OLLAMA_URL)
+    try:
+        async with httpx.AsyncClient() as client:
+            target = models or await runner.list_models(client)
+        _bench_state["models"] = list(target)
+        _bench_state["completed"] = []
+
+        def on_progress(evt: dict[str, Any]) -> None:
+            if evt["event"] == "start":
+                _bench_state["current"] = evt["model"]
+            else:
+                _bench_state["current"] = None
+                _bench_state["completed"].append(evt["model"])
+                save_results([
+                    r for r in _scratch_results if r.model == evt["model"]
+                ])
+
+        _scratch_results = []
+        async with httpx.AsyncClient() as client:
+            for model in target:
+                on_progress({"event": "start", "model": model})
+                res = await runner.run_model(model, client=client)
+                _scratch_results.append(res)
+                save_results([res])
+                on_progress({"event": "done", "model": model, "result": res.to_dict()})
+    finally:
+        _bench_state["running"] = False
+        _bench_state["current"] = None
+
+
+@app.get("/models/benchmarks")
+async def get_benchmarks() -> dict[str, Any]:
+    payload = load_results()
+    payload["status"] = {
+        "running": _bench_state["running"],
+        "current": _bench_state["current"],
+        "queued": _bench_state["models"],
+        "completed": _bench_state["completed"],
+    }
+    return payload
+
+
+@app.post("/models/benchmarks/run")
+async def run_benchmarks(body: BenchmarkRunRequest) -> dict[str, Any]:
+    if _bench_lock.locked() or _bench_state["running"]:
+        raise HTTPException(status_code=409, detail="Benchmark already running")
+
+    async def _runner() -> None:
+        async with _bench_lock:
+            _bench_state["running"] = True
+            try:
+                await _bench_worker(body.models)
+            except Exception as exc:
+                import logging
+                logging.getLogger("zeus").exception("benchmark run failed: %s", exc)
+
+    asyncio.create_task(_runner())
+    return {"ok": True, "started": True}
+
+
+@app.post("/models/active", response_model=ActiveModelResponse)
+async def set_active_model(body: SetModelRequest) -> ActiveModelResponse:
+    """Switch the active Ollama model at runtime (no restart needed)."""
+    set_ollama_model(body.model)
+    provider = "claude" if _chat_use_claude() else "ollama"
+    return ActiveModelResponse(provider=provider, model=_active_model_name())
+
+
+async def _restart_telegram_bot(app: FastAPI) -> None:
+    """Tear down the existing telegram bot (if any) and rebuild from runtime settings."""
+    existing = getattr(app.state, "telegram_bot", None)
+    if existing is not None:
+        try:
+            await existing.stop()
+        except Exception as exc:
+            import logging
+            logging.getLogger("zeus").warning("telegram bot stop failed: %s", exc)
+        app.state.telegram_bot = None
+
+    overrides = app.state.runtime_settings.get_section("telegram")
+    tg_bot = build_telegram_bot(app.state.query_engine, overrides=overrides)
+    if tg_bot is None:
+        return
+    try:
+        await tg_bot.start()
+        app.state.telegram_bot = tg_bot
+    except Exception as exc:
+        import logging
+        logging.getLogger("zeus").warning("telegram bot start failed: %s", exc)
+
+
+class TelegramSettingsPatch(BaseModel):
+    enabled: bool | None = None
+    bot_token: str | None = None
+    allowed_chat_ids: list[int] | None = None
+    aegis_policy: str | None = None
+
+
+class SettingsPatch(BaseModel):
+    telegram: TelegramSettingsPatch | None = None
+
+
+def _mask_token(token: str | None) -> str | None:
+    if not token:
+        return None
+    if len(token) <= 8:
+        return "***"
+    return f"{token[:4]}…{token[-4:]}"
+
+
+@app.get("/admin/settings")
+async def get_settings(request: Request) -> dict:
+    rs: RuntimeSettings = request.app.state.runtime_settings
+    snap = rs.snapshot()
+    tg = dict(snap.get("telegram", {}))
+    if "bot_token" in tg:
+        tg["bot_token_masked"] = _mask_token(tg.pop("bot_token"))
+    return {"telegram": tg}
+
+
+@app.patch("/admin/settings")
+async def patch_settings(body: SettingsPatch, request: Request) -> dict:
+    rs: RuntimeSettings = request.app.state.runtime_settings
+    changed: list[str] = []
+
+    if body.telegram is not None:
+        updates = body.telegram.model_dump(exclude_none=True)
+        if updates:
+            rs.update_section("telegram", updates)
+            changed.append("telegram")
+            await _restart_telegram_bot(request.app)
+
+    return {"ok": True, "changed": changed}
+
+
+class TelegramStatusResponse(BaseModel):
+    enabled: bool
+    connected: bool
+    bot_username: str | None = None
+    chat_count: int = 0
+
+
+@app.get("/integrations/telegram/status", response_model=TelegramStatusResponse)
+async def telegram_status(request: Request) -> TelegramStatusResponse:
+    bot = getattr(request.app.state, "telegram_bot", None)
+    env_enabled = os.getenv("TELEGRAM_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    runtime_settings = getattr(request.app.state, "runtime_settings", None)
+    if runtime_settings is not None:
+        telegram_section = runtime_settings.get_section("telegram") or {}
+        enabled = bool(telegram_section.get("enabled", env_enabled))
+    else:
+        enabled = env_enabled
+    # A live, running bot is the ground truth — reflect it even if the flag
+    # above disagrees (e.g. runtime override applied but file not reloaded).
+    if bot is not None and getattr(bot, "running", False):
+        enabled = True
+    if bot is None:
+        return TelegramStatusResponse(enabled=enabled, connected=False)
+    return TelegramStatusResponse(
+        enabled=enabled,
+        connected=bot.running,
+        bot_username=bot.bot_username,
+        chat_count=bot.chat_count,
     )
 
 

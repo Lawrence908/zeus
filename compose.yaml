@@ -111,6 +111,8 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - WHISPER_URL=ws://whisper:9090
       - WHISPER_REST_URL=http://whisper:8000
+    volumes:
+      - zeus_data:/app/zeus/data
     depends_on:
       qdrant:
         condition: service_started
@@ -129,6 +131,7 @@ services:
 volumes:
   qdrant_data:
   ollama_data:
+  zeus_data:
 
 networks:
   web:

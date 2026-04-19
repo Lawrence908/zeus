@@ -100,6 +100,25 @@ class AegisPolicyEngine:
         return SafetyOutcome(status="ok", text=text, flags=flags)
 
 
+    def evaluate_payload(self, payload: dict, policy_name: str | None = None) -> SafetyOutcome:
+        """Flatten dict values to strings and evaluate each against the policy.
+
+        Returns the first rejection encountered, or an aggregate pass outcome.
+        """
+        all_flags: list[str] = []
+        for key, value in payload.items():
+            if value is None:
+                continue
+            text = str(value) if not isinstance(value, str) else value
+            if not text:
+                continue
+            outcome = self.evaluate(text)
+            if outcome.status == "rejected":
+                return outcome
+            all_flags.extend(outcome.flags)
+        return SafetyOutcome(status="ok", text="", flags=all_flags)
+
+
 def evaluate_text(text: str, policy_name: str | None = None) -> SafetyOutcome:
     if not aegis_enabled():
         return SafetyOutcome(status="ok", text=text, flags=[])

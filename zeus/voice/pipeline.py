@@ -13,6 +13,7 @@ from io import BytesIO
 import httpx
 import pyaudio
 
+from zeus.core.prompts import render as render_prompt
 from zeus.voice.state import VoiceStateEmitter
 from zeus.voice.stt import WhisperSTT
 from zeus.voice.tts import VoiceboxTTS
@@ -48,15 +49,20 @@ class OrpheusPipeline:
             return ""
 
     async def llm_stream(self, prompt: str, context: str) -> AsyncIterator[str]:
-        system = (
-            "You are Zeus, a personal AI assistant. You are talking to Chris.\n"
-            "Answer concisely — you are speaking aloud, so avoid lists, markdown, and long explanations.\n"
-            "Keep responses under 3 sentences unless the question genuinely requires more.\n\n"
-            f"## Personal Context\n{context}\n"
+        # Resolve the currently-active model/provider at call time so runtime
+        # model switches (POST /models/active) flow through the voice path too.
+        from zeus.core.query import _active_model_name, _chat_use_claude
+        model = _active_model_name()
+        provider = "Anthropic Claude" if _chat_use_claude() else "Ollama (local)"
+
+        system = render_prompt(
+            "voice_system",
+            context=context.strip() or "(No retrieved context for this query.)",
+            model_name=model,
+            provider=provider,
         )
 
         base = os.getenv("OLLAMA_URL", "http://localhost:11435").rstrip("/")
-        model = os.getenv("ZEUS_OLLAMA_MODEL") or os.getenv("ZEUS_PROD_MODEL", "qwen2.5:7b-instruct")
         payload = {
             "model": model,
             "messages": [

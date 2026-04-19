@@ -1,7 +1,6 @@
 // zeus/frontend/src/components/chat/ChatInput.tsx
-import { useState, useRef, useCallback, type KeyboardEvent, type ChangeEvent } from 'react'
+import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { useChatStore } from '../../store/chatStore'
-import { useSettingsStore } from '../../store/settingsStore'
 
 export interface ChatInputVoiceProps {
   isRecording: boolean
@@ -16,14 +15,32 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, voice }: ChatInputProps) {
   const [value, setValue] = useState('')
+  const [modelLabel, setModelLabel] = useState<string>('—')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isStreaming = useChatStore((s) => s.isStreaming)
-  const { modelEnv } = useSettingsStore()
 
   const micBusy = Boolean(voice?.isRecording || voice?.isVoiceSending)
   const inputLocked = isStreaming || Boolean(voice?.isVoiceSending)
 
-  const modelLabel = modelEnv === 'dev' ? 'Claude Sonnet 4.6' : 'Qwen 2.5-7B'
+  useEffect(() => {
+    let alive = true
+    const fetchModel = async () => {
+      try {
+        const res = await fetch('/models/active')
+        if (!res.ok) return
+        const data = await res.json() as { model?: string }
+        if (alive && data.model) setModelLabel(data.model)
+      } catch {
+        // backend unavailable
+      }
+    }
+    void fetchModel()
+    const interval = setInterval(() => void fetchModel(), 15_000)
+    return () => {
+      alive = false
+      clearInterval(interval)
+    }
+  }, [])
 
   const adjustHeight = useCallback(() => {
     const ta = textareaRef.current

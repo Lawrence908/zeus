@@ -10,6 +10,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Chat' },
+  { to: '/memories', label: 'Memories' },
   { to: '/ingest', label: 'Ingest' },
   { to: '/agents', label: 'Agents' },
   { to: '/settings', label: 'Settings' },

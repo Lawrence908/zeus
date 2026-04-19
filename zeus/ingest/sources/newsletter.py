@@ -16,6 +16,7 @@ Environment variables:
 from __future__ import annotations
 
 import imaplib
+import io
 import json
 import logging
 import os
@@ -23,12 +24,54 @@ import ssl
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
+from email.message import Message
 from typing import AsyncIterator
 
 from zeus.ingest.pipeline import Chunk, chunk_text
 from zeus.ingest.sources.email import _extract_body, _safe_dt
 
 logger = logging.getLogger("iris.newsletter")
+
+# Newsletter types that should extract text from PDF attachments instead of
+# (or in addition to) the email body.  Configured via NEWSLETTER_PDF_TYPES
+# env var as a comma-separated list, e.g. "finance,reports".
+_PDF_TYPES: set[str] = set(
+    t.strip().lower()
+    for t in os.getenv("NEWSLETTER_PDF_TYPES", "finance").split(",")
+    if t.strip()
+)
+
+
+def _extract_pdf_text(payload: bytes) -> str:
+    """Extract text from a PDF byte payload using pdfminer."""
+    try:
+        from pdfminer.high_level import extract_text
+    except ImportError:
+        logger.warning("pdfminer.six not installed, cannot extract PDF text")
+        return ""
+    try:
+        return extract_text(io.BytesIO(payload)).strip()
+    except Exception as exc:
+        logger.warning("PDF text extraction failed: %s", exc)
+        return ""
+
+
+def _extract_pdf_attachments(msg: Message) -> str:
+    """Walk a MIME message and extract text from all PDF attachments."""
+    texts: list[str] = []
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        ctype = (part.get_content_type() or "").lower()
+        disp = (part.get("Content-Disposition") or "").lower()
+        filename = (part.get_filename() or "").lower()
+        if ctype == "application/pdf" or filename.endswith(".pdf"):
+            payload = part.get_payload(decode=True)
+            if payload:
+                text = _extract_pdf_text(payload)
+                if text:
+                    texts.append(text)
+    return "\n\n".join(texts)
 
 
 @dataclass(frozen=True)
@@ -195,7 +238,15 @@ class NewsletterSource:
                     date_iso = _safe_dt(str(msg.get("Date") or ""))
 
                     body, _ = _extract_body(msg)
-                    if not body:
+
+                    # For PDF-based newsletters, extract text from attachments
+                    if ntype.lower() in _PDF_TYPES:
+                        pdf_text = _extract_pdf_attachments(msg)
+                        if pdf_text:
+                            body = pdf_text
+                        elif not body:
+                            continue
+                    elif not body:
                         continue
 
                     results.append(

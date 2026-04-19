@@ -2,9 +2,20 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export interface OllamaModelInfo {
+  name: string
+  size: number | null
+  parameter_size: string | null
+  quantization_level: string | null
+  modified_at: string | null
+  family: string | null
+}
+
 interface SettingsStore {
   theme: 'dark' | 'light'
   modelEnv: 'dev' | 'prod'
+  /** Currently selected Ollama model (synced with backend via POST /models/active). */
+  ollamaModel: string
   aegisEnabled: boolean
   activePolicy: string
   telegramEnabled: boolean
@@ -16,6 +27,7 @@ interface SettingsStore {
   voiceReplyEnabled: boolean
   setTheme: (t: 'dark' | 'light') => void
   setModelEnv: (e: 'dev' | 'prod') => void
+  setOllamaModel: (m: string) => void
   setAegisEnabled: (v: boolean) => void
   setActivePolicy: (p: string) => void
   setTelegramEnabled: (v: boolean) => void
@@ -31,6 +43,7 @@ export const useSettingsStore = create<SettingsStore>()(
     (set) => ({
       theme: 'dark',
       modelEnv: 'dev',
+      ollamaModel: '',
       aegisEnabled: true,
       activePolicy: 'default',
       telegramEnabled: false,
@@ -41,6 +54,7 @@ export const useSettingsStore = create<SettingsStore>()(
       voiceReplyEnabled: false,
       setTheme: (theme) => set({ theme }),
       setModelEnv: (modelEnv) => set({ modelEnv }),
+      setOllamaModel: (ollamaModel) => set({ ollamaModel }),
       setAegisEnabled: (aegisEnabled) => set({ aegisEnabled }),
       setActivePolicy: (activePolicy) => set({ activePolicy }),
       setTelegramEnabled: (telegramEnabled) => set({ telegramEnabled }),

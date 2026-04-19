@@ -6,7 +6,7 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
-  source?: 'web' | 'telegram' | 'voice'
+  source?: string
   aegis_flags?: string[]
   context_sources?: string[]
   model_used?: string
@@ -18,7 +18,7 @@ export interface Session {
   topic?: string
   turn_count: number
   updated_at: number
-  source?: 'web' | 'telegram' | 'voice'
+  source?: string
 }
 
 interface ChatStore {

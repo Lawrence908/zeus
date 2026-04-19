@@ -1,5 +1,5 @@
 // zeus/frontend/src/components/chat/SessionsSidebar.tsx
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, type MouseEvent } from 'react'
 import { useChatStore, type Session } from '../../store/chatStore'
 import { SourceBadge } from '../common/SourceBadge'
 
@@ -85,6 +85,38 @@ export function SessionsSidebar() {
     await fetchSessions()
   }
 
+  const handleDeleteSession = async (sessionId: string, e: MouseEvent) => {
+    e.stopPropagation()
+    try {
+      const res = await fetch(`/chat/sessions/${sessionId}`, { method: 'DELETE' })
+      if (res.ok || res.status === 404) {
+        const updated = sessions.filter((s) => s.id !== sessionId)
+        setSessions(updated)
+        if (activeSessionId === sessionId) {
+          if (updated.length > 0) {
+            setActiveSession(updated[0].id)
+            try {
+              const msgRes = await fetch(`/chat/sessions/${updated[0].id}/messages`)
+              if (msgRes.ok) {
+                const msgData = await msgRes.json() as { messages?: import('../../store/chatStore').Message[] }
+                if (Array.isArray(msgData.messages)) {
+                  setMessages(msgData.messages)
+                }
+              }
+            } catch {
+              setMessages([])
+            }
+          } else {
+            setActiveSession(null)
+            setMessages([])
+          }
+        }
+      }
+    } catch {
+      // backend not available
+    }
+  }
+
   return (
     <aside className="w-[240px] shrink-0 border-r border-outline-variant/20 flex flex-col bg-surface-container-lowest/50">
       {/* New Session button */}
@@ -108,16 +140,19 @@ export function SessionsSidebar() {
           sessions.map((session) => {
             const isActive = session.id === activeSessionId
             return (
-              <button
+              <div
                 key={session.id}
-                onClick={() => void handleSessionClick(session)}
                 className={[
-                  'w-full text-left px-3 py-2.5 transition-colors',
+                  'group relative w-full text-left px-3 py-2.5 transition-colors cursor-pointer',
                   'border-l-2',
                   isActive
                     ? 'border-primary-container bg-surface-container-low/60'
                     : 'border-transparent hover:bg-surface-container-low/30',
                 ].join(' ')}
+                onClick={() => void handleSessionClick(session)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleSessionClick(session) }}
               >
                 <div className="flex items-start justify-between gap-1 mb-1">
                   <span
@@ -129,14 +164,23 @@ export function SessionsSidebar() {
                   >
                     {session.topic ?? 'Untitled Session'}
                   </span>
-                  {session.source && <SourceBadge source={session.source} />}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {session.source && <SourceBadge source={session.source} />}
+                    <button
+                      onClick={(e) => void handleDeleteSession(session.id, e)}
+                      title="Delete session"
+                      className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-on-surface-variant/50 hover:text-error transition-all"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] font-label text-on-surface-variant/50 uppercase tracking-wider">
                   <span>{session.turn_count} turns</span>
                   <span>·</span>
                   <span>{timeAgo(session.updated_at)}</span>
                 </div>
-              </button>
+              </div>
             )
           })
         )}

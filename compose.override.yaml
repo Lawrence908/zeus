@@ -1,0 +1,21 @@
+# compose.override.yaml — Local dev overlay for zeus-core.
+#
+# Auto-loaded by `docker compose` when present. Bind-mounts the host's `zeus/`
+# package into the container so Python edits take effect without rebuilding the
+# image. Restart the container (or re-run `docker exec ... python -m zeus.bench`
+# etc.) to pick up changes — no rebuild needed for pure-Python edits.
+#
+# Disable temporarily with:
+#   docker compose -f compose.yaml up -d
+#
+# Or rename this file to `compose.override.yaml.disabled` before deploying to
+# olympus/prod, where you want the baked image so you know exactly what's
+# running.
+
+services:
+  zeus-core:
+    volumes:
+      - ./zeus:/app/zeus:ro
+    environment:
+      # Don't write .pyc files into the read-only bind mount.
+      - PYTHONDONTWRITEBYTECODE=1

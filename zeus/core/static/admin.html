@@ -182,18 +182,28 @@ function renderScheduler(sched) {
 }
 
 function renderAgents(data) {
+  const env = data.environment || 'dev';
   const agents = data.agents || {};
   const names = Object.keys(agents);
   if (names.length === 0) return '<div class="empty">No agents loaded</div>';
-  return `<table>
-    <thead><tr><th>Name</th><th>Status</th><th>Model</th><th>Policy</th><th>Description</th></tr></thead>
+  const envLabel = env === 'prod' ? '⬡ LOCAL' : '☁ CLOUD';
+  const activeModel = data.active_model || '—';
+  return `<div style="margin-bottom:8px;font-size:11px;color:var(--muted)">
+    Environment: <strong style="color:var(--fg)">${env.toUpperCase()}</strong>
+    (${envLabel}) — active model: <strong style="color:#00d4ff">${activeModel}</strong>
+    (switch via Settings &rarr; Model)
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th>Status</th><th>Active Model</th><th>Policy</th><th>Description</th></tr></thead>
     <tbody>` +
     names.map(n => {
       const a = agents[n];
+      const isLocal = !(a.model || '').includes('claude');
+      const modelStyle = isLocal ? 'color:#00d4ff' : 'color:#f5a623';
       return `<tr>
         <td><strong>${n}</strong></td>
         <td>${badge(a.status)}</td>
-        <td>${a.model || '—'}</td>
+        <td style="${modelStyle}">${a.model || '—'}</td>
         <td>${a.safety_policy || '—'}</td>
         <td style="color:var(--muted)">${a.description || ''}</td>
       </tr>`;
