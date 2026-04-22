@@ -105,6 +105,8 @@ class EmailConfig:
 
 
 class EmailSource:
+    target: str = "knowledge"
+
     def __init__(
         self,
         *,

@@ -63,7 +63,7 @@ When serving a response (implemented in `QueryEngine` + `SessionManager.get_cont
 1. **Budget:** `ZEUS_CONTEXT_MAX_TOKENS` (default 6144) is the single heuristic knob; **⅓** formats retrieved memory hits, **⅔** formats the session block.
 2. **Recent turns:** Newest turns are packed into the session slice until the budget is exhausted (≈4 characters per token); candidates are limited to the newest `ZEUS_SESSION_PACK_MAX_TURNS` (default 150; `0` = no cap).
 3. Include rolling summary if available (within the session slice’s summary sub-budget).
-4. Include Oracle / mem0 retrieval for the current user query in the memory slice (not the session slice).
+4. Include Oracle / MemoryStore retrieval for the current user query in the memory slice (not the session slice).
 5. Oldest included turns drop first when the budget is full (greedy newest-first pack, then truncate).
 
 ## Summarization Policy

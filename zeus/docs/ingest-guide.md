@@ -1,186 +1,161 @@
-# Iris Ingest Guide — Data Sources and Ordering
+# Iris Ingest Guide
 
-This guide covers what personal data to feed into mnemosyne, in what order, and how to prepare each source before running Iris. The order matters — start with the highest-signal data so you have a useful Zeus after the first ingest, then add volume.
+What personal data to feed into Zeus, in what order, and how each source lands. Iris now writes to two collections:
+
+- **Mnemosyne** (`zeus_memories`): curated profile sources pass through LLM fact extraction via `small_llm_call`. 100–500 items, tight signal. Sources: `context_pack`, `gcal`.
+- **Library / Knowledge** (`zeus_knowledge`): bulk sources are embedded and upserted raw; no LLM on the write path. 10k–1M chunks, high recall. Sources: `markdown`, `obsidian`, `chatgpt`, `email`, `newsletter`, `bookmarks`, `git`.
+
+Routing is declared in [zeus/ingest/config.yaml](../ingest/config.yaml) under each source's `target`. CLI flags override per-invocation:
+
+```bash
+python -m zeus.ingest.run --target memory      # curated only
+python -m zeus.ingest.run --target knowledge   # bulk only
+python -m zeus.ingest.run --target both        # full run (default)
+```
 
 All raw data lives in `zeus/data/raw/` which is gitignored. Never commit personal data to the repo.
 
----
+## Priority order
 
-## Ingest Order (Priority)
+### 1. `context_pack.md` (do this first)
 
-### 1. `context_pack.md` — Hand-written personal context (do this first)
+The single highest-signal document you will ever ingest. Hand-written markdown covering identity, homelab, projects, goals, preferences, key people. Fact-extracted into `zeus_memories`.
 
-This is a single markdown file you write by hand. It is the most valuable thing you can ingest because it contains structured, accurate facts about you that Zeus will use as baseline context for every query.
-
-**Why first:** Sparse personal data + lots of ChatGPT noise = bad recall. The context pack gives Zeus a clean foundation before any noisy source is added.
-
-**Create it at:** `zeus/data/raw/context_pack.md`
-
-**Template — fill in all sections:**
+Create at `zeus/data/raw/context_pack.md`. Template sections:
 
 ```markdown
 # Chris — Personal Context Pack
 # Last updated: YYYY-MM-DD
-# This file is hand-curated. Update it monthly or when major things change.
 
 ## Identity
-- Full name: Chris Lawrence
-- Location: [city, country]
-- Timezone: [e.g. America/Toronto]
-- Occupation: CS student + self-hosted homelab operator
-- School: [institution], graduating [date]
-
 ## Homelab Infrastructure
-- Olympus: RTX 3080 server, 10GB VRAM, Proxmox host, production workloads
-- Apollo (tower): RTX 5080, 16GB VRAM, dev/test machine
-- Hermes (NAS): [storage specs], runs [services]
-- Network: [any relevant topology notes]
-- Key services running: [list what's self-hosted]
-
-## Current Projects (as of [date])
-- Zeus: self-hosted personal AI assistant — currently in Sprint 1 (memory layer)
-- [other projects with brief status]
-
+## Current Projects (as of YYYY-MM-DD)
 ## Skills & Tools I Use Daily
-- Languages: Python (primary), [others]
-- Infra: Proxmox, Docker, [others]
-- AI/ML: Claude API, Ollama, [others]
-
 ## Goals (next 6 months)
-- [list 3-5 concrete goals]
-
 ## Preferences & Working Style
-- [e.g. I prefer CLI tools over GUIs]
-- [e.g. I self-host everything possible for privacy]
-- [e.g. I work best in the evenings]
-
 ## Key People
-- [family / colleagues / collaborators and brief context]
-
 ## Things I'm Learning Right Now
-- [list topics actively studying]
-
 ## Recurring Commitments
-- [classes, meetings, deadlines]
 ```
 
-**Ingest command:**
+Ingest:
+
 ```bash
-python -m zeus.ingest.run --source markdown --glob "context_pack.md" --base-dir zeus/data/raw --dry-run
-# Check output looks sensible
-python -m zeus.ingest.run --source markdown --glob "context_pack.md" --base-dir zeus/data/raw
+python -m zeus.ingest.run --source context_pack
 ```
 
----
+Re-run whenever you edit the file. Idempotent.
 
-### 2. Notes / Markdown files
+### 2. Obsidian vault
 
-Any notes you've written over time: Obsidian vault, Bear exports, Notion exports, plain `.md` files, engineering notes, project journals.
+Offline RAG over daily notes, class notes, project journals. Bulk source to `zeus_knowledge`. See [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md) for the LiveSync pipeline that keeps a headless mirror at `/home/chris/data/headless-obsidian-vault` in sync with CouchDB.
 
-**Prepare:**
-- Export from your notes app as markdown (most support this)
-- Place in `zeus/data/raw/notes/`
-- No special formatting required — Iris strips frontmatter and splits on headings automatically
-
-**Filter before ingesting:**
-- Remove anything you don't want Zeus to reference (meeting notes with other people's PII, sensitive info)
-- Iris doesn't filter content — it stores what you give it
-
-**Ingest command:**
 ```bash
-# Preview first
-python -m zeus.ingest.run --source markdown --glob "notes/**/*.md" --base-dir zeus/data/raw --dry-run
-
-# Check chunk count and spot-check some chunks look coherent
-# Then go live
-python -m zeus.ingest.run --source markdown --glob "notes/**/*.md" --base-dir zeus/data/raw
+python -m zeus.ingest.run --source obsidian --dry-run
+python -m zeus.ingest.run --source obsidian
 ```
 
-**Chunk size note:** The default 512-word chunks work well for notes. If your notes are very short (tweet-length), consider dropping `--chunk-size` to 128 so you don't merge unrelated notes.
+### 3. Markdown under `zeus/data/raw/notes/`
 
----
+Any tree of markdown: context-pack core, jobkit archive, engineering notes. Symlinks recommended; see [ingest-paths.md](ingest-paths.md).
 
-### 3. ChatGPT Export
-
-Your conversation history with ChatGPT contains a lot of signal about how you think, what you've worked on, and what you've asked for help with.
-
-**Export:**
-1. ChatGPT → Settings → Data Controls → Export Data
-2. You'll receive an email with a download link (can take up to an hour)
-3. Unzip → rename `conversations.json` → place at `zeus/data/raw/chatgpt_export.json`
-
-**What gets ingested:** By default, only your messages (role: `user`). This captures your questions, preferences, and context without also ingesting all the AI's responses, which adds noise without adding personal signal.
-
-**Optionally include assistant responses:** If you want to capture answers you've relied on (e.g. you asked for an explanation of something and memorised it), edit `ChatGPTSource` default to `roles={"user", "assistant"}`. Not recommended for first ingest — see how user-only performs first.
-
-**Ingest command:**
 ```bash
-python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chatgpt_export.json --dry-run
-# This will log chunk count — can be large (thousands of chunks)
-python -m zeus.ingest.run --source chatgpt --path zeus/data/raw/chatgpt_export.json
+python -m zeus.ingest.run --source markdown --dry-run
+python -m zeus.ingest.run --source markdown
 ```
 
-**Expect:** A large ChatGPT export (years of history) will produce 5,000–30,000 chunks. This is fine — Qdrant handles it easily and mem0's hybrid search will surface the relevant ones.
+### 4. ChatGPT export
 
----
+Years of conversational history. By default Iris indexes only your messages (`role: user`); flip `roles={"user","assistant"}` on `ChatGPTSource` if you want Claude's answers too.
 
-### 4. Engineering Notes & Project Docs
+Export: ChatGPT → Settings → Data Controls → Export. Drop the unzipped `conversations.json` at `zeus/data/raw/chat-history/` or set `CHATGPT_EXPORT_PATH`.
 
-Markdown files specific to ongoing projects: architecture decisions, setup notes, debugging notes, TODO lists.
-
-**Example paths to ingest:**
 ```bash
-# If you have notes in the zeus repo itself
-python -m zeus.ingest.run --source markdown --glob "docs/**/*.md" --base-dir zeus
-
-# Project notes outside the repo
-python -m zeus.ingest.run --source markdown --glob "**/*.md" --base-dir ~/projects/notes
+python -m zeus.ingest.run --source chatgpt --dry-run
+python -m zeus.ingest.run --source chatgpt
 ```
 
----
+Expect thousands to tens of thousands of chunks.
 
-### 5. Future Sources (Sprint 1 → Sprint 2)
+### 5. Secondary sources
 
-These require writing a new source parser following the `IngestSource` protocol.
+| Source | Target | Notes |
+|--------|--------|-------|
+| `newsletter` | knowledge | IMAP fetch, see LAB-336 in ticket plan |
+| `email` | knowledge | Starred / sent only by default |
+| `bookmarks` | knowledge | Parses browser HTML export |
+| `git` | knowledge | Commit messages from configured repos |
+| `gcal` | memory | Calendar events, profile-shaped |
 
-**Obsidian vault** (`zeus/ingest/sources/obsidian.py`):
-- Obsidian uses standard markdown with `[[wikilinks]]` syntax
-- The markdown parser handles most of it; strip `[[` / `]]` from links before chunking
-- Daily notes are especially valuable — they're a log of what you actually did
+Each source has its own config block in `zeus/ingest/config.yaml`. Run with `--source <name>` or run all with no flag (respects per-source `target`).
 
-**Git commit messages** (`zeus/ingest/sources/git.py`):
-- `git log --all --pretty=format:"%H %ai %s%n%b"` gives you date + subject + body
-- Filter to repos you want Zeus to know about
-- Useful for "what did I work on last week"
+## Fact extraction contract (memory layer)
 
-**Calendar events** (`zeus/ingest/sources/gcal.py`):
-- Google Calendar API → export recurring commitments and one-off events
-- Focus on past events for context, upcoming events for task awareness
-- Store as structured text: `2024-03-15 10:00: Meeting with [person] about [topic]`
+Memory-layer sources go through `small_llm_call(response_format=FactExtraction, min_privacy_tier=1)` against the prompt in [zeus/core/prompts/memory_extract.md](../core/prompts/memory_extract.md). Hard constraints baked in:
 
-**Browser bookmarks** (`zeus/ingest/sources/bookmarks.py`):
-- Export from browser → parse the HTML bookmark file
-- Include title + URL + folder path
-- Gives Zeus insight into what tools/sites you use and reference
+- English only.
+- Maximum 10 facts per chunk.
+- Atomic claims, no speculation.
+- `confidence < 0.6` facts are dropped.
+- `contains_pii=true` is set on any fact containing names, emails, addresses.
 
----
+Payloads use ISO-8601 strings for `created_at` / `updated_at`, `valid_from` / `valid_until`. Re-ingest is idempotent via `delete_by_source(source, source_id)`.
 
-## Source Parser Template
+## Knowledge layer contract
 
-To add a new source, create `zeus/ingest/sources/<name>.py` following this pattern:
+Knowledge-layer sources embed with `nomic-embed-text:v1.5` (768-dim cosine) and upsert directly. With `ZEUS_KNOWLEDGE_HYBRID=1` (default), a named sparse BM25 vector is written alongside the dense vector so `search()` can fuse dense + sparse via RRF. Optional reranker (`ZEUS_KNOWLEDGE_RERANK=1`, `ZEUS_RERANKER_MODEL=BAAI/bge-reranker-v2-m3`) re-orders top-k candidates on CPU or the 5080.
+
+No LLM is called on the knowledge write path; writes are fast and cheap. Idempotent via `KnowledgeStore.delete_by_source(source, source_id)`.
+
+## Quality tips
+
+- **Re-ingest whenever `context_pack.md` changes.** It is the tuning lever for grounded replies.
+- **Chunk size default is 512 tokens with 64 overlap.** Drop to 128 for very short notes; raise for long-form writing.
+- **Don't ingest**: chat logs with other people, work comms you don't own, credentials or tokens, any note marked `private: true` in frontmatter.
+- **Watch the small-LLM usage DB** (`zeus/data/small_llm_usage.db`) after a memory-layer run; extraction cost should be a few cents at most per 100 chunks.
+
+## Verifying a run
+
+```bash
+# Qdrant point counts
+curl -s http://localhost:6333/collections/zeus_memories | jq '.result.points_count'
+curl -s http://localhost:6333/collections/zeus_knowledge | jq '.result.points_count'
+
+# Profile-shaped probe
+curl -s -X POST localhost:8203/context/profile | jq '.facts[].text'
+
+# Knowledge probe
+curl -s -X POST localhost:8203/memory/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"hash tables class notes","limit":5}' | jq
+```
+
+## Retrieval eval
+
+Baseline (30 hand-written queries on current knowledge corpus) lives at [tests/retrieval_eval_baseline.json](../../tests/retrieval_eval_baseline.json): hit@1=0.60, hit@5=0.867, hit@10=0.933, MRR@10=0.71.
+
+Gate every retrieval-config change through the harness:
+
+```bash
+python -m zeus.memory.eval --query-set zeus/data/eval/queries.json --top-k 10
+```
+
+Tune `chunk_size`, `chunk_overlap`, `ZEUS_KNOWLEDGE_HYBRID`, `ZEUS_KNOWLEDGE_RERANK`, reranker device. Commit both the resulting JSON and the setting change together.
+
+## Adding a new source
 
 ```python
-# zeus/ingest/sources/<name>.py — Iris <Name> source parser
+# zeus/ingest/sources/<name>.py
 from typing import AsyncIterator
-from zeus.ingest.pipeline import Chunk, chunk_text
-
+from zeus.ingest.types import Chunk, chunk_text
 
 class <Name>Source:
-    def __init__(self, ..., chunk_size: int = 512, chunk_overlap: int = 64, user_id: str = "chris"):
+    target = "knowledge"   # or "memory"
+
+    def __init__(self, ..., chunk_size=512, chunk_overlap=64, user_id="chris"):
         ...
 
     async def chunks(self) -> AsyncIterator[Chunk]:
-        # Parse your source format here
         for item in self._load():
             for text in chunk_text(item.text, self.chunk_size, self.chunk_overlap):
                 yield Chunk(
@@ -191,66 +166,4 @@ class <Name>Source:
                 )
 ```
 
-Then add it to `zeus/ingest/run.py`'s `build_sources()` function and to `zeus/orchestration/agents/iris.yaml`'s `config.sources` list.
-
----
-
-## Memory Quality Tips
-
-**Re-ingest frequently:** mnemosyne deduplicates by content hash (mem0 handles this), so re-running ingest on the same files is safe. Run it weekly to pick up new notes.
-
-**Context pack is your tuning lever:** If Zeus gives bad answers, check if the context pack is stale. Update it and re-ingest — it takes 30 seconds and often fixes the problem.
-
-**Chunk size tradeoffs:**
-- Large chunks (512+ words): better semantic coherence, fewer results returned per query
-- Small chunks (128 words): higher recall granularity, but may fragment context
-- Default 512 is the right starting point; tune down if you're getting irrelevant results
-
-**What not to ingest:**
-- Chat logs with other people (privacy)
-- Work communications unless fully self-owned
-- Credentials, keys, secrets (check your notes for these before ingesting)
-- Large binary descriptions (PDFs of textbooks, etc.) — too much noise relative to signal
-
----
-
-## Checking Ingest Quality
-
-After each source ingest, spot-check with a few queries through Oracle:
-
-```bash
-# Start oracle if not running
-uvicorn zeus.api.main:app --port 8001 --reload
-
-# Test queries
-curl -s -X POST localhost:8001/context/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "what homelab servers do I run", "top_k": 3}' | python3 -m json.tool
-
-curl -s -X POST localhost:8001/context/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "what am I currently working on", "top_k": 5}' | python3 -m json.tool
-```
-
-Good results: relevant chunks with high scores, diverse sources. Bad results: irrelevant chunks, very low scores, all from the same source. If quality is poor, check your context pack first, then look at chunk sizes.
-
----
-
-## Retrieval eval + tuning loop (Phase 2)
-
-To tune retrieval, use the eval harness:
-
-```bash
-python3 -m zeus.memory.eval --query-set zeus/data/eval/queries.json --top-k 10
-```
-
-Then iterate on:
-
-- **chunk_size / overlap**: re-run Iris ingest with different `--chunk-size` / `--chunk-overlap` values (try 256/64, 512/64, 1024/128).
-- **top_k**: re-run eval with `--top-k` (try 5 and 10).
-
-Record best-known settings here (update as you learn):
-
-- **current_best_chunk_size**: TBD
-- **current_best_chunk_overlap**: TBD
-- **current_best_top_k**: TBD
+Register in `zeus/ingest/run.py:build_sources()` and add a block in `zeus/ingest/config.yaml`. Class-level `target` decides which store receives chunks.

@@ -1,6 +1,6 @@
 # Obsidian Self-hosted LiveSync → Zeus (Iris)
 
-Recommended pipeline: **CouchDB ↔ local vault directory ↔ symlink under `zeus/data/raw/notes/` ↔ scheduled markdown ingest** into mnemosyne (mem0 + Qdrant). Zeus does not connect to CouchDB; it only reads **files on disk** that LiveSync keeps current.
+Recommended pipeline: **CouchDB ↔ local vault directory ↔ symlink under `zeus/data/raw/notes/` ↔ scheduled markdown ingest** into mnemosyne (MemoryStore + Qdrant). Zeus does not connect to CouchDB; it only reads **files on disk** that LiveSync keeps current.
 
 Upstream: [vrtmrz/obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync) (Obsidian plugin and **official CLI** for headless sync).
 
@@ -20,7 +20,7 @@ That folder should look like an Obsidian vault (markdown notes, optional `.obsid
 
 ## 2. Keep it in sync with CouchDB
 
-### Option A — Obsidian on this machine
+### Option A: Obsidian on this machine
 
 1. Install Obsidian.
 2. Open or create a vault at your chosen path (e.g. `~/obsidian-vault`).
@@ -28,7 +28,7 @@ That folder should look like an Obsidian vault (markdown notes, optional `.obsid
 
 Notes are written to disk by the plugin; Zeus only needs read access to that tree.
 
-### Option B — Headless (no Obsidian UI)
+### Option B: Headless (no Obsidian UI)
 
 1. Install and configure the **LiveSync CLI** from [vrtmrz/obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync) (sync, then mirror into your vault directory).
 2. Use the **same** fixed path as your mirror root so paths in this doc stay stable.
@@ -66,29 +66,29 @@ Remove `--dry-run` when the chunks look right.
 
 Typical pattern:
 
-1. **Sync** — CLI (or Obsidian) replicates CouchDB into the local DB.
-2. **Mirror** — CLI writes DB → files on disk.
-3. **Ingest** — Zeus indexes `.md` into mnemosyne.
+1. **Sync:** CLI (or Obsidian) replicates CouchDB into the local DB.
+2. **Mirror:** CLI writes DB → files on disk.
+3. **Ingest:** Zeus indexes `.md` into mnemosyne.
 
 Use the wrapper **`scripts/replicate-obsidian-and-ingest.sh`** (sync + mirror + ingest). Cron setup is in [Cron: how to install the job](#cron-how-to-install-the-job) below.
 
 ## What you should see on disk
 
-- **Markdown and attachments** — After a successful **`mirror`**, notes appear as normal paths under your vault root, e.g. `…/headless-obsidian-vault/SomeNote.md`, `…/headless-obsidian-vault/ASTR311/…`, etc.
-- **Folder like `headless-obsidian-vault-fa1dd4bf-…-livesync-v2/`** — That is the CLI’s **local LevelDB / PouchDB** store (internal). It is **not** your notes tree. Ignore it for Zeus; ingest globs should target `**/*.md` alongside it, not inside it.
+- **Markdown and attachments:** After a successful **`mirror`**, notes appear as normal paths under your vault root, e.g. `…/headless-obsidian-vault/SomeNote.md`, `…/headless-obsidian-vault/ASTR311/…`, etc.
+- **Folder like `headless-obsidian-vault-fa1dd4bf-…-livesync-v2/`:** That is the CLI’s **local LevelDB / PouchDB** store (internal). It is **not** your notes tree. Ignore it for Zeus; ingest globs should target `**/*.md` alongside it, not inside it.
 
 ## If `sync` fails (no `.md` files yet)
 
 `mirror` only materializes files after the local DB has been filled by replication. If the CLI prints `[Error] Command 'sync' failed`:
 
-1. **Capture the real reason** — Notices often go to stderr and are easy to miss. Run:
+1. **Capture the real reason:** Notices often go to stderr and are easy to miss. Run:
    ```bash
    LIVESYNC_DEBUG=1 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh 2>&1 | tee /tmp/livesync-sync.log
    ```
    Then search the log for `Notice`, `Failed`, `denied`, `corrupted`, `PBKDF2`, `VersionUpFlash`, `Pending`, `Locked`.
-2. **Use loopback CouchDB on daedalus** — In `.livesync/settings.json`, set `couchDB_URI` to `http://127.0.0.1:5984` (same DB as Docker on this host). Re-copy from Obsidian or edit the plaintext fields if you are not relying only on `encryptedCouchDBConnection`. Hairpin via Tailscale to yourself can be flaky.
-3. **Clear plugin “changelog / version” gate** — If Obsidian had `versionUpFlash` set, copy a fresh `data.json` from the PC or clear that field after plugin updates (see LiveSync docs).
-4. **Remote lock / fetch** — If the desktop app says the remote is locked or asks to **Fetch** again, resolve that in Obsidian first; then retry CLI sync.
+2. **Use loopback CouchDB on daedalus:** In `.livesync/settings.json`, set `couchDB_URI` to `http://127.0.0.1:5984` (same DB as Docker on this host). Re-copy from Obsidian or edit the plaintext fields if you are not relying only on `encryptedCouchDBConnection`. Hairpin via Tailscale to yourself can be flaky.
+3. **Clear plugin “changelog / version” gate:** If Obsidian had `versionUpFlash` set, copy a fresh `data.json` from the PC or clear that field after plugin updates (see LiveSync docs).
+4. **Remote lock / fetch:** If the desktop app says the remote is locked or asks to **Fetch** again, resolve that in Obsidian first; then retry CLI sync.
 
 When `sync` succeeds, run `mirror` (or the wrapper script); you should then see real folders and `.md` files next to the `*-livesync-v2` directory.
 
@@ -105,7 +105,7 @@ If the log shows:
 LIVESYNC_HEADLESS_DIALOG_INDEX=0 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
 ```
 
-Or add this device without wiping local state (only if you understand the plugin warning—usually use Fetch for an empty headless vault):
+Or add this device without wiping local state (only if you understand the plugin warning; usually use Fetch for an empty headless vault):
 
 ```bash
 LIVESYNC_HEADLESS_DIALOG_INDEX=1 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
@@ -118,7 +118,7 @@ LIVESYNC_HEADLESS_DIALOG_CHOICE=reset /home/chris/apps/obsidian-livesync/sync-he
 LIVESYNC_HEADLESS_DIALOG_CHOICE=unlock /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
 ```
 
-**After a successful Unlock** you should see: `The remote database has been unlocked. Please retry the operation.` The process still exits with `[Error] Command 'sync' failed` — that only means “no replication ran *this* invocation.” **Run `sync` again immediately** (no `LIVESYNC_HEADLESS_*` needed unless the dialog appears again):
+**After a successful Unlock** you should see: `The remote database has been unlocked. Please retry the operation.` The process still exits with `[Error] Command 'sync' failed`; that only means “no replication ran *this* invocation.” **Run `sync` again immediately** (no `LIVESYNC_HEADLESS_*` needed unless the dialog appears again):
 
 ```bash
 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
@@ -151,6 +151,6 @@ The markdown source ingests `.md` per your glob. Binary attachments (PDFs, image
 
 ## Related
 
-- [ingest-paths.md](ingest-paths.md) — raw layout and symlink conventions
-- [ingest-guide.md](ingest-guide.md) — ordering and source priorities
-- [project-nomad-integration.md](project-nomad-integration.md) — parallel integration for N.O.M.A.D.
+- [ingest-paths.md](ingest-paths.md): raw layout and symlink conventions
+- [ingest-guide.md](ingest-guide.md): ordering and source priorities
+- [project-nomad-integration.md](project-nomad-integration.md): parallel integration for N.O.M.A.D.

@@ -3,6 +3,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# git: needed by zeus.ingest.sources.git (commit history ingest)
+# libzim-dev: native library for python `libzim` bindings used by
+# zeus.ingest.sources.kiwix_zim (disk ZIM → zeus_knowledge ingest)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git libzim-dev \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

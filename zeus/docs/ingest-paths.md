@@ -12,7 +12,7 @@ This tree is **gitignored**. Do not commit exports, vault copies, or secrets her
 
 ## Curated baseline
 
-- **`zeus/data/raw/context_pack.md`** — Single markdown file you maintain. Highest signal; ingest this first via the `context_pack` source.
+- **`zeus/data/raw/context_pack.md`**: single markdown file you maintain. Highest signal. Routes to the memory layer (LLM fact extraction). Ingest first via the `context_pack` source.
 
 ## Optional layout
 
@@ -43,7 +43,7 @@ ln -sfn /home/chris/data/headless-obsidian-vault     "$RAW/notes/obsidian-vault"
 |------|--------|
 | `notes/context-pack-core` | `/home/chris/services/context-pack/core` |
 | `notes/context-pack-writing` | `/home/chris/services/context-pack/writing` |
-| `notes/jobkit-archive` | `/home/chris/apps/jobkit/archive/data` (JobKit **archive** only — not `apps/jobkit/data/demo/`) |
+| `notes/jobkit-archive` | `/home/chris/apps/jobkit/archive/data` (JobKit **archive** only, not `apps/jobkit/data/demo/`) |
 | `notes/obsidian-vault` | `/home/chris/data/headless-obsidian-vault` (LiveSync CLI mirror target on daedalus; see [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md)) |
 
 The JobKit link covers `resume_base.yml`, `profile.yml`, `projects/*.md`, and the rest of that archive tree in one place.
@@ -80,7 +80,7 @@ python3 -m zeus.ingest.run --source markdown \
 
 ## Scheduled ingest (cron)
 
-For sources that change on disk without you running the CLI (e.g. LiveSync updates), run the same ingest command on a timer. Example: every three hours, from repo root with venv and `.env` loaded — adapt paths to your machine:
+For sources that change on disk without you running the CLI (e.g. LiveSync updates), run the same ingest command on a timer. Example: every three hours, from repo root with venv and `.env` loaded. Adapt paths to your machine:
 
 ```cron
 10 */3 * * * cd /path/to/zeus-repo && . .venv/bin/activate && set -a && . ./.env && set +a && python3 -m zeus.ingest.run --source markdown --glob "notes/obsidian-vault/**/*.md" --base-dir zeus/data/raw
@@ -92,4 +92,4 @@ If you use the headless LiveSync CLI, run **sync then ingest** in order (one wra
 
 ## Markdown vs YAML under `notes/`
 
-The `markdown` source is tuned for `.md` (heading-aware splits, YAML frontmatter stripping). YAML files (e.g. `resume_base.yml`, `profile.yml`) are still read as text and chunked, but without markdown headings you get larger, less structured chunks — usually acceptable for factual baselines.
+The `markdown` source is tuned for `.md` (heading-aware splits, YAML frontmatter stripping). YAML files (e.g. `resume_base.yml`, `profile.yml`) are still read as text and chunked, but without markdown headings you get larger, less structured chunks; usually acceptable for factual baselines.

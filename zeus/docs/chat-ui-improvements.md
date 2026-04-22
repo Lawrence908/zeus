@@ -1,6 +1,8 @@
-# Zeus chat UI improvements
+# Zeus chat UI improvements (static page)
 
-Living checklist for the browser chat at [`GET /chat`](../core/static/chat.html). See also [`chat-interface-spec.md`](chat-interface-spec.md).
+> **Scope:** the legacy single-file browser chat at `zeus/core/static/chat.html`. The primary chat UI is now the React SPA in [zeus/frontend/](../frontend/) (built into `zeus/core/static/app/`). This checklist survives so the static fallback stays useful for dev smoke and offline debugging; new UI work should happen in the React app, not here.
+
+Living checklist for the static browser chat. See also [`chat-interface-spec.md`](chat-interface-spec.md) for the HTTP surface shared by both UIs.
 
 ## Priority summary
 

@@ -52,6 +52,8 @@ class ObsidianSource:
     Config keys: vault_path, exclude_dirs, chunk_size, chunk_overlap
     """
 
+    target: str = "knowledge"
+
     def __init__(
         self,
         vault_path: str | Path | None = None,

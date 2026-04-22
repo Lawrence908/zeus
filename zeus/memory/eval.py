@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from zeus.memory.config import get_memory_client
 from zeus.memory.search import search_memories
 
 
@@ -90,14 +89,12 @@ def load_query_set(path: Path) -> list[EvalCase]:
 
 
 def run_eval(*, cases: list[EvalCase], top_k: int) -> dict[str, Any]:
-    memory = get_memory_client()
-
     per_case: list[dict[str, Any]] = []
     r5_sum = r10_sum = 0.0
     mrr_sum = 0.0
 
     for c in cases:
-        results = search_memories(memory=memory, query=c.query, user_id="chris", top_k=top_k)
+        results = search_memories(query=c.query, user_id="chris", top_k=top_k)
         rank = _first_rank(results, c.expected_sources)
         r5 = _recall_at_k(results, c.expected_sources, 5)
         r10 = _recall_at_k(results, c.expected_sources, 10)

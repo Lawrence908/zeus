@@ -1,0 +1,98 @@
+# zeus/ingest/config.yaml — Declarative ingest routing
+#
+# Routes each source to one of the three retrieval layers:
+#   memory     — mem0 LLM fact extraction, small & high-signal (profile-shaped)
+#   knowledge  — raw chunk → embed → Qdrant, no LLM (bulk RAG)
+#   reference  — Phase 2 only; live proxy, not ingested (schema-accepted, pipeline-rejected)
+#
+# Loaded by zeus/ingest/config.py (load_ingest_config). CLI args in
+# zeus/ingest/run.py override individual source fields when passed explicitly.
+# See docs/memory-architecture-plan.md for the source-by-source rationale.
+
+defaults:
+  user_id: chris
+  chunk_size: 512
+  chunk_overlap: 64
+
+sources:
+  # Curated profile source — the ONLY file that should hit mem0 fact extraction.
+  context_pack:
+    target: memory
+    path: zeus/data/raw/context_pack.md
+    chunk_size: 256
+    chunk_overlap: 32
+
+  # Bulk markdown corpora: context-pack-core, jobkit-archive, notes. No extraction.
+  markdown:
+    target: knowledge
+    roots:
+      - base_dir: zeus/data/raw/context-pack-core
+        globs: ["**/*.md"]
+      - base_dir: zeus/data/raw/jobkit-archive
+        globs: ["**/*.md"]
+      - base_dir: zeus/data/raw/notes
+        globs: ["**/*.md"]
+      # Note: Zeus's own project docs (CLAUDE.md, README.md, docs/, zeus/docs/,
+      # subsystem CLAUDE.md files) are handled by the separate `docs` source
+      # below, not this markdown source. zeus/docs/legacy/ stays out of
+      # retrieval by design.
+
+  # ChatGPT export — historical dialogue, RAG target, not profile facts.
+  chatgpt:
+    target: knowledge
+    path: zeus/data/raw/chat-history
+
+  # Obsidian vault — RAG target. Path comes from env; skipped if unset.
+  obsidian:
+    target: knowledge
+    vault_path: ${OBSIDIAN_VAULT_PATH}
+    exclude:
+      - ".trash/**"
+      - "templates/**"
+
+  email:
+    target: knowledge
+    limit: 200
+
+  newsletter:
+    target: knowledge
+
+  bookmarks:
+    target: knowledge
+    path: zeus/data/raw/bookmarks.html
+
+  git:
+    target: knowledge
+    max_commits: 500
+
+  # Calendar events are future-looking and small, profile-shaped, goes to memory.
+  gcal:
+    target: memory
+    days_back: 90
+    days_forward: 30
+
+  # Zeus's own project docs (CLAUDE.md, README.md, docs/, zeus/docs/, subsystem
+  # CLAUDE.md files). Lets the model answer questions about its own architecture.
+  # Excludes zeus/docs/legacy/ by design.
+  docs:
+    target: knowledge
+
+  # Kiwix ZIM ingest — static reference snapshots → zeus_knowledge.
+  # Large ZIMs (Wikipedia, Wiktionary, iFixit, wikiversity, armypubs) are
+  # served live via the Reference layer (zeus.memory.reference.KiwixClient)
+  # instead. `max_zim_mb` is the guardrail that keeps Wikipedia out.
+  #
+  # Leave `books` empty (or drop the key) to ingest every eligible ZIM under
+  # the size threshold. The default list is conservative: small curated books
+  # where semantic retrieval wins.
+  kiwix_zim:
+    target: knowledge
+    zim_dir: ${ZEUS_KIWIX_ZIM_DIR}
+    max_zim_mb: 2048
+    books:
+      - foss.cooking_en_all_2025-11
+      - freecodecamp_en_coding-interview-prep_2025-11
+      - freecodecamp_en_project-euler_2025-07
+      - communitybuilding.stackexchange.com_en_all_2025-12
+      - sustainability.stackexchange.com_en_all_2025-12
+      - theworldfactbook_en_all_2026-02

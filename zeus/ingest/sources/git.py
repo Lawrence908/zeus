@@ -54,6 +54,8 @@ class GitSource:
     Config keys: repo_path, author_email, max_commits
     """
 
+    target: str = "knowledge"
+
     def __init__(
         self,
         repo_path: str | Path | None = None,

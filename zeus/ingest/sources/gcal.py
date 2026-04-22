@@ -106,6 +106,8 @@ class GoogleCalendarSource:
     Config keys: credentials_path, token_path, days_back, days_forward
     """
 
+    target: str = "memory"
+
     def __init__(
         self,
         credentials_path: str | None = None,

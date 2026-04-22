@@ -1,0 +1,33 @@
+# zeus/orchestration/agents/athena.yaml — Knowledge layer agent
+# Athena owns the bulk RAG library: KnowledgeStore over the `zeus_knowledge`
+# Qdrant collection with dense + BM25 hybrid fusion (RRF) and optional
+# BGE-reranker-v2-m3. No LLM on the write path — iris routes bulk sources
+# (Obsidian, chatgpt, markdown, email, newsletter, bookmarks, git) here raw.
+
+name: athena
+description: "Knowledge layer: hybrid RAG over the Library via KnowledgeStore (Qdrant zeus_knowledge)"
+model:
+  dev: claude-sonnet-4-6
+  prod: qwen2.5:7b-instruct-q4_K_M
+
+tools:
+  - knowledge_search
+  - knowledge_write
+
+context:
+  - self   # athena can introspect its own collection for meta-queries
+
+safety:
+  policy: standard
+
+endpoints:
+  - path: /knowledge/search
+    method: POST
+    description: "Hybrid (dense + BM25) search over the knowledge library"
+  - path: /knowledge/ingest
+    method: POST
+    description: "Store raw chunks (called by iris for bulk sources)"
+
+config:
+  hybrid: true          # ZEUS_KNOWLEDGE_HYBRID — dense + BM25 fused via RRF
+  rerank: false         # ZEUS_KNOWLEDGE_RERANK — BGE-reranker-v2-m3 (off by default)

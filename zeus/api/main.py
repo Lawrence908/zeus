@@ -1,6 +1,7 @@
 # zeus/api/main.py — Oracle router for Zeus Core
 import asyncio
 import os
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -10,6 +11,7 @@ from zeus.memory.search import MEMORY_SEARCH_TOP_K, format_context_block, get_pr
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "zeus_memories")
+ZEUS_KNOWLEDGE_COLLECTION = os.getenv("ZEUS_KNOWLEDGE_COLLECTION", "zeus_knowledge")
 ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "chris")
 
 ORACLE_VERSION = "0.1.0"
@@ -143,14 +145,9 @@ async def query_context(body: ContextQuery, request: Request):
     The context string is ready to inject into an LLM system prompt:
         system_prompt += f"\\n\\n## Personal Context\\n{context_response.context}"
     """
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
     try:
         results = await asyncio.to_thread(
             search_memories,
-            memory,
             body.query,
             "chris",
             body.top_k,
@@ -165,9 +162,10 @@ async def query_context(body: ContextQuery, request: Request):
     context, token_estimate = format_context_block(results, max_tokens=body.max_tokens)
     sources: list[ContextSource] = []
     for mem in results:
+        md = mem.get("metadata", {}) or {}
         sources.append(ContextSource(
             memory_id=mem.get("id", ""),
-            source=mem.get("metadata", {}).get("source", "unknown"),
+            source=md.get("source_id") or md.get("source") or "unknown",
             relevance=float(mem.get("score") or 0.0),
         ))
 
@@ -183,7 +181,7 @@ def _raw_memory_hits(rows: list[dict]) -> list[MemoryHit]:
     for m in rows:
         md = m.get("metadata", {}) or {}
         text = str(m.get("memory", "") or "").strip()
-        src = str(md.get("source", "") or "unknown")
+        src = str(md.get("source_id") or md.get("source") or "unknown")
         out.append(
             MemoryHit(
                 id=str(m.get("id", "") or ""),
@@ -198,11 +196,7 @@ def _raw_memory_hits(rows: list[dict]) -> list[MemoryHit]:
 
 @router.post("/memory/search", response_model=MemorySearchResponse)
 async def memory_search_raw(body: MemorySearchBody, request: Request):
-    """Raw mem0 hits for MCP / debugging (no formatted context block)."""
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
+    """Raw memory hits for MCP / debugging (no formatted context block)."""
     k = body.top_k if body.top_k is not None else body.limit
     if k is None:
         k = MEMORY_SEARCH_TOP_K
@@ -210,7 +204,6 @@ async def memory_search_raw(body: MemorySearchBody, request: Request):
     try:
         rows = await asyncio.to_thread(
             search_memories,
-            memory,
             body.query,
             "chris",
             k,
@@ -224,11 +217,7 @@ async def memory_search_raw(body: MemorySearchBody, request: Request):
 
 @router.post("/ingest/trigger", response_model=IngestTriggerResponse)
 async def ingest_trigger(body: IngestTriggerBody, request: Request):
-    """Run Iris ingest for one source (or all). Uses app.state.memory."""
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
+    """Run Iris ingest for one source (or all). Writes to MemoryStore / KnowledgeStore."""
     src = (body.source or "all").strip().lower()
     if src not in _TRIGGER_SOURCE_CHOICES:
         raise HTTPException(
@@ -253,7 +242,6 @@ async def ingest_trigger(body: IngestTriggerBody, request: Request):
         sources,
         chunk_size=INGEST_CHUNK_SIZE,
         dry_run=False,
-        memory=memory,
         ingest_ui="plain",
     )
     total = sum(r.chunks_stored for r in results)
@@ -263,11 +251,13 @@ async def ingest_trigger(body: IngestTriggerBody, request: Request):
 
 def _point_to_entry(point: dict) -> MemoryEntry:
     payload = point.get("payload", {}) or {}
-    text = str(payload.get("data", "") or "").strip()
+    # MemoryStore payload key is "text" (KnowledgeStore-aligned); fall back to
+    # mem0's legacy "data" for any pre-migration points that still linger.
+    text = str(payload.get("text") or payload.get("data") or "").strip()
     source = str(payload.get("source", "") or "unknown")
     metadata = {
         k: v for k, v in payload.items()
-        if k not in {"data", "hash", "user_id"}
+        if k not in {"text", "data", "hash", "user_id"}
     }
     return MemoryEntry(
         id=str(point.get("id", "")),
@@ -390,41 +380,80 @@ async def memory_get(memory_id: str, request: Request) -> MemoryEntry:
 
 @router.patch("/memory/{memory_id}", response_model=MemoryEntry)
 async def memory_update(memory_id: str, body: MemoryUpdateBody, request: Request) -> MemoryEntry:
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
+    from zeus.memory.store import get_memory_store
+
+    store = get_memory_store()
     try:
-        await asyncio.to_thread(memory.update, memory_id=memory_id, data=body.text)
+        await asyncio.to_thread(store.update, memory_id, body.text)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"mem0 update failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"memory update failed: {exc}") from exc
     return await memory_get(memory_id, request)
 
 
 @router.delete("/memory/{memory_id}")
 async def memory_delete(memory_id: str, request: Request) -> dict:
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
+    from zeus.memory.store import get_memory_store
+
+    store = get_memory_store()
     try:
-        await asyncio.to_thread(memory.delete, memory_id=memory_id)
+        await asyncio.to_thread(store.delete, memory_id)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"mem0 delete failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"memory delete failed: {exc}") from exc
     return {"ok": True, "id": memory_id}
+
+
+class MemoryAddBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=8000)
+    source: str = Field("manual", description="Source label: manual, chat, kairos, ...")
+    source_id: str | None = Field(None, description="Stable dedupe key; defaults to uuid")
+    extract_facts: bool = Field(
+        False,
+        description="If True, route through small_llm_call for LLM fact extraction",
+    )
+
+
+class MemoryAddResponse(BaseModel):
+    status: str
+    added: int
+    skipped: int
+    raw_fallbacks: int
+    errors: list[str]
+
+
+@router.post("/memory/add", response_model=MemoryAddResponse)
+async def memory_add(body: MemoryAddBody) -> MemoryAddResponse:
+    """Add a memory item. Used by the MCP `zeus_remember` tool and manual UI."""
+    import uuid
+
+    from zeus.memory.store import get_memory_store
+
+    store = get_memory_store()
+    source_id = body.source_id or f"{body.source}:{uuid.uuid4()}"
+    try:
+        result = await store.add_text(
+            body.text,
+            source=body.source,
+            source_id=source_id,
+            user_id=ZEUS_USER_ID,
+            extract_facts=body.extract_facts,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"memory add failed: {exc}") from exc
+    return MemoryAddResponse(
+        status="ok" if result.added > 0 else "empty",
+        added=result.added,
+        skipped=result.skipped,
+        raw_fallbacks=result.raw_fallbacks,
+        errors=result.errors,
+    )
 
 
 @router.get("/context/profile", response_model=ProfileResponse)
 async def get_profile(request: Request):
-    """
-    Return stable facts about the user — used as baseline system prompt context.
-
-    In Sprint 0 this is a stub. Sprint 1 will populate it from mnemosyne
-    after the first ingest run.
-    """
-    memory = getattr(request.app.state, "memory", None)
-    if memory is None:
-        raise HTTPException(status_code=503, detail="Memory client not initialized")
-
-    facts = await asyncio.to_thread(get_profile_facts, memory, "chris", 8)
+    """Return stable facts about the user — baseline system prompt context."""
+    facts = await asyncio.to_thread(get_profile_facts, "chris", 8)
     if not facts:
         return ProfileResponse(
             user_id="chris",
@@ -443,3 +472,404 @@ async def get_profile(request: Request):
 @router.get("/context/status")
 async def status():
     return {"service": "oracle", "version": ORACLE_VERSION, "env": ZEUS_ENV}
+
+
+# ---------------------------------------------------------------------------
+# Knowledge browse / search — parallel to /memory/* but against zeus_knowledge.
+# Read-only + delete-by-source (bulk chunks don't support per-point edits).
+# ---------------------------------------------------------------------------
+
+class KnowledgeEntry(BaseModel):
+    id: str
+    text: str
+    source: str
+    source_id: str | None = None
+    source_path: str | None = None
+    chunk_index: int | None = None
+    metadata: dict
+    created_at: str | None = None
+
+
+class KnowledgeListResponse(BaseModel):
+    entries: list[KnowledgeEntry]
+    next_offset: str | None = None
+    total_estimate: int | None = None
+
+
+class KnowledgeSearchBody(BaseModel):
+    query: str = Field(..., description="Hybrid (dense+BM25) knowledge search")
+    top_k: int | None = Field(None, ge=1, le=20)
+    sources: list[str] = Field(default_factory=list)
+
+
+class KnowledgeHitModel(BaseModel):
+    id: str
+    score: float
+    text: str
+    source: str
+    metadata: dict
+
+
+class KnowledgeSearchResponse(BaseModel):
+    results: list[KnowledgeHitModel]
+
+
+class FacetBucket(BaseModel):
+    value: str
+    count: int
+
+
+class KnowledgeFacetsResponse(BaseModel):
+    total: int
+    source: list[FacetBucket]
+    type: list[FacetBucket]
+    book: list[FacetBucket]
+
+
+class KnowledgeDeleteResponse(BaseModel):
+    ok: bool
+    deleted: int
+    source: str
+    source_id: str
+
+
+class KnowledgeFacetDeleteResponse(BaseModel):
+    ok: bool
+    key: str
+    value: str
+    deleted: int  # best-effort: pre-delete count when exact=false is unavailable
+
+
+class IdBatch(BaseModel):
+    ids: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class BulkDeleteResponse(BaseModel):
+    ok: bool
+    deleted: int
+
+
+# Qdrant payload keys safe to expose for facet-style bulk delete.
+# Keeping this narrow prevents a naive DELETE with key=user_id from nuking
+# the whole collection.
+_ALLOWED_FACET_DELETE_KEYS: frozenset[str] = frozenset({"source", "type", "book"})
+
+
+def _iso_or_none(value) -> str | None:
+    """Accept float (time.time()) or ISO-8601 string; return ISO-8601 or None."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    return str(value)
+
+
+def _knowledge_point_to_entry(point: dict) -> KnowledgeEntry:
+    payload = point.get("payload", {}) or {}
+    metadata = {
+        k: v for k, v in payload.items()
+        if k not in {"text", "user_id", "created_at", "source", "source_id", "source_path", "chunk_index"}
+    }
+    return KnowledgeEntry(
+        id=str(point.get("id", "")),
+        text=str(payload.get("text", "") or "").strip(),
+        source=str(payload.get("source", "") or "unknown"),
+        source_id=payload.get("source_id"),
+        source_path=payload.get("source_path"),
+        chunk_index=payload.get("chunk_index"),
+        metadata=metadata,
+        created_at=_iso_or_none(payload.get("created_at")),
+    )
+
+
+async def _qdrant_facet(
+    client: httpx.AsyncClient, key: str, extra_must: list[dict] | None = None
+) -> list[FacetBucket]:
+    body: dict = {"key": key, "limit": 50}
+    must: list[dict] = [{"key": "user_id", "match": {"value": ZEUS_USER_ID}}]
+    if extra_must:
+        must.extend(extra_must)
+    body["filter"] = {"must": must}
+    try:
+        resp = await client.post(
+            f"{QDRANT_URL.rstrip('/')}/collections/{ZEUS_KNOWLEDGE_COLLECTION}/facet",
+            json=body,
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        return []
+    hits = (resp.json().get("result", {}) or {}).get("hits", []) or []
+    return [FacetBucket(value=str(h["value"]), count=int(h["count"])) for h in hits if h.get("value") is not None]
+
+
+@router.get("/knowledge/list", response_model=KnowledgeListResponse)
+async def knowledge_list(
+    request: Request,
+    limit: int = 50,
+    offset: str | None = None,
+    source: str | None = None,
+    type: str | None = None,
+    book: str | None = None,
+):
+    """Browse knowledge chunks via Qdrant scroll. Filters: source, type, book."""
+    limit = max(1, min(200, limit))
+    client: httpx.AsyncClient = request.app.state.http_client
+
+    must: list[dict] = [{"key": "user_id", "match": {"value": ZEUS_USER_ID}}]
+    if source:
+        must.append({"key": "source", "match": {"value": source}})
+    if type:
+        must.append({"key": "type", "match": {"value": type}})
+    if book:
+        must.append({"key": "book", "match": {"value": book}})
+
+    body: dict = {
+        "limit": limit,
+        "with_payload": True,
+        "with_vector": False,
+        "filter": {"must": must},
+    }
+    if offset:
+        body["offset"] = offset
+
+    data = await _qdrant_post(
+        client, f"/collections/{ZEUS_KNOWLEDGE_COLLECTION}/points/scroll", body
+    )
+    result = data.get("result", {}) or {}
+    points = result.get("points", []) or []
+    entries = [_knowledge_point_to_entry(p) for p in points]
+
+    total_estimate: int | None = None
+    if not offset and not source and not type and not book:
+        try:
+            info_resp = await client.get(
+                f"{QDRANT_URL.rstrip('/')}/collections/{ZEUS_KNOWLEDGE_COLLECTION}",
+                timeout=5.0,
+            )
+            if info_resp.status_code == 200:
+                total_estimate = int(
+                    info_resp.json().get("result", {}).get("points_count") or 0
+                )
+        except httpx.HTTPError:
+            pass
+
+    return KnowledgeListResponse(
+        entries=entries,
+        next_offset=str(result.get("next_page_offset")) if result.get("next_page_offset") else None,
+        total_estimate=total_estimate,
+    )
+
+
+@router.post("/knowledge/search", response_model=KnowledgeSearchResponse)
+async def knowledge_search(body: KnowledgeSearchBody):
+    """Hybrid dense+BM25 search over zeus_knowledge (with optional source filter)."""
+    from zeus.memory.search import search_knowledge
+
+    k = body.top_k or 20
+    try:
+        rows = await asyncio.to_thread(
+            search_knowledge,
+            body.query,
+            ZEUS_USER_ID,
+            k,
+            body.sources or None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Knowledge search failed: {exc}") from exc
+
+    results: list[KnowledgeHitModel] = []
+    for r in rows:
+        md = r.get("metadata", {}) or {}
+        text = str(r.get("memory", "") or "").strip()
+        src = str(md.get("source") or "unknown")
+        results.append(
+            KnowledgeHitModel(
+                id=str(r.get("id") or ""),
+                score=float(r.get("score") or 0.0),
+                text=text,
+                source=src,
+                metadata=dict(md),
+            )
+        )
+    return KnowledgeSearchResponse(results=results)
+
+
+@router.get("/knowledge/facets", response_model=KnowledgeFacetsResponse)
+async def knowledge_facets(
+    request: Request,
+    source: str | None = None,
+    type: str | None = None,
+):
+    """Facet counts for source / type / book — drives the sidebar sidebar in KnowledgePage.
+
+    Passing ``source`` or ``type`` narrows the book facet to that subset, so the
+    sidebar updates as filters apply.
+    """
+    client: httpx.AsyncClient = request.app.state.http_client
+    narrow: list[dict] = []
+    if source:
+        narrow.append({"key": "source", "match": {"value": source}})
+    if type:
+        narrow.append({"key": "type", "match": {"value": type}})
+
+    # total points for the current filter scope
+    total = 0
+    try:
+        resp = await client.post(
+            f"{QDRANT_URL.rstrip('/')}/collections/{ZEUS_KNOWLEDGE_COLLECTION}/points/count",
+            json={
+                "filter": {"must": [{"key": "user_id", "match": {"value": ZEUS_USER_ID}}] + narrow},
+                "exact": False,
+            },
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            total = int((resp.json().get("result", {}) or {}).get("count", 0))
+    except httpx.HTTPError:
+        pass
+
+    # unfiltered axes come from narrow scope; book/type narrow to both, source unfiltered.
+    source_facet, type_facet, book_facet = await asyncio.gather(
+        _qdrant_facet(client, "source"),
+        _qdrant_facet(client, "type", narrow if source else None),
+        _qdrant_facet(client, "book", narrow or None),
+    )
+    return KnowledgeFacetsResponse(
+        total=total,
+        source=source_facet,
+        type=type_facet,
+        book=book_facet,
+    )
+
+
+@router.get("/knowledge/{point_id}", response_model=KnowledgeEntry)
+async def knowledge_get(point_id: str, request: Request) -> KnowledgeEntry:
+    client: httpx.AsyncClient = request.app.state.http_client
+    url = f"{QDRANT_URL.rstrip('/')}/collections/{ZEUS_KNOWLEDGE_COLLECTION}/points/{point_id}"
+    try:
+        resp = await client.get(url, params={"with_payload": "true"}, timeout=5.0)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Qdrant request failed: {exc}") from exc
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="Knowledge point not found")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Qdrant error: {resp.text}")
+    point = resp.json().get("result") or {}
+    return _knowledge_point_to_entry(point)
+
+
+@router.delete("/knowledge/by-source", response_model=KnowledgeDeleteResponse)
+async def knowledge_delete_by_source(source: str, source_id: str) -> KnowledgeDeleteResponse:
+    """Bulk-delete every knowledge point tagged with (source, source_id).
+
+    Use this when re-ingesting a file or dropping a whole book — per-point
+    delete isn't offered because knowledge chunks are derived, not authored.
+    """
+    from zeus.memory.library import get_knowledge_store
+
+    store = get_knowledge_store()
+    try:
+        deleted = await asyncio.to_thread(store.delete_by_source, source, source_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"knowledge delete failed: {exc}") from exc
+    return KnowledgeDeleteResponse(
+        ok=bool(deleted),
+        deleted=int(deleted or 0),
+        source=source,
+        source_id=source_id,
+    )
+
+
+@router.delete("/knowledge/by-facet", response_model=KnowledgeFacetDeleteResponse)
+async def knowledge_delete_by_facet(
+    request: Request,
+    key: str,
+    value: str,
+) -> KnowledgeFacetDeleteResponse:
+    """Delete every zeus_knowledge point where ``payload.{key} == value``.
+
+    Scoped to ``source`` / ``type`` / ``book`` — the only keys where a
+    delete-everything gesture makes sense. Accept-list keeps a stray
+    ``key=user_id`` from wiping the whole collection.
+    """
+    if key not in _ALLOWED_FACET_DELETE_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"key must be one of {sorted(_ALLOWED_FACET_DELETE_KEYS)}, got {key!r}",
+        )
+    if not value:
+        raise HTTPException(status_code=400, detail="value is required")
+
+    client: httpx.AsyncClient = request.app.state.http_client
+    flt = {
+        "must": [
+            {"key": "user_id", "match": {"value": ZEUS_USER_ID}},
+            {"key": key, "match": {"value": value}},
+        ]
+    }
+
+    # Best-effort count first, so the response can report how many got removed.
+    deleted = 0
+    try:
+        count_resp = await client.post(
+            f"{QDRANT_URL.rstrip('/')}/collections/{ZEUS_KNOWLEDGE_COLLECTION}/points/count",
+            json={"filter": flt, "exact": True},
+            timeout=10.0,
+        )
+        if count_resp.status_code == 200:
+            deleted = int((count_resp.json().get("result", {}) or {}).get("count", 0))
+    except httpx.HTTPError:
+        pass
+
+    try:
+        del_resp = await client.post(
+            f"{QDRANT_URL.rstrip('/')}/collections/{ZEUS_KNOWLEDGE_COLLECTION}/points/delete",
+            json={"filter": flt},
+            params={"wait": "true"},
+            timeout=30.0,
+        )
+        del_resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"qdrant delete failed: {exc}") from exc
+
+    return KnowledgeFacetDeleteResponse(ok=True, key=key, value=value, deleted=deleted)
+
+
+@router.post("/knowledge/delete_batch", response_model=BulkDeleteResponse)
+async def knowledge_delete_batch(body: IdBatch, request: Request) -> BulkDeleteResponse:
+    """Delete a set of knowledge point IDs in one Qdrant round-trip."""
+    client: httpx.AsyncClient = request.app.state.http_client
+    try:
+        resp = await client.post(
+            f"{QDRANT_URL.rstrip('/')}/collections/{ZEUS_KNOWLEDGE_COLLECTION}/points/delete",
+            json={"points": body.ids},
+            params={"wait": "true"},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"qdrant delete failed: {exc}") from exc
+    return BulkDeleteResponse(ok=True, deleted=len(body.ids))
+
+
+@router.post("/memory/delete_batch", response_model=BulkDeleteResponse)
+async def memory_delete_batch(body: IdBatch) -> BulkDeleteResponse:
+    """Delete a set of memory IDs through MemoryStore (keeps any cleanup side-effects)."""
+    from zeus.memory.store import get_memory_store
+
+    store = get_memory_store()
+    deleted = 0
+    errors: list[str] = []
+    for mid in body.ids:
+        try:
+            await asyncio.to_thread(store.delete, mid)
+            deleted += 1
+        except Exception as exc:
+            errors.append(f"{mid}: {exc}")
+    if errors and deleted == 0:
+        raise HTTPException(status_code=500, detail=f"all deletes failed: {errors[:3]}")
+    return BulkDeleteResponse(ok=deleted > 0, deleted=deleted)

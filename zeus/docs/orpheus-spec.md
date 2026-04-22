@@ -1,4 +1,4 @@
-# Orpheus — Voice Pipeline Implementation Spec
+# Orpheus: Voice Pipeline Implementation Spec
 
 Orpheus handles the full voice interaction loop: wake word detection → real-time STT → context retrieval → LLM → TTS → audio output. It runs as a host-native process (not containerised) because it needs direct access to audio devices.
 
@@ -19,7 +19,7 @@ WhisperLiveKit (GPU, SimulStreaming)
 Silence / VAD end-of-utterance
     │  final transcript
     ▼
-Zeus Core — mnemosyne retrieval + session transcript (QueryEngine / Oracle paths)
+Zeus Core, mnemosyne retrieval + session transcript (QueryEngine / Oracle paths)
     │  heuristic budget: `ZEUS_CONTEXT_MAX_TOKENS` (default 6144; see `CLAUDE.md`)
     ▼
 LLM (Claude API in dev / Qwen2.5-7B in prod)
@@ -34,16 +34,16 @@ Voicebox REST → LuxTTS (GPU)
 Speaker output
 ```
 
-The pipeline is designed around **streaming at every stage** — TTS begins as soon as the first sentence is complete, not waiting for the full LLM response. This is what makes sub-2-second latency achievable.
+The pipeline is designed around **streaming at every stage**; TTS begins as soon as the first sentence is complete, not waiting for the full LLM response. This is what makes sub-2-second latency achievable.
 
 ---
 
-## Phaos — browser / WebXR visualization
+## Phaos: browser / WebXR visualization
 
 **Phaos** is the visual presence during voice turns (orb in the chat UI or standalone `/viz`). Zeus Core already exposes:
 
-- `WS /ws/voice-state` — JSON events (`type: voice_state`, `state`, `audio_level`, …)
-- `POST /voice-state/publish` — ingest the same payload from host-native Orpheus (optional `X-Zeus-Voice-State-Secret`)
+- `WS /ws/voice-state`: JSON events (`type: voice_state`, `state`, `audio_level`, …)
+- `POST /voice-state/publish`: ingest the same payload from host-native Orpheus (optional `X-Zeus-Voice-State-Secret`)
 
 **In-process:** pass `VoiceStateHub` from Core into Orpheus only if they share a process (unusual).
 
@@ -85,7 +85,7 @@ pip install openwakeword
 python -c "from openwakeword.model import Model; Model(wakeword_models=['hey_jarvis'])"
 ```
 
-**Initial approach:** Use `hey_jarvis` as a placeholder during development. Record a custom `hey_zeus` model after the core pipeline works — the custom model is more reliable but not needed to start.
+**Initial approach:** Use `hey_jarvis` as a placeholder during development. Record a custom `hey_zeus` model after the core pipeline works; the custom model is more reliable but not needed to start.
 
 **Config in `orpheus.yaml`:**
 ```yaml
@@ -136,11 +136,11 @@ class WakeWordDetector:
 
 ---
 
-### WhisperLiveKit — STT
+### WhisperLiveKit: STT
 
 **Role:** Real-time transcription of the user's utterance after wake word.
 
-**Mode:** SimulStreaming — partial transcripts arrive before the user stops speaking, so the LLM call can start earlier.
+**Mode:** SimulStreaming, partial transcripts arrive before the user stops speaking, so the LLM call can start earlier.
 
 **Install:**
 ```bash
@@ -151,7 +151,7 @@ docker run -p 9090:9090 collabora/whisperlive:latest
 
 **Key settings:**
 - Model: `large-v3` (best accuracy, ~3GB VRAM on 3080)
-- Language: `en` (lock it — auto-detection adds ~100ms)
+- Language: `en` (lock it; auto-detection adds ~100ms)
 - VAD: built-in Silero VAD for end-of-utterance detection
 
 **Implementation (`zeus/voice/stt.py`):**
@@ -197,11 +197,11 @@ class WhisperSTT:
             await send_task
 ```
 
-**Gotcha:** WhisperLiveKit's WebSocket protocol sends partial results with `"isFinal": false` and a final result with `"isFinal": true`. Parse accordingly — only pass the final transcript to the LLM.
+**Gotcha:** WhisperLiveKit's WebSocket protocol sends partial results with `"isFinal": false` and a final result with `"isFinal": true`. Parse accordingly; only pass the final transcript to the LLM.
 
 ---
 
-### Voicebox / LuxTTS — TTS
+### Voicebox / LuxTTS: TTS
 
 **Role:** Convert LLM text response to natural speech audio using Chris's cloned voice.
 
@@ -211,7 +211,7 @@ class WhisperSTT:
 3. POST to Voicebox to register the voice: `POST /voice/clone` with the WAV file
 4. Save the returned `voice_id` as `ORPHEUS_VOICE_ID` in `.env`
 
-**Streaming approach:** Request audio in chunks as LLM tokens arrive. Don't wait for the full response — split on sentence boundaries (`.`, `!`, `?`) and synthesize each sentence independently. This gets first audio playing ~200ms after first LLM sentence is complete.
+**Streaming approach:** Request audio in chunks as LLM tokens arrive. Don't wait for the full response; split on sentence boundaries (`.`, `!`, `?`) and synthesize each sentence independently. This gets first audio playing ~200ms after first LLM sentence is complete.
 
 **Implementation (`zeus/voice/tts.py`):**
 ```python
@@ -271,7 +271,7 @@ class VoiceboxTTS:
 
 **Implementation (`zeus/voice/pipeline.py`):**
 ```python
-# zeus/voice/pipeline.py — Orpheus full voice loop
+# zeus/voice/pipeline.py: Orpheus full voice loop
 import asyncio
 import logging
 import os
@@ -293,7 +293,7 @@ ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
 MAX_RESPONSE_TOKENS = 512
 
 SYSTEM_PROMPT_TEMPLATE = """You are Zeus, a personal AI assistant. You are talking to Chris.
-Answer concisely — you are speaking aloud, so avoid lists, markdown, and long explanations.
+Answer concisely; you are speaking aloud, so avoid lists, markdown, and long explanations.
 Keep responses under 3 sentences unless the question genuinely requires more.
 
 ## Personal Context
@@ -311,7 +311,7 @@ async def get_context(query: str) -> str:
             )
             return r.json().get("context", "")
     except Exception as e:
-        logger.warning(f"orpheus: context fetch failed — {e}")
+        logger.warning(f"orpheus: context fetch failed: {e}")
         return ""
 
 
@@ -468,7 +468,7 @@ sudo apt install portaudio19-dev ffmpeg
 
 - **Wake word false positives:** raise `threshold` from 0.5 → 0.7 if triggers happen in background noise
 - **STT lag:** if first-word latency is > 500ms, switch Whisper to `medium` model (trades accuracy for speed)
-- **LLM slow on 3080:** if Qwen inference > 800ms/token, try `qwen2.5:3b-instruct-q4_K_M` — smaller but faster
+- **LLM slow on 3080:** if Qwen inference > 800ms/token, try `qwen2.5:3b-instruct-q4_K_M`; smaller but faster
 - **TTS lag:** ensure Voicebox is on the same host; network latency kills the 150x realtime advantage
 - **Audio glitches:** increase PyAudio `frames_per_buffer` if you hear crackling; decrease if latency is high
 
