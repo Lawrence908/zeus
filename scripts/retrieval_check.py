@@ -15,7 +15,7 @@ COLLECTION = "zeus_memories"
 EMBED_MODEL = "nomic-embed-text:v1.5"
 
 SAMPLE_QUERIES = [
-    "What is Zeus and what problem does it solve for Chris?",
+    "What is Zeus and what problem does it solve for the user?",
     "What are the main Zeus subsystems and their Greek names?",
     "Where does Zeus store memories and what vector DB does it use?",
     "What is my Obsidian vault and how does it get ingested?",

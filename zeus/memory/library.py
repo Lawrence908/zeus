@@ -43,7 +43,7 @@ class KnowledgeChunk:
     source_id: str
     source_path: str = ""
     chunk_index: int = 0
-    user_id: str = "chris"
+    user_id: str = "user"
     created_at: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
 

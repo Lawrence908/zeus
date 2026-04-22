@@ -219,9 +219,27 @@ zeus/data/*.csv
 zeus/data/*.jsonl
 zeus/data/*.zip
 
+# Zeus — runtime SQLite databases (session history, small-LLM usage ledger).
+# Contains full conversation turns; never commit.
+zeus/data/*.db
+zeus/data/*.db-shm
+zeus/data/*.db-wal
+
 # Zeus — newsletter digest runtime data
 zeus/data/audio/
 zeus/data/newsletters/
+
+# Zeus — per-deployer personalized prompts and workspace files.
+# Generic templates are under zeus/prompts/templates/ and
+# zeus/safety/workspace-templates/ (tracked). These overrides dirs hold
+# the live deployer's personalized copies; loader prefers them when present.
+zeus/prompts/overrides/
+zeus/safety/workspace-templates/overrides/
+
+# Docker Compose local overlay. Use compose.override.example.yaml as the
+# template; copy to compose.override.yaml and fill in your host-specific
+# bind mounts and env vars. The real override is per-deployer and gitignored.
+compose.override.yaml
 
 # Zeus — local model weights (Ollama manages these)
 *.gguf

@@ -98,7 +98,7 @@ class MemoryDriftObserver:
     cycles (no new writes).
     """
 
-    def __init__(self, user_id: str = "chris") -> None:
+    def __init__(self, user_id: str = "user") -> None:
         self._user_id = user_id
         self._watermark: str = ""  # ISO-8601 string from MemoryStore payload
 
@@ -152,7 +152,7 @@ class KairosAgent:
         state: KairosState,
         allowlist: list[str],
         max_actions: int,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self._llm = llm_fn
         self._observers = observers
@@ -181,7 +181,7 @@ class KairosAgent:
         obs_block = "\n".join(f"- [{o.source}] {o.summary}" for o in observations)
         allowed = ", ".join(self._allowlist) or "(none)"
         system = (
-            "You are KAIROS, a cautious background agent for Chris's Zeus assistant. "
+            "You are KAIROS, a cautious background agent for this Zeus assistant instance. "
             "You run read-only introspection cycles. Given observations, propose at most "
             f"{self._max_actions} tool calls, each using ONLY these tools: {allowed}. "
             "Never propose shell or write operations. Respond with a single JSON object "

@@ -6,9 +6,9 @@ Provide a minimal local web chat interface for Zeus that shares the same context
 
 ## User Stories
 
-- As Chris, I can open a local URL and chat with Zeus without voice input.
-- As Chris, I can continue the same session across multiple messages.
-- As Chris, I can see streaming responses with low perceived latency.
+- As the user, I can open a local URL and chat with Zeus without voice input.
+- As the user, I can continue the same session across multiple messages.
+- As the user, I can see streaming responses with low perceived latency.
 
 ## Routes
 

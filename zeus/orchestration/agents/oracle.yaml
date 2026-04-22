@@ -31,4 +31,4 @@ endpoints:
 
   - path: /context/profile
     method: GET
-    description: "Return user profile summary (stable facts about Chris)"
+    description: "Return user profile summary (stable facts about the user)"

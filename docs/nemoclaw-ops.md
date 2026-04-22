@@ -1,11 +1,25 @@
 # docs/nemoclaw-ops.md: NemoClaw + OpenClaw Operational Runbook
 
-For Zeus homelab on daedalus (Ubuntu 24.04, RTX 3080). Access from Apollo via SSH tunnel. NemoClaw alpha (0.0.16+), Mar 2026.
+Templated runbook for Zeus + NemoClaw/OpenClaw deployments. NemoClaw alpha
+(0.0.16+), Mar 2026. This doc records gotchas discovered on a reference
+deployment (Ubuntu 24.04, RTX 3080); fill in your own host names and paths.
+
+## Template placeholders
+
+Substitute these throughout when applying commands from this runbook:
+
+| Placeholder | Meaning | Example |
+|---|---|---|
+| `{PROD_HOST}` | Always-on production host (NemoClaw runs here) | `olympus` or `daedalus` |
+| `{WORKSTATION}` | Client workstation that tunnels into `{PROD_HOST}` | `apollo` or your laptop |
+| `{SSH_USER}` | SSH login on `{PROD_HOST}` | `chris`, `zeus`, `ubuntu` |
+| `{LAN_IP}` | LAN IP of `{PROD_HOST}` as seen from itself (`hostname -I \| awk '{print $1}'`) | `192.168.50.128` |
+| `{BACKUP_DIR}` | Directory for NemoClaw backups | `~/.nemoclaw/backups` |
 
 ## Architecture Overview
 
 ```
-Apollo (workstation)                    daedalus (RTX 3080 server)
+{WORKSTATION}                           {PROD_HOST} (NemoClaw + GPU host)
 ┌─────────────────────┐                ┌──────────────────────────────────────────┐
 │ Browser             │  SSH -L        │  zeus-ollama (Docker):11435 → ctr 11434 │
 │ http://127.0.0.1:   │◄──────────────►│  OpenShell Gateway  :8080               │
@@ -17,22 +31,22 @@ Apollo (workstation)                    daedalus (RTX 3080 server)
 
 **Single Ollama runtime (current homelab):** **zeus-ollama** (`compose.yaml`, host port **11435** → container **11434**). Zeus Core and NemoClaw inference both target this instance when the OpenShell provider base URL points at it.
 
-**OpenShell provider name (example):** `ollama-local` with `OPENAI_BASE_URL=http://<daedalus-LAN-IP>:11435/v1`, the name is arbitrary; rename to `zeus-ollama` if you prefer consistency with the container.
+**OpenShell provider name (example):** `ollama-local` with `OPENAI_BASE_URL=http://{LAN_IP}:11435/v1`, the name is arbitrary; rename to `zeus-ollama` if you prefer consistency with the container.
 
 Zeus Aegis (in-process YAML regex on LLM outputs) and NemoClaw/OpenShell (OS-level sandbox
 enforcement) are complementary layers, no overlap. See `zeus/safety/policy_engine.py`.
 
 ---
 
-## SSH Aliases (Apollo: add to ~/.bashrc or ~/.bash_aliases)
+## SSH Aliases ({WORKSTATION}: add to ~/.bashrc or ~/.bash_aliases)
 
 ```bash
-# --- NemoClaw SSH tunnels (Apollo → daedalus) ---
+# --- NemoClaw SSH tunnels ({WORKSTATION} → {PROD_HOST}) ---
 # Main tunnel: OpenClaw UI + OpenShell gateway debug
-alias nemotunnel='ssh -N -L 18789:127.0.0.1:18789 -L 18080:127.0.0.1:8080 chris@daedalus'
+alias nemotunnel='ssh -N -L 18789:127.0.0.1:18789 -L 18080:127.0.0.1:8080 {SSH_USER}@{PROD_HOST}'
 
-# If local port 18080 is busy on Apollo, use an alternate
-alias nemotunnel-alt='ssh -N -L 18789:127.0.0.1:18789 -L 28080:127.0.0.1:8080 chris@daedalus'
+# If local port 18080 is busy on {WORKSTATION}, use an alternate
+alias nemotunnel-alt='ssh -N -L 18789:127.0.0.1:18789 -L 28080:127.0.0.1:8080 {SSH_USER}@{PROD_HOST}'
 
 # Quick open after tunnel is up
 alias nemoui='xdg-open http://127.0.0.1:18789/ 2>/dev/null || echo "Open http://127.0.0.1:18789/ in browser"'
@@ -47,7 +61,7 @@ Usage:
 
 ---
 
-## Server Aliases (daedalus: add to ~/.bashrc or ~/.bash_aliases)
+## Server Aliases ({PROD_HOST}: add to ~/.bashrc or ~/.bash_aliases)
 
 ```bash
 # --- NemoClaw sandbox management ---
@@ -73,7 +87,7 @@ alias nemo-health='nemoclaw my-assistant status && openshell forward list'
 # --- Backup (run before destroy or upgrades) ---
 nemo-backup() {
   local SANDBOX=my-assistant
-  local BACKUP_DIR=~/.nemoclaw/backups/$(date +%Y%m%d-%H%M%S)
+  local BACKUP_DIR=${NEMOCLAW_BACKUP_ROOT:-~/.nemoclaw/backups}/$(date +%Y%m%d-%H%M%S)
   mkdir -p "$BACKUP_DIR"/{cron,devices,credentials,identity,memory}
   echo "Backing up to $BACKUP_DIR ..."
   openshell sandbox download "$SANDBOX" /sandbox/.openclaw/openclaw.json "$BACKUP_DIR/"
@@ -122,10 +136,10 @@ Merge these keys into the existing `gateway` block:
 ```
 
 - `100.64.0.0/10` = Tailscale CGNAT range. Add if you want Tailscale hostname access later.
-- If you add a Tailscale origin (e.g. `http://daedalus.tail12345.ts.net:18789`), add it to `allowedOrigins` too.
+- If you add a Tailscale origin (e.g. `http://{PROD_HOST}.<tailnet>.ts.net:18789`), add it to `allowedOrigins` too.
 - **Do not** use `dangerouslyAllowHostHeaderOriginFallback: true` except for one-off debugging.
 
-**Verify:** Open `http://127.0.0.1:18789/` from Apollo. Debug tab should show Health: green.
+**Verify:** Open `http://127.0.0.1:18789/` from {WORKSTATION}. Debug tab should show Health: green.
 
 Known blockers: [NVIDIA/NemoClaw#739](https://github.com/NVIDIA/NemoClaw/issues/739),
 [#759](https://github.com/NVIDIA/NemoClaw/issues/759), `openclaw.json` is root-owned.
@@ -148,14 +162,14 @@ daemon on `11434` unless you install it; `ollama list` on the host may be talkin
 - **`host.openshell.internal`** resolves **inside the sandbox**. `openshell inference set` runs
   endpoint verification from the **host**, where that name often does not resolve, verification
   can time out even when inference works from the sandbox.
-- Use the daedalus **LAN IP** in `OPENAI_BASE_URL` for provider create (example below), or pass
+- Use the {PROD_HOST} **LAN IP** in `OPENAI_BASE_URL` for provider create (example below), or pass
   **`--no-verify`** to `openshell inference set` if verification fails spuriously.
 
 ### Working pattern (substitute your LAN IP)
 
 ```bash
-# LAN IP of daedalus (example: 192.168.50.128)
-hostname -I | awk '{print $1}'
+# Find the LAN IP of {PROD_HOST} (run on {PROD_HOST} itself)
+hostname -I | awk '{print $1}'   # → {LAN_IP}
 
 openshell provider delete ollama-local 2>/dev/null || true
 
@@ -163,7 +177,7 @@ openshell provider create \
   --name ollama-local \
   --type openai \
   --credential OPENAI_API_KEY=unused \
-  --config OPENAI_BASE_URL=http://192.168.50.128:11435/v1
+  --config OPENAI_BASE_URL=http://{LAN_IP}:11435/v1
 
 openshell inference set --provider ollama-local --model qwen2.5:7b-instruct --no-verify
 ```
@@ -171,7 +185,7 @@ openshell inference set --provider ollama-local --model qwen2.5:7b-instruct --no
 Confirm Ollama from the host:
 
 ```bash
-curl -s http://192.168.50.128:11435/v1/models
+curl -s http://{LAN_IP}:11435/v1/models
 ollama pull qwen2.5:7b-instruct   # if missing
 ```
 
@@ -307,7 +321,7 @@ nemoclaw my-assistant policy-add
 
 ### Custom policy YAML for Zeus LAN services
 
-Save as `~/.nemoclaw/policy-zeus.yaml` on daedalus, then apply:
+Save as `~/.nemoclaw/policy-zeus.yaml` on {PROD_HOST}, then apply:
 
 ```yaml
 ---
@@ -355,7 +369,7 @@ If `node` or `nemoclaw-start` triggers the request, it's denied. Known issue:
 
 Fill in after running the steps above. Use `docker network inspect bridge` to find bridge IP.
 
-- Docker bridge IP on daedalus: **`<fill in>`** (expected: `172.17.0.1`)
+- Docker bridge IP on {PROD_HOST}: **`<fill in>`** (expected: `172.17.0.1`)
 - Policy file written to: `~/.nemoclaw/policy-zeus.yaml`
 - Applied with: `openshell policy set my-assistant --policy ~/.nemoclaw/policy-zeus.yaml --wait`
 - `nemoclaw my-assistant policy-list` shows `allow_zeus_ollama` and `allow_zeus_core`: ✅ / ❌
@@ -422,7 +436,7 @@ Backup location: `~/.nemoclaw/backups/<timestamp>/`
 | Layer | What It Does | Where It Runs | Config |
 |---|---|---|---|
 | Zeus Aegis | Regex rules on LLM output content | In-process (Zeus Core) | `zeus/safety/policies/*.yaml`, `ZEUS_AEGIS_ENABLED=1` |
-| NemoClaw/OpenShell | OS-level sandbox (Landlock, seccomp, netns) | daedalus host | `openclaw-sandbox.yaml`, `openshell policy set` |
+| NemoClaw/OpenShell | OS-level sandbox (Landlock, seccomp, netns) | {PROD_HOST} | `openclaw-sandbox.yaml`, `openshell policy set` |
 
 No overlap: Aegis filters *what the LLM says*; NemoClaw restricts *what the agent can do*.
 Future bridge: `NEMOCLAW_RUNTIME_URL` env var reserved in `compose.yaml` line 97.
@@ -439,7 +453,7 @@ Recommendations:
 - Avoid `--light-context` on cron jobs that need tool/skill access.
 - Complex multi-skill cron jobs may not work reliably at 7B model size.
 - Consider upgrading to a 14B+ model if sandbox agent tasks grow in complexity.
-  On a 3080 (10GB), `qwen2.5:14b-instruct-q4_k_m` requires unloading `nomic-embed-text` first
+  On a 10 GB GPU (e.g. RTX 3080), `qwen2.5:14b-instruct-q4_k_m` requires unloading `nomic-embed-text` first
   (`OLLAMA_MAX_LOADED_MODELS=1`). Try this before expanding SOUL/IDENTITY/AGENTS.
 
 Slim templates for SOUL.md, IDENTITY.md, and AGENTS.md are in `zeus/safety/workspace-templates/`
@@ -452,7 +466,7 @@ direct impact on model tool-dispatch. OpenClaw has no documented system prompt o
 control relies on session context and reasoning flags, not workspace files. Built-in tools
 (Memory Search) fire below the workspace layer and cannot be suppressed via AGENTS.md. Practical
 fix for tool-heavy loops is a model upgrade to 14B+. qwen2.5:7b measured at **53 tok/s** on the
-3080; concurrent request timeouts occur when iris embed + OpenClaw chat overlap.
+reference 10 GB GPU; concurrent request timeouts occur when iris embed + OpenClaw chat overlap.
 
 ---
 
@@ -463,7 +477,7 @@ When Health goes offline or WebSocket disconnects:
 1. `nemo-status`, check sandbox state
 2. `nemo-term`, OpenShell TUI, look for errors
 3. `nemo-fwdlist`, verify port forward is active
-4. Check SSH tunnel is alive on Apollo
+4. Check SSH tunnel is alive on {WORKSTATION}
 5. Browser DevTools → Network → WS tab → look for disconnects
 6. Re-establish forward: `nemo-fwd`
 7. After machine reboot: sandbox may need re-registration
@@ -472,7 +486,7 @@ When Health goes offline or WebSocket disconnects:
 
 ### Token / Auth
 
-- Retrieve gateway token: check `~/.nemoclaw/` on daedalus or
+- Retrieve gateway token: check `~/.nemoclaw/` on {PROD_HOST} or
   `openshell gateway token`
 - Token rotation: destroy + re-onboard (no standalone command in alpha)
 - Never expose `#token=...` URL via Cloudflare Tunnel without Zero Trust
@@ -525,16 +539,16 @@ docker exec openshell-cluster-nemoclaw kubectl exec -n openshell my-assistant --
 
 ## Next session: continuation prompt (copy-paste)
 
-Use this to resume NemoClaw / OpenClaw work in a new chat. Repo: **zeus** on daedalus; runbook:
-**`docs/nemoclaw-ops.md`** (this file).
+Use this to resume NemoClaw / OpenClaw work in a new chat. Repo: **zeus** on {PROD_HOST};
+runbook: **`docs/nemoclaw-ops.md`** (this file).
 
 ```
-You are helping me continue Zeus + NemoClaw/OpenClaw on daedalus (RTX 3080).
+You are helping me continue Zeus + NemoClaw/OpenClaw on {PROD_HOST}.
 
 Context already done (see docs/nemoclaw-ops.md):
 - Single Ollama: zeus-ollama on host port 11435; OpenShell provider (e.g. ollama-local) uses LAN IP + --no-verify where needed.
 - openclaw.json models.providers.inference.api set to openai-completions (not openai-responses) for Ollama.
-- allowedOrigins for Control UI; SSH tunnel from Apollo (18789, 18080).
+- allowedOrigins for Control UI; SSH tunnel from {WORKSTATION} (18789, 18080).
 
 Continue with this plan:
 1. Confirm gateway.trustedProxies CIDRs in openclaw.json match how we access the UI (LAN, Tailscale) and add any missing allowedOrigins if we use non-localhost hostnames.

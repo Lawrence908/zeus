@@ -10,7 +10,7 @@
 # See docs/memory-architecture-plan.md for the source-by-source rationale.
 
 defaults:
-  user_id: chris
+  user_id: user   # ZEUS_USER_ID env override applies at runtime
   chunk_size: 512
   chunk_overlap: 64
 

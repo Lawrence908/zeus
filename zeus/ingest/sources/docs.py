@@ -39,7 +39,7 @@ class DocsSource:
         globs: list[str] | None = None,
         chunk_size: int = 512,
         chunk_overlap: int = 64,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.globs = globs if globs is not None else DEFAULT_DOC_GLOBS

@@ -115,7 +115,7 @@ def test_live_retrieval_metrics(capsys):
     for row in GROUND_TRUTH:
         q = str(row["query"])
         kws = list(row["expected_keywords"])
-        hits = search_knowledge(query=q, user_id="chris", top_k=top_k)
+        hits = search_knowledge(query=q, user_id="user", top_k=top_k)
         first_rank = 0  # 1-indexed; 0 means no hit
         for i, h in enumerate(hits):
             text = str(h.get("memory", ""))

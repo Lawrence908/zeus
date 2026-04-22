@@ -63,7 +63,7 @@ class GitSource:
         max_commits: int = 500,
         chunk_size: int = 512,
         chunk_overlap: int = 64,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.repo_path = Path(repo_path or os.getenv("ZEUS_REPO_PATH", ".")).resolve()
         self.author_email = author_email or os.getenv("GIT_AUTHOR_EMAIL", "")

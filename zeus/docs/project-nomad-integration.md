@@ -4,7 +4,7 @@ How Zeus connects to a local [Project N.O.M.A.D.](https://github.com/Crosstalk-S
 
 ## Install location (this machine)
 
-- **Source / build tree:** `/home/chris/apps/project-nomad`
+- **Source / build tree:** `/path/to/project-nomad`
 - **Command Center (typical):** browser at `http://127.0.0.1:8080` or `http://<host-ip>:8080` (see upstream install notes).
 
 ## What N.O.M.A.D. provides
@@ -30,7 +30,7 @@ When implementing clients:
 
 ## Phase 0: Discovery checklist
 
-Complete these in `/home/chris/apps/project-nomad` after the Command Center runs:
+Complete these in `/path/to/project-nomad` after the Command Center runs:
 
 1. **HTTP API:** Inspect the `admin/` app: routes, OpenAPI/Swagger if present, `fetch` URLs for status, apps, collections, AI/RAG.
 2. **On-disk data:** FlatNotes paths, JSON/YAML under `/opt/project-nomad` (upstream install) or your Compose volumes; anything safe to symlink under `zeus/data/raw/` (see [ingest-paths.md](ingest-paths.md)).

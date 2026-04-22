@@ -48,10 +48,10 @@ Search helpers (`search.py`) return mem0-shaped dicts so `format_context_block` 
 from zeus.memory.store import get_memory_store
 store = get_memory_store()
 await store.add_text(
-    "Chris prefers plain text in Telegram.",
+    "The user prefers plain text in Telegram.",
     source="context_pack",
     source_id="context_pack:telegram_pref",
-    user_id="chris",
+    user_id="user",
     extract_facts=True,
 )
 ```

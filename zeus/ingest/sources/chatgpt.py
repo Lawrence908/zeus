@@ -3,7 +3,7 @@
 # Supports both the legacy single-file format (conversations.json) and the
 # newer multi-file export (conversations-000.json, conversations-001.json, …
 # plus media directories).  Pass a file or a directory as `path`.
-# Only user messages are ingested by default — they contain Chris's actual
+# Only user messages are ingested by default — they contain the user's actual
 # thoughts, preferences, and questions, which is what mnemosyne needs.
 import json
 import logging
@@ -14,8 +14,8 @@ from zeus.ingest.pipeline import Chunk, chunk_text
 
 logger = logging.getLogger("iris")
 
-# Which roles to ingest. "user" = Chris's messages; add "assistant" if you want
-# the AI's responses too (useful for capturing answers Chris relied on).
+# Which roles to ingest. "user" = the user's messages; add "assistant" if you
+# want the AI's responses too (useful for capturing answers the user relied on).
 DEFAULT_ROLES = {"user"}
 
 
@@ -42,7 +42,7 @@ class ChatGPTSource:
         roles: set[str] = DEFAULT_ROLES,
         chunk_size: int = 512,
         chunk_overlap: int = 64,
-        user_id: str = "chris",
+        user_id: str = "user",
         min_chars: int = 50,
     ) -> None:
         self.path = Path(path)

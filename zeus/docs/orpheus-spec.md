@@ -203,7 +203,7 @@ class WhisperSTT:
 
 ### Voicebox / LuxTTS: TTS
 
-**Role:** Convert LLM text response to natural speech audio using Chris's cloned voice.
+**Role:** Convert LLM text response to natural speech audio using the deployer's cloned voice.
 
 **Voice cloning setup:**
 1. Record 30–60 seconds of clean speech (quiet room, no background noise, varied sentences)
@@ -292,7 +292,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
 MAX_RESPONSE_TOKENS = 512
 
-SYSTEM_PROMPT_TEMPLATE = """You are Zeus, a personal AI assistant. You are talking to Chris.
+SYSTEM_PROMPT_TEMPLATE = """You are Zeus, a personal AI assistant. You are talking to the user.
 Answer concisely; you are speaking aloud, so avoid lists, markdown, and long explanations.
 Keep responses under 3 sentences unless the question genuinely requires more.
 
@@ -486,7 +486,7 @@ import asyncio
 from zeus.voice.tts import VoiceboxTTS
 import os
 tts = VoiceboxTTS(os.getenv('VOICEBOX_URL'), os.getenv('ORPHEUS_VOICE_ID'))
-audio = asyncio.run(tts.synthesize('Zeus voice test. Hello Chris.'))
+audio = asyncio.run(tts.synthesize('Zeus voice test. Hello there.'))
 open('/tmp/test.wav', 'wb').write(audio)
 print('Saved to /tmp/test.wav')
 "

@@ -255,9 +255,7 @@ def get_reference_clients() -> tuple[KiwixClient | None, NomadClient | None]:
         return _kiwix_singleton, _nomad_singleton
 
     if _env_bool("ZEUS_KIWIX_ENABLED", True):
-        url = os.getenv(
-            "ZEUS_KIWIX_URL", "https://kiwix-nomad.chrislawrence.ca"
-        ).strip()
+        url = os.getenv("ZEUS_KIWIX_URL", "").strip()
         cf_id = os.getenv("ZEUS_KIWIX_CF_ACCESS_CLIENT_ID", "").strip()
         cf_secret = os.getenv("ZEUS_KIWIX_CF_ACCESS_CLIENT_SECRET", "").strip()
         if url:

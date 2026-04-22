@@ -10,4 +10,4 @@ class Chunk:
     text: str
     source: str  # e.g. "markdown:notes/2024-01.md"
     metadata: dict = field(default_factory=dict)
-    user_id: str = "chris"  # mem0 partitions by user_id
+    user_id: str = "user"  # mem0 partitions by user_id

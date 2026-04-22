@@ -1,8 +1,8 @@
 # Zeus: Personal AI Assistant System
 
-A self-hosted, voice-first, privacy-preserving AI assistant built from proven open-source components. Runs on consumer GPUs (RTX 3080 production, RTX 5080 dev) and keeps all data and computation on your own hardware.
+A self-hosted, voice-first, privacy-preserving AI assistant built from proven open-source components. Runs on consumer GPUs (example: RTX 3080 for production, RTX 5080 for dev — substitute your own) and keeps all data and computation on your own hardware.
 
-**Status (2026-04-18):** Foundation, memory + knowledge + reference retrieval, text chat, Telegram bot, MCP server, benchmarks, and Aegis safety layer are live. Voice pipeline is scaffolded; Kairos background daemon is opt-in. Olympus production deploy pending.
+**Status (2026-04-18):** Foundation, memory + knowledge + reference retrieval, text chat, Telegram bot, MCP server, benchmarks, and Aegis safety layer are live. Voice pipeline is scaffolded; Kairos background daemon is opt-in. Production deploy to the always-on "olympus" host is pending.
 
 > Docs map: [`docs/INDEX.md`](docs/INDEX.md). Project brief: [`CLAUDE.md`](CLAUDE.md). Ticket plan: [`docs/ZEUS_LINEAR_TICKET_PLAN.md`](docs/ZEUS_LINEAR_TICKET_PLAN.md).
 
@@ -74,7 +74,7 @@ Full subsystem map: [`zeus/docs/architecture.md`](zeus/docs/architecture.md).
 | **aegis** | Safety layer (YAML policies + bus pre/post hooks) | Live |
 | **olympians** | Ruflo agent swarm | YAML manifests + runtime wired |
 | **kairos** | Background observe-decide-act daemon | Shipped, off by default |
-| **olympus** | Production server (RTX 3080) | Deploy pending; daedalus hosts today |
+| **olympus** | Production server (always-on host; typical: RTX 3080-class) | Deploy pending; example deployment runs on a separate workstation host |
 
 ### Tech stack
 
@@ -86,7 +86,7 @@ Full subsystem map: [`zeus/docs/architecture.md`](zeus/docs/architecture.md).
 | Knowledge | `zeus/memory/library.py` (`KnowledgeStore`) | Dense + BM25 hybrid, optional BGE-reranker |
 | Small-task LLM | `zeus/core/small_llm.py` | Provider router with privacy-tier gate and daily USD cap |
 | Chat LLM (dev) | Claude Sonnet 4.6 via Anthropic API | Best quality during iteration |
-| Chat LLM (prod) | Ollama `qwen2.5:7b-instruct` Q4_K_M | Fits 10 GB VRAM on the 3080 |
+| Chat LLM (prod) | Ollama `qwen2.5:7b-instruct` Q4_K_M | Fits 10 GB VRAM on an RTX 3080-class GPU |
 | Embeddings | `nomic-embed-text:v1.5` via Ollama | 768-dim cosine, fast, self-hosted |
 | HTTP API | FastAPI on port 8203 | Async-first, validated schemas |
 | MCP | `zeus/mcp/server.py` (FastMCP) | Zeus memory exposed to Cursor / Claude Desktop |
@@ -199,7 +199,7 @@ Per-source routing lives in [`zeus/ingest/config.yaml`](zeus/ingest/config.yaml)
 docker exec zeus-core python -m zeus.bench
 ```
 
-Writes per-model tok/s + TTFT + prompt-eval to `zeus/data/benchmarks.json`; results show up in the Settings UI. Measured on the 3080: `qwen2.5:7b-instruct` 119 tok/s, `llama3.1:8b-instruct` 113 tok/s, `qwen3:8b` 100 tok/s. Full context in [`zeus/docs/model-comparison.md`](zeus/docs/model-comparison.md).
+Writes per-model tok/s + TTFT + prompt-eval to `zeus/data/benchmarks.json`; results show up in the Settings UI. Reference numbers from the example RTX 3080 deployment: `qwen2.5:7b-instruct` 119 tok/s, `llama3.1:8b-instruct` 113 tok/s, `qwen3:8b` 100 tok/s. Full context in [`zeus/docs/model-comparison.md`](zeus/docs/model-comparison.md).
 
 ---
 
@@ -213,8 +213,8 @@ Writes per-model tok/s + TTFT + prompt-eval to `zeus/data/benchmarks.json`; resu
 
 | Mode | Chat LLM | Hardware | Use case |
 |------|----------|----------|----------|
-| `dev` | Claude Sonnet 4.6 | RTX 5080 tower or daedalus | Rapid iteration |
-| `prod` | Ollama `qwen2.5:7b-instruct` | RTX 3080 (Olympus) | Always-on |
+| `dev` | Claude Sonnet 4.6 | Dev workstation (typical: RTX 5080-class, 16 GB VRAM) | Rapid iteration |
+| `prod` | Ollama `qwen2.5:7b-instruct` | Always-on production host (typical: RTX 3080-class, 10 GB VRAM) | Always-on |
 
 Switch via `ZEUS_ENV` and optionally `ZEUS_LLM`. See [`zeus/docs/deployment.md`](zeus/docs/deployment.md).
 
@@ -226,9 +226,9 @@ Switch via `ZEUS_ENV` and optionally `ZEUS_LLM`. See [`zeus/docs/deployment.md`]
 
 ## Development workflow
 
-Dev on the 5080 tower or daedalus; `compose.override.yaml` bind-mounts `./zeus` read-only into `zeus-core` so pure-Python edits take effect with a container restart. Production hosts do not apply the override; they run a baked image.
+Dev on the workstation host or the always-on host itself; start from `compose.override.example.yaml` (copy to `compose.override.yaml`, fill in your host-side bind-mount paths — the real override is gitignored). It bind-mounts `./zeus` read-only into `zeus-core` so pure-Python edits take effect with a container restart. Production hosts do not apply the override; they run a baked image.
 
-1. Create a feature branch: `git checkout -b chrislawrencedev/LAB-XXX-description`
+1. Create a feature branch: `git checkout -b <github-user>/LAB-XXX-description`
 2. Iterate locally with `docker compose up -d`
 3. Run tests: `pytest` + `python -m zeus.memory.eval` for retrieval
 4. Run `python -m zeus.bench` if you touched model config

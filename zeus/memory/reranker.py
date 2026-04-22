@@ -10,8 +10,9 @@
 #   ZEUS_RERANKER_DEVICE — "cpu" (default) | "cuda" | "cuda:0"
 #   ZEUS_RERANKER_FP16 — "1" to use fp16 weights (smaller VRAM, slightly lossy)
 #
-# Olympus (RTX 3080 10GB) rule: run this on CPU or the dev 5080. The 3080
-# stays dedicated to qwen2.5:7b for chat. See CLAUDE.md.
+# Production-GPU rule: do not load the reranker onto a VRAM-constrained chat
+# GPU — put it on CPU or a separate dev GPU so the chat model keeps its
+# headroom. See CLAUDE.md for the full VRAM budget.
 from __future__ import annotations
 
 import logging

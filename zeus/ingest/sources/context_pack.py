@@ -16,7 +16,7 @@ class ContextPackSource:
         path: str | Path = "zeus/data/raw/context_pack.md",
         chunk_size: int = 256,
         chunk_overlap: int = 32,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.path = Path(path)
         self.chunk_size = chunk_size

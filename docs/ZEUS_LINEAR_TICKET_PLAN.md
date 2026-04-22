@@ -2,7 +2,7 @@
 
 Full ticket structure for the Zeus project. Incorporates feedback on sprint ordering, Phaos subsystem, retrieval eval, collection versioning, and dependency awareness.
 
-**Team:** Chris Lawrence Homelab
+**Team:** `<YOUR_LINEAR_TEAM>`
 **Linear Projects:** Zeus 0–8 + Backlog
 
 ## Labels
@@ -405,7 +405,7 @@ Vite `outDir → zeus/core/static/app/`. `main.py`: mount `/assets`, add SPA cat
 **Sub-issues:** LAB-311 (Vite outDir + asset mount), LAB-312 (SPA catch-all), LAB-313 (API preservation + redirects), LAB-314 (deployment docs)
 
 ### LAB-291: Telegram Bot Backend
-**Status (14 Apr 2026):** **Shipped** on `frontend-improvements`. End-to-end working in prod: Chris messages the bot, QueryEngine runs, grounded reply comes back in plain text. Files: `zeus/integrations/telegram/{__init__,bot}.py` (new), `zeus/core/main.py` (lifespan + `/integrations/telegram/status`), `.env.example`, `requirements.txt`.
+**Status (14 Apr 2026):** **Shipped** on `frontend-improvements`. End-to-end working in prod: the user messages the bot, QueryEngine runs, grounded reply comes back in plain text. Files: `zeus/integrations/telegram/{__init__,bot}.py` (new), `zeus/core/main.py` (lifespan + `/integrations/telegram/status`), `.env.example`, `requirements.txt`.
 
 Delivered beyond the original scope:
 - `markdown_to_plaintext()` stripper in `bot.py`, Telegram replies go out as clean plain text (code fences unwrapped, bold/italic removed, links rewritten as `text (url)`, list markers to `•`). Avoids MarkdownV2 parse failures from LLM output.
@@ -490,7 +490,7 @@ Files: `zeus/core/main.py`, `zeus/core/runtime_settings.py`, `zeus/frontend/src/
 
 Current MCP tools (`zeus_query`, `zeus_profile`, `zeus_remember`) are memory read/write only. Agent YAMLs list `file_read`, `bus_call`, none exist as callable tools. All new tools follow the `olympian_` prefix and the existing `zeus_` pattern (httpx call to `_core_url()`).
 
-1. **`olympian_file_read(path, max_lines=200)`**: validate `path` against `ZEUS_FILE_READ_ROOTS` allowlist (env var, default `/home/chris,/tmp/zeus-sandbox`); return `{content, lines, path, truncated}`.
+1. **`olympian_file_read(path, max_lines=200)`**: validate `path` against `ZEUS_FILE_READ_ROOTS` allowlist (env var, default `./,/tmp/zeus-sandbox`); return `{content, lines, path, truncated}`.
 2. **`olympian_search(query, path, glob, max_results=20)`**: async `rg --json` subprocess; Python `re.findall` fallback; same path allowlist; return `{matches: [{file, line, text}], total}`.
 3. **`olympian_shell(command, timeout=30)`**: gated by `ZEUS_SHELL_ENABLED=1`; command must match `ZEUS_SHELL_ALLOWLIST` (newline-separated regexes); Aegis post-filters stdout; hard kill after timeout; **never** in KAIROS default allowlist.
 4. **`olympian_memory_search(query, namespace, top_k=5)`**: extends `zeus_query` with explicit namespace filtering; proxies to `/context/query` with `namespaces=[namespace]`.
@@ -600,7 +600,7 @@ Tickets shipped in this branch that are not yet reflected in their original proj
 ### LAB-361: Mnemosyne retrieval bug (URGENT, Done)
 **Files:** `zeus/memory/search.py` · **Priority:** Urgent · **Parent:** LAB-61
 
-mem0 ≥ 0.1.x changed `Memory.search()` to return `{"results": [...]}` instead of a bare list. `search_memories()` had `if not isinstance(results, list): return []`, so every retrieval silently dropped to empty, Telegram and chat both replied "I don't have that in memory" even though Qdrant had 396 points with `user_id=chris`. Same bug in `get_profile_facts()`. Fix: `_unwrap_mem0_results()` handles both shapes. Verified end-to-end: `POST /memory/search "will allow OpenSSH in ufw"` → score 0.9654, `GET /context/profile` → 8 facts.
+mem0 ≥ 0.1.x changed `Memory.search()` to return `{"results": [...]}` instead of a bare list. `search_memories()` had `if not isinstance(results, list): return []`, so every retrieval silently dropped to empty, Telegram and chat both replied "I don't have that in memory" even though Qdrant had 396 points keyed by the configured `user_id`. Same bug in `get_profile_facts()`. Fix: `_unwrap_mem0_results()` handles both shapes. Verified end-to-end: `POST /memory/search "will allow OpenSSH in ufw"` → score 0.9654, `GET /context/profile` → 8 facts.
 
 No data was lost; the Qdrant volume was intact throughout.
 

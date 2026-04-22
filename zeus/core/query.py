@@ -42,7 +42,7 @@ ZEUS_DEV_MODEL = os.getenv("ZEUS_DEV_MODEL") or os.getenv(
     "ZEUS_CLAUDE_MODEL", "claude-sonnet-4-6"
 )
 
-ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "chris")
+ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "user")
 
 _TIMING_LOG_THRESHOLD_MS = int(os.getenv("ZEUS_TIMING_LOG_THRESHOLD_MS", "250"))
 

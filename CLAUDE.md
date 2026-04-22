@@ -1,6 +1,6 @@
 # Zeus: Personal AI Assistant System
 
-Zeus is a self-hosted, voice-first, privacy-preserving AI assistant built from proven open-source components. It runs on a Proxmox homelab: production on an RTX 3080 server (Olympus), dev/test on an RTX 5080 tower.
+Zeus is a self-hosted, voice-first, privacy-preserving AI assistant built from proven open-source components. It runs on a Proxmox homelab with consumer GPUs: a smaller always-on production GPU (e.g. 10 GB VRAM for a 7B Q4/Q5 chat model) and a larger dev GPU for iteration. The example deployment targets RTX 3080 (prod, "olympus") and RTX 5080 (dev) — substitute your own hardware.
 
 **This file (`CLAUDE.md` at repo root)** is the primary project brief for humans and for AI assistants (Claude Code, Cursor). Stack, naming, layout, and conventions live here. Prefer updating it when assumptions change rather than scattering one-off context in chats. Companion doc index: [docs/INDEX.md](docs/INDEX.md).
 
@@ -42,7 +42,7 @@ All subsystems use Greek mythology names. Agents and humans working in this repo
 - **phaos** voice-state visualization (WebSocket + Three.js orb)
 - **aegis** safety layer (YAML policies; optional NemoClaw + OpenShell on host)
 - **olympians** agent swarm (Ruflo-managed task agents)
-- **olympus** production server (RTX 3080)
+- **olympus** production server (the always-on host, typical: RTX 3080-class)
 - **oracle** Zeus Context API (serves structured context to agents)
 - **kairos** background agent daemon (observe, decide, act, update cycles)
 
@@ -137,8 +137,8 @@ safety:
 
 The system supports two environments controlled by `ZEUS_ENV`:
 
-- `dev` uses Claude API for LLM calls, runs on the 5080 tower, verbose logging.
-- `prod` uses Ollama (Qwen2.5-7B) for LLM calls, runs on the 3080 server, structured logging.
+- `dev` uses Claude API for LLM calls, runs on the dev workstation (typical: RTX 5080-class, 16 GB VRAM), verbose logging.
+- `prod` uses Ollama (Qwen2.5-7B) for LLM calls, runs on the always-on production host (typical: RTX 3080-class, 10 GB VRAM), structured logging.
 
 `ZEUS_LLM` overrides per process (`claude` | `ollama` | unset). All services must check `ZEUS_ENV` / `ZEUS_LLM` and configure themselves accordingly. Never hardcode model names or API endpoints.
 
@@ -156,20 +156,20 @@ The system supports two environments controlled by `ZEUS_ENV`:
 
 ## Development Workflow
 
-- Dev on the 5080 tower (16 GB VRAM, 14B models comfortable), or on `daedalus` with `compose.override.yaml` bind-mounting `./zeus` into `zeus-core` for hot-reload of pure-Python edits.
-- Prod deploys target Olympus (RTX 3080, 10 GB VRAM, 7B Q4/Q5 models). Daedalus currently hosts the always-on instance.
-- Branches per tool or experiment; merge when working. `main` is always deployable to Olympus.
+- Dev on the workstation host (16 GB VRAM class leaves headroom for 14B models), or on the production host itself with `compose.override.yaml` bind-mounting `./zeus` into `zeus-core` for hot-reload of pure-Python edits. See `compose.override.example.yaml` for a templated starting point.
+- Prod deploys target the always-on "olympus" host (10 GB VRAM class, 7B Q4/Q5 models). The example deployment currently runs on a "daedalus" host; any always-on Linux+NVIDIA host works.
+- Branches per tool or experiment; merge when working. `main` is always deployable to prod.
 - Use `zeus.bench` (`python -m zeus.bench` or `POST /models/benchmarks/run`) after any model change to confirm per-model tok/s and prompt-eval on the host; results feed the Settings UI.
 
 ## Key Decisions
 
 - **MemoryStore replaced mem0 (April 2026).** mem0 v2.0.0 deleted `mem0g`, shipped several breaking schema changes in 24 hours, and couldn't guarantee Qdrant payload stability. Zeus now owns the write path: ~200 LOC `MemoryStore` with LLM fact extraction via `small_llm_call`, bi-temporal payloads, ISO-8601 timestamps.
 - **Memory + Knowledge + Reference split.** The single `zeus_memories` collection polluted profile retrieval with bulk doc chunks. Writes now fan out by source: curated profile sources (`context_pack`, `gcal`) go through fact extraction into `zeus_memories`; bulk sources (Obsidian, chatgpt, markdown, email, newsletter, bookmarks, git) go into `zeus_knowledge` raw (no LLM); Wikipedia / NOMAD are live-proxied (no ingest).
-- **Hybrid retrieval with optional reranker.** `KnowledgeStore` uses Qdrant-native BM25 sparse vectors fused with dense via RRF (`ZEUS_KNOWLEDGE_HYBRID=1`). Optional BGE-reranker-v2-m3 on CPU or the 5080 (`ZEUS_KNOWLEDGE_RERANK=1`). Baseline on 30 hand-written queries: hit@1=0.60, hit@5=0.867, hit@10=0.933, MRR@10=0.71 (see `tests/retrieval_eval_baseline.json`).
+- **Hybrid retrieval with optional reranker.** `KnowledgeStore` uses Qdrant-native BM25 sparse vectors fused with dense via RRF (`ZEUS_KNOWLEDGE_HYBRID=1`). Optional BGE-reranker-v2-m3 on CPU or a dev GPU (`ZEUS_KNOWLEDGE_RERANK=1`) — do not load it onto the VRAM-constrained production chat GPU. Baseline on 30 hand-written queries: hit@1=0.60, hit@5=0.867, hit@10=0.933, MRR@10=0.71 (see `tests/retrieval_eval_baseline.json`).
 - **Two LLM layers with privacy-tier gating.** `small_llm_call` routes structured-output / batch work across `gemini_paid`, `groq`, `openrouter`, `anthropic_haiku`, `ollama` with a daily USD cap and an allowed-models gate. Gemini free tier is not in the chain (trains on input). LiteLLM is forbidden (March 2026 supply-chain attack on versions 1.82.7/1.82.8).
 - **Ruflo v3.5 over LangGraph / CrewAI** because it is Claude Code native and supports swarm patterns without framework lock-in.
 - **Voicebox + LuxTTS over Coqui / Bark** because 150x realtime speed makes conversational latency viable on consumer GPUs.
-- **Qwen2.5-7B-Instruct Q4_K_M in prod** fits in 10 GB VRAM on the 3080 while maintaining instruction-following quality. See `zeus/docs/model-comparison.md` for measured tok/s across candidate models.
+- **Qwen2.5-7B-Instruct Q4_K_M in prod** fits in 10 GB VRAM (RTX 3080-class) while maintaining instruction-following quality. See `zeus/docs/model-comparison.md` for measured tok/s across candidate models.
 - **Text chat is a first-class fallback** so dev and non-voice modes work without the full audio pipeline.
 - **MCP is a first-class integration boundary** so Zeus memory and context can be reused by external assistant clients.
 - **Session continuity** is required for natural multi-turn interactions across chat, voice, and Telegram.

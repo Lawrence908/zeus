@@ -1,0 +1,38 @@
+# compose.override.example.yaml — Template for local dev overlay
+#
+# Copy this file to `compose.override.yaml` (gitignored) and fill in your
+# host-specific bind mount paths and env vars. The real override is
+# per-deployer — your paths and secrets stay out of git.
+#
+# Docker Compose auto-loads `compose.override.yaml` when present. Bind-mounts
+# the host's `zeus/` package into the container so Python edits take effect
+# without rebuilding the image. Restart the container (or re-run
+# `docker exec ... python -m zeus.bench` etc.) to pick up changes — no rebuild
+# needed for pure-Python edits.
+#
+# Disable temporarily with:
+#   docker compose -f compose.yaml up -d
+#
+# Rename to `compose.override.yaml.disabled` before deploying to prod, where
+# you want the baked image so you know exactly what's running.
+
+services:
+  zeus-core:
+    volumes:
+      - ./zeus:/app/zeus:ro
+      # Writable data dir so docker cp (OAuth tokens, bookmarks.html, etc.)
+      # and per-source state survives restarts without poking the named volume.
+      - ./zeus/data:/app/zeus/data
+      # Obsidian vault (LiveSync headless mirror) — read-only ingest input.
+      # Replace with the absolute path to your vault on the host.
+      - /path/to/your/obsidian-vault:/path/to/your/obsidian-vault:ro
+      # Kiwix ZIM archives (static reference snapshots) — read-only ingest input
+      # for KiwixZimSource. Large ZIMs are served live via KiwixClient instead.
+      # Replace with the absolute path to your ZIM directory on the host.
+      - /path/to/your/kiwix/zims:/path/to/your/kiwix/zims:ro
+    environment:
+      # Don't write .pyc files into the read-only bind mount.
+      - PYTHONDONTWRITEBYTECODE=1
+      # The next two must match the host-side halves of the bind mounts above.
+      - OBSIDIAN_VAULT_PATH=/path/to/your/obsidian-vault
+      - ZEUS_KIWIX_ZIM_DIR=/path/to/your/kiwix/zims
