@@ -145,6 +145,7 @@ def search_knowledge(
         md.setdefault("type", "knowledge")
         results.append(
             {
+                "id": hit.id,
                 "memory": hit.text,
                 "score": hit.score,
                 "metadata": md,

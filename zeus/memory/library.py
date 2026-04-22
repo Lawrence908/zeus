@@ -67,6 +67,7 @@ class KnowledgeHit:
     source: str
     source_path: str
     payload: dict[str, Any]
+    id: str = ""
 
 
 @dataclass
@@ -135,6 +136,10 @@ class KnowledgeStore:
                 ("source", qmodels.PayloadSchemaType.KEYWORD),
                 ("source_id", qmodels.PayloadSchemaType.KEYWORD),
                 ("user_id", qmodels.PayloadSchemaType.KEYWORD),
+                # Faceted browsing in the /knowledge admin page needs keyword
+                # indices on the per-source type + per-book axis.
+                ("type", qmodels.PayloadSchemaType.KEYWORD),
+                ("book", qmodels.PayloadSchemaType.KEYWORD),
             ):
                 try:
                     self._client.create_payload_index(
@@ -306,6 +311,7 @@ class KnowledgeStore:
             payload = dict(p.payload or {})
             hits.append(
                 KnowledgeHit(
+                    id=str(getattr(p, "id", "") or ""),
                     text=str(payload.get("text", "")),
                     score=float(p.score),
                     source=str(payload.get("source", "")),
@@ -386,6 +392,7 @@ class KnowledgeStore:
         for h, s in scored:
             out.append(
                 KnowledgeHit(
+                    id=h.id,
                     text=h.text,
                     score=float(s),
                     source=h.source,

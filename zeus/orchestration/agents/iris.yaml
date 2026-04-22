@@ -1,9 +1,11 @@
 # zeus/orchestration/agents/iris.yaml — Ingest pipeline agent
-# Iris ingests raw data from sources, chunks it, embeds it, and stores
-# it in mnemosyne. It never writes directly to Qdrant — it calls mnemosyne.
+# Iris ingests raw data from sources, chunks it, embeds it, and routes by source:
+# curated fact sources (context_pack, gcal) → mnemosyne (LLM fact extraction);
+# bulk sources (obsidian, chatgpt, markdown, email, newsletter, bookmarks, git)
+# → athena (raw chunks, no LLM). Iris never writes to Qdrant directly.
 
 name: iris
-description: "Data ingest pipeline: reads sources, chunks, embeds, stores via mnemosyne"
+description: "Data ingest pipeline: reads sources, chunks, embeds, routes to mnemosyne (facts) or athena (library)"
 model:
   dev: claude-sonnet-4-6
   prod: qwen2.5:7b-instruct-q4_K_M

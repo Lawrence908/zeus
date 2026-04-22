@@ -34,6 +34,10 @@ agents:
     definition: agents/mnemosyne.yaml
     auto_start: false          # invoked by other agents via bus
 
+  - name: athena
+    definition: agents/athena.yaml
+    auto_start: false          # invoked by other agents via bus
+
   - name: oracle
     definition: agents/oracle.yaml
     auto_start: true           # always running — serves context to swarm

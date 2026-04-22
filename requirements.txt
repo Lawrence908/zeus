@@ -32,3 +32,5 @@ pytest>=8.0.0
 pdfminer.six>=20221105
 # Iris integrations
 python-telegram-bot>=21.0
+# Kiwix ZIM ingest (KiwixZimSource → zeus_knowledge). Requires libzim-dev at build.
+libzim>=3.1.0

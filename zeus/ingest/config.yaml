@@ -76,3 +76,23 @@ sources:
   # Excludes zeus/docs/legacy/ by design.
   docs:
     target: knowledge
+
+  # Kiwix ZIM ingest — static reference snapshots → zeus_knowledge.
+  # Large ZIMs (Wikipedia, Wiktionary, iFixit, wikiversity, armypubs) are
+  # served live via the Reference layer (zeus.memory.reference.KiwixClient)
+  # instead. `max_zim_mb` is the guardrail that keeps Wikipedia out.
+  #
+  # Leave `books` empty (or drop the key) to ingest every eligible ZIM under
+  # the size threshold. The default list is conservative: small curated books
+  # where semantic retrieval wins.
+  kiwix_zim:
+    target: knowledge
+    zim_dir: ${ZEUS_KIWIX_ZIM_DIR}
+    max_zim_mb: 2048
+    books:
+      - foss.cooking_en_all_2025-11
+      - freecodecamp_en_coding-interview-prep_2025-11
+      - freecodecamp_en_project-euler_2025-07
+      - communitybuilding.stackexchange.com_en_all_2025-12
+      - sustainability.stackexchange.com_en_all_2025-12
+      - theworldfactbook_en_all_2026-02

@@ -6,6 +6,7 @@ import { AgentsPage } from './pages/AgentsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { IngestPage } from './pages/IngestPage'
 import { MemoriesPage } from './pages/MemoriesPage'
+import { KnowledgePage } from './pages/KnowledgePage'
 
 const router = createBrowserRouter([
   {
@@ -31,6 +32,10 @@ const router = createBrowserRouter([
   {
     path: '/memories',
     element: <MemoriesPage />,
+  },
+  {
+    path: '/knowledge',
+    element: <KnowledgePage />,
   },
   {
     path: '*',

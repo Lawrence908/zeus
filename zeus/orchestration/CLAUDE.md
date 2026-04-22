@@ -11,7 +11,7 @@ Agent lifecycle, multi-step tasks, bus routing, and the Kairos background daemon
 | `hooks.py` | `HookRegistry`, `BusMetrics`, built-in hooks (`validate_context`, `log`, `retry_backoff`, `bus_metrics`) |
 | `daemon.py` | `KairosAgent`, `KairosDaemon`, `MemoryDriftObserver`, `KairosState` |
 | `ruflo.yaml` | Ruflo v3.5 swarm config |
-| `agents/*.yaml` | Individual agent manifests: iris, mnemosyne, oracle, orpheus |
+| `agents/*.yaml` | Individual agent manifests: iris, mnemosyne, athena, oracle, orpheus |
 
 ## FastAPI surface (port 8203)
 

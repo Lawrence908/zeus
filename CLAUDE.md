@@ -35,7 +35,7 @@ All subsystems use Greek mythology names. Agents and humans working in this repo
 
 - **zeus** main system, orchestration entry point
 - **mnemosyne** memory layer (MemoryStore + Qdrant, LLM fact extraction via `small_llm_call`)
-- **library / knowledge** bulk RAG layer (`KnowledgeStore` over `zeus_knowledge`)
+- **athena / library** bulk RAG knowledge layer (`KnowledgeStore` over `zeus_knowledge`)
 - **reference** live external-source proxy (kiwix, NOMAD)
 - **iris** ingest pipeline (data sources to processed chunks)
 - **orpheus** voice interface (STT + TTS + wake word)

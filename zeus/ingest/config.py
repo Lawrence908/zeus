@@ -63,6 +63,11 @@ class SourceConfig(BaseModel):
     days_back: int | None = None
     days_forward: int | None = None
 
+    # kiwix_zim-specific.
+    zim_dir: str | None = None
+    books: list[str] | None = None
+    max_zim_mb: int | None = None
+
     @field_validator("target")
     @classmethod
     def _validate_target(cls, v: str) -> str:

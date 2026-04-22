@@ -1,5 +1,5 @@
 // zeus/frontend/src/pages/MemoriesPage.tsx — browse, search, edit, delete ingested memories
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TopNav } from '../components/layout/TopNav'
 
 interface MemoryEntry {
@@ -41,10 +41,14 @@ function shortDate(s?: string | null): string {
 
 function MemoryCard({
   entry,
+  selected,
+  onToggleSelect,
   onUpdate,
   onDelete,
 }: {
   entry: MemoryEntry
+  selected: boolean
+  onToggleSelect: (id: string, shift: boolean) => void
   onUpdate: (id: string, text: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
 }) {
@@ -84,24 +88,45 @@ function MemoryCard({
   }
 
   return (
-    <div className="border border-outline-variant/20 rounded bg-surface-container-lowest/50 p-3">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left flex items-start gap-3"
-      >
-        <span className="text-[10px] font-label uppercase tracking-widest text-on-surface-variant/60 shrink-0 mt-0.5">
-          {entry.source}
-        </span>
-        {entry.score !== undefined && (
-          <span className="text-[10px] font-label text-primary-container shrink-0 mt-0.5">
-            {entry.score.toFixed(3)}
+    <div
+      className={[
+        'border rounded bg-surface-container-lowest/50 p-3',
+        selected
+          ? 'border-primary-container/60 bg-primary-container/5'
+          : 'border-outline-variant/20',
+      ].join(' ')}
+    >
+      <div className="flex items-start gap-3">
+        <label className="shrink-0 mt-0.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => { /* handled on click to access shiftKey */ }}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleSelect(entry.id, (e as React.MouseEvent).shiftKey)
+            }}
+            className="accent-primary-container"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex-1 text-left flex items-start gap-3 min-w-0"
+        >
+          <span className="text-[10px] font-label uppercase tracking-widest text-on-surface-variant/60 shrink-0 mt-0.5">
+            {entry.source}
           </span>
-        )}
-        <span className={`text-sm font-body text-on-surface flex-1 ${expanded ? '' : 'line-clamp-2'}`}>
-          {entry.text || '(empty)'}
-        </span>
-      </button>
+          {entry.score !== undefined && (
+            <span className="text-[10px] font-label text-primary-container shrink-0 mt-0.5">
+              {entry.score.toFixed(3)}
+            </span>
+          )}
+          <span className={`text-sm font-body text-on-surface flex-1 min-w-0 ${expanded ? '' : 'line-clamp-2'}`}>
+            {entry.text || '(empty)'}
+          </span>
+        </button>
+      </div>
 
       {expanded && (
         <div className="mt-3 border-t border-outline-variant/15 pt-3">
@@ -186,6 +211,9 @@ export function MemoriesPage() {
   const [total, setTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const lastClickedId = useRef<string | null>(null)
 
   const loadSources = useCallback(async () => {
     try {
@@ -286,7 +314,70 @@ export function MemoriesPage() {
       throw new Error(`Delete failed (${res.status}) ${detail}`.trim())
     }
     setEntries((prev) => prev.filter((e) => e.id !== id))
+    setSelected((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
   }, [])
+
+  const toggleSelect = useCallback((id: string, shift: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (shift && lastClickedId.current) {
+        const ids = entries.map((e) => e.id)
+        const start = ids.indexOf(lastClickedId.current)
+        const end = ids.indexOf(id)
+        if (start >= 0 && end >= 0) {
+          const [lo, hi] = start < end ? [start, end] : [end, start]
+          const add = !prev.has(id)
+          for (let i = lo; i <= hi; i++) {
+            if (add) next.add(ids[i])
+            else next.delete(ids[i])
+          }
+          lastClickedId.current = id
+          return next
+        }
+      }
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      lastClickedId.current = id
+      return next
+    })
+  }, [entries])
+
+  const selectAllVisible = () => setSelected(new Set(entries.map((e) => e.id)))
+  const clearSelection = () => {
+    setSelected(new Set())
+    lastClickedId.current = null
+  }
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return
+    if (!confirm(`Delete ${selected.size} selected memor${selected.size === 1 ? 'y' : 'ies'}? Cannot be undone.`)) return
+    setBulkBusy(true)
+    setError('')
+    try {
+      const ids = Array.from(selected)
+      const res = await fetch('/memory/delete_batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        throw new Error(`Bulk delete failed (${res.status}) ${detail}`.trim())
+      }
+      const deleted = new Set(ids)
+      setEntries((prev) => prev.filter((e) => !deleted.has(e.id)))
+      clearSelection()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   const headerLine = useMemo(() => {
     if (searchActive) return `${entries.length} hits for "${searchActive}"`
@@ -352,6 +443,35 @@ export function MemoriesPage() {
             {loading && <span className="text-primary-container">Loading…</span>}
           </div>
 
+          {selected.size > 0 && (
+            <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded border border-primary-container/40 bg-primary-container/10 text-xs font-label">
+              <span className="text-primary-container">{selected.size} selected</span>
+              <button
+                type="button"
+                onClick={selectAllVisible}
+                className="px-2 py-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high"
+              >
+                Select all visible ({entries.length})
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="px-2 py-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high"
+              >
+                Clear
+              </button>
+              <span className="flex-1" />
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={bulkBusy}
+                className="px-3 py-1 rounded bg-error/15 text-error hover:bg-error/25 disabled:opacity-40"
+              >
+                {bulkBusy ? 'Deleting…' : `Delete ${selected.size}`}
+              </button>
+            </div>
+          )}
+
           {error && (
             <p className="mb-3 text-sm font-body text-error">{error}</p>
           )}
@@ -361,6 +481,8 @@ export function MemoriesPage() {
               <MemoryCard
                 key={entry.id}
                 entry={entry}
+                selected={selected.has(entry.id)}
+                onToggleSelect={toggleSelect}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
               />

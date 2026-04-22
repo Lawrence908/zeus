@@ -165,6 +165,7 @@ def _apply_config_overrides(sources: list, ingest_cfg) -> list:
         "GitSource": "git",
         "GoogleCalendarSource": "gcal",
         "DocsSource": "docs",
+        "KiwixZimSource": "kiwix_zim",
     }
     for source in sources:
         key = CLASS_TO_KEY.get(type(source).__name__)
@@ -175,6 +176,11 @@ def _apply_config_overrides(sources: list, ingest_cfg) -> list:
             continue
         src_cfg.reject_if_phase2_only(key)
         source.target = src_cfg.target
+        if key == "kiwix_zim":
+            if src_cfg.books is not None:
+                source.books = set(src_cfg.books)
+            if src_cfg.max_zim_mb is not None:
+                source.max_zim_mb = src_cfg.max_zim_mb
     return sources
 
 
@@ -214,6 +220,7 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
     from zeus.ingest.sources.email import EmailSource
     from zeus.ingest.sources.gcal import GoogleCalendarSource
     from zeus.ingest.sources.git import GitSource
+    from zeus.ingest.sources.kiwix_zim import KiwixZimSource
     from zeus.ingest.sources.markdown import MarkdownSource
     from zeus.ingest.sources.newsletter import NewsletterSource
     from zeus.ingest.sources.obsidian import ObsidianSource
@@ -366,6 +373,28 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
             sources.append(
                 DocsSource(
                     repo_root=repo_root,
+                    chunk_size=args.chunk_size,
+                    chunk_overlap=args.chunk_overlap,
+                    user_id=args.user_id,
+                )
+            )
+
+    if args.source in ("kiwix_zim", "all"):
+        zim_dir = args.path or os.getenv("ZEUS_KIWIX_ZIM_DIR", "")
+        # books list + max_zim_mb come from zeus/ingest/config.yaml via
+        # _apply_config_overrides; CLI only supplies zim_dir.
+        if not zim_dir or not Path(zim_dir).is_dir():
+            if args.source == "kiwix_zim":
+                fail_hard(
+                    "kiwix_zim: zim_dir not found — "
+                    "set ZEUS_KIWIX_ZIM_DIR or use --path"
+                )
+            if zim_dir:
+                logger.warning("skipping kiwix_zim — zim_dir not found: %s", zim_dir)
+        else:
+            sources.append(
+                KiwixZimSource(
+                    zim_dir=zim_dir,
                     chunk_size=args.chunk_size,
                     chunk_overlap=args.chunk_overlap,
                     user_id=args.user_id,
@@ -704,7 +733,7 @@ Examples:
         "--source",
         choices=["context_pack", "markdown", "chatgpt", "email",
                  "obsidian", "git", "gcal", "bookmarks", "newsletter",
-                 "docs", "all"],
+                 "docs", "kiwix_zim", "all"],
         default="all",
         help="Which source type to ingest (default: all, includes zeus/data/raw/context_pack.md and project docs)",
     )
