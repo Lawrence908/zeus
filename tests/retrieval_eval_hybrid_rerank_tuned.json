@@ -1,0 +1,408 @@
+{
+  "summary": {
+    "n_queries": 30,
+    "hit@1": 0.0,
+    "hit@5": 0.0,
+    "hit@10": 0.0,
+    "mrr@10": 0.0,
+    "config": {
+      "ZEUS_KNOWLEDGE_HYBRID": "1",
+      "ZEUS_KNOWLEDGE_RERANK": "1",
+      "ZEUS_EMBED_MODEL": "nomic-embed-text:v1.5"
+    }
+  },
+  "per_query": [
+    {
+      "query": "What is the Zeus project?",
+      "keywords": [
+        "zeus",
+        "assistant",
+        "homelab"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "How does Zeus handle voice input and output?",
+      "keywords": [
+        "orpheus",
+        "tts",
+        "stt",
+        "whisper"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Aegis safety policies and guardrails",
+      "keywords": [
+        "aegis",
+        "policy",
+        "safety",
+        "nemoclaw"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "What embedding model does Zeus use?",
+      "keywords": [
+        "nomic",
+        "embed",
+        "768"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Ruflo agent orchestration",
+      "keywords": [
+        "ruflo",
+        "agent",
+        "swarm"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "How do stars form from a solar nebula?",
+      "keywords": [
+        "star",
+        "nebula",
+        "solar"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Early galaxies and collisional events",
+      "keywords": [
+        "galaxies",
+        "collisional",
+        "ellipticals"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Copernicus Brahe Kepler heliocentric model",
+      "keywords": [
+        "copernicus",
+        "kepler",
+        "brahe"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Binary stars and stellar groupings",
+      "keywords": [
+        "binary",
+        "stellar",
+        "star"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Steps to solve a definite integral",
+      "keywords": [
+        "integral",
+        "antiderivative",
+        "bounds"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Proof step summaries for lemmas and theorems",
+      "keywords": [
+        "lemma",
+        "theorem",
+        "proof"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Atlas physical network interfaces",
+      "keywords": [
+        "atlas",
+        "eno1",
+        "networking"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Hephaestus fresh server directory structure",
+      "keywords": [
+        "hephaestus",
+        "github",
+        "directory"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Caddy proxy diagnostics troubleshooting",
+      "keywords": [
+        "caddy",
+        "proxy",
+        "diagnostics"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "ZFS pool RAIDZ2 mount setup",
+      "keywords": [
+        "zfs",
+        "pool",
+        "raidz2"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "SSH fail2ban hardening",
+      "keywords": [
+        "fail2ban",
+        "ssh",
+        "systemctl"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Gmail OAuth trigger for rent receipts",
+      "keywords": [
+        "gmail",
+        "oauth",
+        "rent"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "InboxCast personalized inbox summary",
+      "keywords": [
+        "inboxcast",
+        "summary",
+        "inbox"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Azure VM xfce4 session setup",
+      "keywords": [
+        "azure",
+        "xfce4",
+        "session"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "WSL update in PowerShell",
+      "keywords": [
+        "wsl",
+        "powershell",
+        "update"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Portfolio of tools I have built",
+      "keywords": [
+        "portfolio",
+        "tools",
+        "platforms"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Resume for software developer data scientist student",
+      "keywords": [
+        "resume",
+        "software",
+        "developer"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "C floating point addition function",
+      "keywords": [
+        "floating",
+        "fp_number",
+        "add_floating_point"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Team Arena PlayerNFT Linear checklist",
+      "keywords": [
+        "playernft",
+        "linear",
+        "checklist"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Lulu webhook email order integration",
+      "keywords": [
+        "lulu",
+        "webhook",
+        "order"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Plato Republic summary life lessons",
+      "keywords": [
+        "plato",
+        "republic",
+        "lessons"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "AI deception risks ethical dilemma",
+      "keywords": [
+        "deception",
+        "ethical",
+        "dilemma"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Physical Intelligence robotics research",
+      "keywords": [
+        "physical intelligence",
+        "robots",
+        "robotics"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Amazon Leo in-flight antenna vs Starlink",
+      "keywords": [
+        "amazon",
+        "leo",
+        "antenna",
+        "starlink"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    },
+    {
+      "query": "Add Telegram integration feature",
+      "keywords": [
+        "telegram",
+        "integration"
+      ],
+      "first_rank": 0,
+      "rr": 0.0,
+      "n_hits": 0,
+      "top1_source": "",
+      "top1_path": ""
+    }
+  ]
+}
