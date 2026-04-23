@@ -676,11 +676,6 @@ Extend the existing retrieval eval with labelled ground-truth queries (`profile_
 
 ---
 
-<<<<<<< Updated upstream
-=======
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
 ## Retrieval + Fact-Extraction Spikes (April 2026) — results + tabled follow-ups
 
 Four pre-implementation spikes from the hand-rolled memory / small-LLM / hybrid-retrieval plan (`/home/chris/.claude/plans/ok-i-tried-another-serene-lagoon.md`) ran against the live corpus (10,580 → 275k knowledge chunks across chatgpt, obsidian, markdown, newsletter, git). Summaries below; results JSONs under `tests/`.
