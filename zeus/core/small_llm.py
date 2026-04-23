@@ -438,6 +438,7 @@ async def _call_openai_compat(
             )
             if resp.status_code != 429 or attempt == len(delays_ms):
                 break
+            await resp.aclose()
             delay = delays_ms[attempt] / 1000.0
             delay *= 0.8 + 0.4 * random.random()  # ±20% jitter
             await asyncio.sleep(delay)
