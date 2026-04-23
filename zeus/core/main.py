@@ -102,6 +102,16 @@ async def lifespan(app: FastAPI):
     app.state.orchestration_hooks = orch_hooks
     app.state.bus_metrics = bus_metrics
 
+    # Chat-path tool loop (Zeus 10). Tools register into a process-local
+    # registry; QueryEngine.query() consults it when ZEUS_TOOLS_ENABLED=1.
+    from zeus.core.tools import registry as tool_registry
+    from zeus.core.tools.current_time import register as _register_current_time
+    from zeus.core.tools.web_search import register_if_configured as _register_web_search
+
+    _register_current_time()
+    _register_web_search()
+    app.state.tools_registered = [spec.name for spec in tool_registry.list_specs()]
+
     # Observability — query log ring buffer
     init_query_log(app)
 

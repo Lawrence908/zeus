@@ -1,0 +1,19 @@
+name: tool_arguments
+description: Validates LLM-emitted tool arguments and tool-result payloads on the chat-path tool loop.
+rules:
+  - name: prompt_injection_in_args
+    pattern: '(?i)(ignore previous instructions|disregard your system prompt|act as .{0,40} without restrictions)'
+    action: reject
+    message: "Tool argument contained prompt-injection pattern."
+  - name: shell_metacharacters
+    pattern: '(?:\$\(|`[^`]{1,40}`|\|\s*(curl|wget|sh|bash|nc)\b|;\s*(rm|curl|wget)\b)'
+    action: reject
+    message: "Tool argument contained shell metacharacter pattern."
+  - name: secret_extraction_attempt
+    pattern: '(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*\S{8,}'
+    action: flag_for_review
+    message: ""
+  - name: filesystem_traversal
+    pattern: '(\.\./){2,}|/etc/(passwd|shadow)\b'
+    action: reject
+    message: "Tool argument contained filesystem traversal pattern."
