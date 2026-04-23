@@ -428,8 +428,33 @@ async def _call_openai_compat(
     # particular) in play under burst load instead of immediately falling
     # through to more expensive providers. Comma-separated ms delays; empty
     # disables retries entirely.
+    default_delays_ms = [2000, 5000, 15000]
     delays_ms_raw = os.getenv("ZEUS_SMALL_LLM_RETRY_DELAYS_MS", "2000,5000,15000")
-    delays_ms = [int(x.strip()) for x in delays_ms_raw.split(",") if x.strip()]
+    if delays_ms_raw.strip() == "":
+        delays_ms = []
+    else:
+        delays_ms = []
+        invalid_delay_tokens: list[str] = []
+        for x in delays_ms_raw.split(","):
+            token = x.strip()
+            if not token:
+                continue
+            try:
+                delays_ms.append(int(token))
+            except ValueError:
+                invalid_delay_tokens.append(token)
+        if invalid_delay_tokens:
+            logger.warning(
+                "Ignoring invalid ZEUS_SMALL_LLM_RETRY_DELAYS_MS token(s): %s",
+                ", ".join(invalid_delay_tokens),
+            )
+        if not delays_ms:
+            logger.warning(
+                "ZEUS_SMALL_LLM_RETRY_DELAYS_MS had no valid integer delays; "
+                "falling back to default retry delays: %s",
+                default_delays_ms,
+            )
+            delays_ms = default_delays_ms
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         for attempt in range(len(delays_ms) + 1):
