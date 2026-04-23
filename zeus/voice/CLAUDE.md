@@ -44,7 +44,7 @@ Host-native voice pipeline: wake word to STT to chat LLM to TTS to speaker. Root
 
 ```bash
 # Host-native, outside Docker
-cd /home/chris/zeus
+cd /path/to/zeus
 source .venv-orpheus/bin/activate   # or appropriate venv
 python -m zeus.voice.pipeline
 ```

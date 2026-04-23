@@ -87,7 +87,7 @@ Tool failures return structured MCP errors with `code`, `message`, and `details.
     "zeus": {
       "command": "python",
       "args": ["-m", "zeus.mcp.server"],
-      "cwd": "/home/chris/zeus",
+      "cwd": "/path/to/zeus",
       "env": {
         "ZEUS_CORE_URL": "http://127.0.0.1:8203",
         "ZEUS_MCP_ALLOW_WRITE": "false"

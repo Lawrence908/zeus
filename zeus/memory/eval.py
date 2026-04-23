@@ -94,7 +94,7 @@ def run_eval(*, cases: list[EvalCase], top_k: int) -> dict[str, Any]:
     mrr_sum = 0.0
 
     for c in cases:
-        results = search_memories(query=c.query, user_id="chris", top_k=top_k)
+        results = search_memories(query=c.query, user_id="user", top_k=top_k)
         rank = _first_rank(results, c.expected_sources)
         r5 = _recall_at_k(results, c.expected_sources, 5)
         r10 = _recall_at_k(results, c.expected_sources, 10)

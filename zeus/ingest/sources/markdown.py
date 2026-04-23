@@ -87,7 +87,7 @@ class MarkdownSource:
         base_dir: str | Path = ".",
         chunk_size: int = 512,
         chunk_overlap: int = 64,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.globs = globs
         self.base_dir = Path(base_dir)

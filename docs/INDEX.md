@@ -31,7 +31,9 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [ZEUS_LINEAR_TICKET_PLAN.md](ZEUS_LINEAR_TICKET_PLAN.md) | ticket | Authoritative Linear ticket + project plan. Do not regenerate. |
 | [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) | bootstrap | Prompt for AI collaborators (Cursor, Claude Code) working on the Zeus codebase. |
 | [memory-architecture-plan.md](memory-architecture-plan.md) | product | Three-layer memory plan (Mnemosyne / Library / Reference), migration runbook. Phase 1 shipped. |
-| [nemoclaw-ops.md](nemoclaw-ops.md) | ops | NemoClaw + OpenShell runbook on daedalus: SSH tunnels, inference routing, policies, backups. |
+| [kronos-backend-plan.md](kronos-backend-plan.md) | product | Kronos scheduler subsystem plan: job registry, asyncio loop, three dispatch modes, REST + MCP, Aegis-gated execution. |
+| [kronos-frontend-plan.md](kronos-frontend-plan.md) | product | `/jobs` dashboard plan for the React SPA: jobs table, detail drawer, cron builder, live execution feed. |
+| [nemoclaw-ops.md](nemoclaw-ops.md) | ops | NemoClaw + OpenShell templated runbook: SSH tunnels, inference routing, policies, backups. Fill in your own host names and paths. |
 | [claude-code-architecture-notes.md](claude-code-architecture-notes.md) | product | External analysis of Claude Code architecture patterns that informed Zeus's design. |
 
 ## zeus/docs/ (product and subsystem design)
@@ -67,5 +69,5 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 
 - **TODO: resolve.** CLAUDE.md previously named `olympian_file_read`, `olympian_search`, `olympian_memory_search`, `olympian_shell` as first-class tools. The shipped MCP tools are `zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_memory_search`, `zeus_ingest_trigger`; `zeus/mcp/olympian_tools.py` does not exist. The current CLAUDE.md text has been updated to match shipped state; Linear ticket LAB-328 tracks the olympian tool pack if it is ever built.
 - **TODO: resolve.** `zeus/core/static/chat.html` + `zeus/core/static/admin.html` + `viz/` are still served alongside the React SPA in `zeus/core/static/app/`. The spec docs call the React SPA primary; no ticket yet for removing the static pages.
-- **TODO: resolve.** Olympus is referenced as the production target throughout the docs, but the actual always-on host is daedalus as of April 2026. The deployment runbook covers both; pick a host name convention if Olympus stays vacant much longer.
+- **TODO: resolve.** "Olympus" is referenced as the production target throughout the docs; in practice the always-on host is whichever box the deployer currently runs (the example deployment uses a workstation host called "daedalus"). The deployment runbook covers either topology — pick a host-name convention once a permanent production box is in place.
 - **TODO: resolve.** `zeus/docs/model-comparison.md:94` retains one historical `mem0` reference (explaining a past Telegram retrieval bug). Kept intentionally; flag if the narrative becomes confusing to new readers.

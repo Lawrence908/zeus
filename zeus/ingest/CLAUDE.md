@@ -65,7 +65,7 @@ from zeus.ingest.types import Chunk, chunk_text
 class <Name>Source:
     target = "knowledge"   # or "memory"
 
-    def __init__(self, ..., chunk_size=512, chunk_overlap=64, user_id="chris"):
+    def __init__(self, ..., chunk_size=512, chunk_overlap=64, user_id="user"):
         ...
 
     async def chunks(self) -> AsyncIterator[Chunk]:

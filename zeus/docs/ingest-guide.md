@@ -24,7 +24,7 @@ The single highest-signal document you will ever ingest. Hand-written markdown c
 Create at `zeus/data/raw/context_pack.md`. Template sections:
 
 ```markdown
-# Chris — Personal Context Pack
+# <Your Name> — Personal Context Pack
 # Last updated: YYYY-MM-DD
 
 ## Identity
@@ -48,7 +48,7 @@ Re-run whenever you edit the file. Idempotent.
 
 ### 2. Obsidian vault
 
-Offline RAG over daily notes, class notes, project journals. Bulk source to `zeus_knowledge`. See [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md) for the LiveSync pipeline that keeps a headless mirror at `/home/chris/data/headless-obsidian-vault` in sync with CouchDB.
+Offline RAG over daily notes, class notes, project journals. Bulk source to `zeus_knowledge`. See [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md) for the LiveSync pipeline that keeps a headless mirror at `your configured vault path` in sync with CouchDB.
 
 ```bash
 python -m zeus.ingest.run --source obsidian --dry-run
@@ -152,7 +152,7 @@ from zeus.ingest.types import Chunk, chunk_text
 class <Name>Source:
     target = "knowledge"   # or "memory"
 
-    def __init__(self, ..., chunk_size=512, chunk_overlap=64, user_id="chris"):
+    def __init__(self, ..., chunk_size=512, chunk_overlap=64, user_id="user"):
         ...
 
     async def chunks(self) -> AsyncIterator[Chunk]:

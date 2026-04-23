@@ -66,7 +66,7 @@ docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
 
 ```bash
 sudo mkdir -p /opt/zeus && sudo chown $USER /opt/zeus
-git clone https://github.com/<chris>/zeus.git /opt/zeus
+git clone https://github.com/<github-user>/zeus.git /opt/zeus
 cd /opt/zeus
 cp .env.example .env
 nano .env

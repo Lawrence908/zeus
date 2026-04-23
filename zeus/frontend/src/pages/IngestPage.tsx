@@ -37,7 +37,7 @@ type MetricsScheduler = {
 
 export function IngestPage() {
   const [source, setSource] = useState<string>('all')
-  const [userId, setUserId] = useState('chris')
+  const [userId, setUserId] = useState('user')
   const [busy, setBusy] = useState(false)
   const [lastResult, setLastResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

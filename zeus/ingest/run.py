@@ -1,6 +1,6 @@
 # zeus/ingest/run.py — Iris ingest CLI
 #
-# Local raw context (paths relative to Zeus repo root, e.g. /home/chris/zeus):
+# Local raw context (paths relative to Zeus repo root):
 #   zeus/data/raw/chat-history/       — ChatGPT exports (conversations-*.json)
 #   zeus/data/raw/context-pack-core/ — curated markdown pack (directory of .md files)
 #   zeus/data/raw/jobkit-archive/    — JobKit archive (.md ingested; .yml not handled by markdown source)
@@ -427,7 +427,7 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
 def build_sources_for_trigger(
     source: str,
     *,
-    user_id: str = "chris",
+    user_id: str = "user",
     chunk_size: int = 512,
     chunk_overlap: int = 64,
 ) -> list:
@@ -777,8 +777,8 @@ Examples:
     )
     p.add_argument(
         "--user-id",
-        default="chris",
-        help="mem0 user ID to store memories under (default: chris)",
+        default="user",
+        help="Memory partition key (default: user; ZEUS_USER_ID env overrides)",
     )
     p.add_argument(
         "--email-limit",

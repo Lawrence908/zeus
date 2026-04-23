@@ -33,18 +33,19 @@ This tree is **gitignored**. Do not commit exports, vault copies, or secrets her
 ```bash
 RAW="zeus/data/raw"
 mkdir -p "$RAW/notes"
-ln -sfn /home/chris/services/context-pack/core       "$RAW/notes/context-pack-core"
-ln -sfn /home/chris/services/context-pack/writing    "$RAW/notes/context-pack-writing"
-ln -sfn /home/chris/apps/jobkit/archive/data         "$RAW/notes/jobkit-archive"
-ln -sfn /home/chris/data/headless-obsidian-vault     "$RAW/notes/obsidian-vault"
+# Substitute the absolute paths on your host. Example layout:
+ln -sfn /path/to/your/context-pack/core       "$RAW/notes/context-pack-core"
+ln -sfn /path/to/your/context-pack/writing    "$RAW/notes/context-pack-writing"
+ln -sfn /path/to/your/jobkit/archive/data     "$RAW/notes/jobkit-archive"
+ln -sfn /path/to/your/obsidian-vault          "$RAW/notes/obsidian-vault"
 ```
 
-| Link | Target |
+| Link | Target (substitute your host paths) |
 |------|--------|
-| `notes/context-pack-core` | `/home/chris/services/context-pack/core` |
-| `notes/context-pack-writing` | `/home/chris/services/context-pack/writing` |
-| `notes/jobkit-archive` | `/home/chris/apps/jobkit/archive/data` (JobKit **archive** only, not `apps/jobkit/data/demo/`) |
-| `notes/obsidian-vault` | `/home/chris/data/headless-obsidian-vault` (LiveSync CLI mirror target on daedalus; see [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md)) |
+| `notes/context-pack-core` | `/path/to/your/context-pack/core` |
+| `notes/context-pack-writing` | `/path/to/your/context-pack/writing` |
+| `notes/jobkit-archive` | `/path/to/your/jobkit/archive/data` (JobKit **archive** only, not `apps/jobkit/data/demo/`) |
+| `notes/obsidian-vault` | `/path/to/your/obsidian-vault` (LiveSync CLI mirror target on the production host; see [obsidian-livesync-ingest.md](obsidian-livesync-ingest.md)) |
 
 The JobKit link covers `resume_base.yml`, `profile.yml`, `projects/*.md`, and the rest of that archive tree in one place.
 

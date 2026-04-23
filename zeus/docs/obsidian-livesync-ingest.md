@@ -12,9 +12,9 @@ Upstream: [vrtmrz/obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync
 
 ## 1. Local vault directory
 
-Pick a **fixed path** for the vault root on this machine. On daedalus the headless mirror is:
+Pick a **fixed path** for the vault root on this machine. On the production host the headless mirror is:
 
-- `/home/chris/data/headless-obsidian-vault`
+- `/path/to/your/obsidian-vault`
 
 That folder should look like an Obsidian vault (markdown notes, optional `.obsidian/` config, and `.livesync/settings.json` for the CLI). You may never open Obsidian there; it still works as the mirror target.
 
@@ -83,10 +83,10 @@ Use the wrapper **`scripts/replicate-obsidian-and-ingest.sh`** (sync + mirror + 
 
 1. **Capture the real reason:** Notices often go to stderr and are easy to miss. Run:
    ```bash
-   LIVESYNC_DEBUG=1 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh 2>&1 | tee /tmp/livesync-sync.log
+   LIVESYNC_DEBUG=1 /path/to/obsidian-livesync/sync-headless-vault.sh 2>&1 | tee /tmp/livesync-sync.log
    ```
    Then search the log for `Notice`, `Failed`, `denied`, `corrupted`, `PBKDF2`, `VersionUpFlash`, `Pending`, `Locked`.
-2. **Use loopback CouchDB on daedalus:** In `.livesync/settings.json`, set `couchDB_URI` to `http://127.0.0.1:5984` (same DB as Docker on this host). Re-copy from Obsidian or edit the plaintext fields if you are not relying only on `encryptedCouchDBConnection`. Hairpin via Tailscale to yourself can be flaky.
+2. **Use loopback CouchDB on the production host:** In `.livesync/settings.json`, set `couchDB_URI` to `http://127.0.0.1:5984` (same DB as Docker on this host). Re-copy from Obsidian or edit the plaintext fields if you are not relying only on `encryptedCouchDBConnection`. Hairpin via Tailscale to yourself can be flaky.
 3. **Clear plugin “changelog / version” gate:** If Obsidian had `versionUpFlash` set, copy a fresh `data.json` from the PC or clear that field after plugin updates (see LiveSync docs).
 4. **Remote lock / fetch:** If the desktop app says the remote is locked or asks to **Fetch** again, resolve that in Obsidian first; then retry CLI sync.
 
@@ -102,48 +102,48 @@ If the log shows:
 
 ```bash
 # Prefer for a brand-new headless copy: reset local sync state and fetch from remote (button order: Fetch, Unlock, Dismiss)
-LIVESYNC_HEADLESS_DIALOG_INDEX=0 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
+LIVESYNC_HEADLESS_DIALOG_INDEX=0 /path/to/obsidian-livesync/sync-headless-vault.sh
 ```
 
 Or add this device without wiping local state (only if you understand the plugin warning; usually use Fetch for an empty headless vault):
 
 ```bash
-LIVESYNC_HEADLESS_DIALOG_INDEX=1 /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
+LIVESYNC_HEADLESS_DIALOG_INDEX=1 /path/to/obsidian-livesync/sync-headless-vault.sh
 ```
 
 Substring match (works across locales if the label contains the word):
 
 ```bash
-LIVESYNC_HEADLESS_DIALOG_CHOICE=reset /home/chris/apps/obsidian-livesync/sync-headless-vault.sh   # Fetch / reset sync
-LIVESYNC_HEADLESS_DIALOG_CHOICE=unlock /home/chris/apps/obsidian-livesync/sync-headless-vault.sh
+LIVESYNC_HEADLESS_DIALOG_CHOICE=reset /path/to/obsidian-livesync/sync-headless-vault.sh   # Fetch / reset sync
+LIVESYNC_HEADLESS_DIALOG_CHOICE=unlock /path/to/obsidian-livesync/sync-headless-vault.sh
 ```
 
 **After a successful Unlock** you should see: `The remote database has been unlocked. Please retry the operation.` The process still exits with `[Error] Command 'sync' failed`; that only means “no replication ran *this* invocation.” **Run `sync` again immediately** (no `LIVESYNC_HEADLESS_*` needed unless the dialog appears again):
 
 ```bash
-/home/chris/apps/obsidian-livesync/sync-headless-vault.sh
+/path/to/obsidian-livesync/sync-headless-vault.sh
 ```
 
 Then let **`mirror`** run (same script does both).
 
 **Fetch (dialog index 0) in headless mode:** Choosing “Reset Synchronisation…” schedules a fetch that normally opens another **Svelte wizard** in the app. In the CLI that path is **not** fully headless; you may get `flag_fetch.md` and a failed `sync` exit. For a dedicated headless replica, **Unlock (index 1)** once, then **retry `sync`**, is usually the right sequence. If you tried Fetch and have a stale flag file, remove it:
 
-`rm -f /home/chris/data/headless-obsidian-vault/flag_fetch.md /home/chris/data/headless-obsidian-vault/redflag3.md`
+`rm -f /path/to/your/obsidian-vault/flag_fetch.md /path/to/your/obsidian-vault/redflag3.md`
 
 **Alternative:** Resolve the lock entirely in **Obsidian** on a trusted device (same vault / CouchDB), then retry headless `sync`.
 
 ## Cron: how to install the job
 
-1. On daedalus: `crontab -e`
+1. On the production host: `crontab -e`
 2. Add one line (adjust minute/path/log dir):
 
    ```cron
-   12 * * * * /home/chris/zeus/scripts/replicate-obsidian-and-ingest.sh >> /home/chris/logs/zeus-obsidian-ingest.log 2>&1
+   12 * * * * /path/to/zeus/scripts/replicate-obsidian-and-ingest.sh >> /path/to/logs/zeus-obsidian-ingest.log 2>&1
    ```
 
-3. Ensure the log directory exists: `mkdir -p /home/chris/logs`
+3. Ensure the log directory exists: `mkdir -p /path/to/logs`
 
-Cron uses **your user’s** environment; the script activates `/home/chris/zeus/.venv` and loads `/home/chris/zeus/.env` itself, so you do not need to duplicate that in the crontab.
+Cron uses **your user’s** environment; the script activates `/path/to/zeus/.venv` and loads `/path/to/zeus/.env` itself, so you do not need to duplicate that in the crontab.
 
 ## Large attachments and non-markdown files
 

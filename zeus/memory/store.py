@@ -294,7 +294,7 @@ class MemoryStore:
         *,
         source: str,
         source_id: str,
-        user_id: str = "chris",
+        user_id: str = "user",
         extract_facts: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> AddResult:
@@ -437,7 +437,7 @@ class MemoryStore:
         self,
         query: str,
         *,
-        user_id: str = "chris",
+        user_id: str = "user",
         top_k: int = 8,
         category: str | list[str] | None = None,
         valid_as_of: date | None = None,

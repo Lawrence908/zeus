@@ -12,7 +12,7 @@ from zeus.memory.search import MEMORY_SEARCH_TOP_K, format_context_block, get_pr
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "zeus_memories")
 ZEUS_KNOWLEDGE_COLLECTION = os.getenv("ZEUS_KNOWLEDGE_COLLECTION", "zeus_knowledge")
-ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "chris")
+ZEUS_USER_ID = os.getenv("ZEUS_USER_ID", "user")
 
 ORACLE_VERSION = "0.1.0"
 ZEUS_ENV = os.getenv("ZEUS_ENV", "dev")
@@ -121,7 +121,7 @@ class IngestTriggerBody(BaseModel):
         "all",
         description="One of: all, markdown, chatgpt, obsidian, context_pack, email, git, gcal, bookmarks",
     )
-    user_id: str = Field("chris", description="mem0 user id")
+    user_id: str = Field(ZEUS_USER_ID, description="Memory partition key (ZEUS_USER_ID)")
 
 
 class IngestTriggerResponse(BaseModel):
@@ -149,7 +149,7 @@ async def query_context(body: ContextQuery, request: Request):
         results = await asyncio.to_thread(
             search_memories,
             body.query,
-            "chris",
+            ZEUS_USER_ID,
             body.top_k,
             body.namespaces,
         )
@@ -205,7 +205,7 @@ async def memory_search_raw(body: MemorySearchBody, request: Request):
         rows = await asyncio.to_thread(
             search_memories,
             body.query,
-            "chris",
+            ZEUS_USER_ID,
             k,
             body.namespaces,
         )
@@ -453,17 +453,17 @@ async def memory_add(body: MemoryAddBody) -> MemoryAddResponse:
 @router.get("/context/profile", response_model=ProfileResponse)
 async def get_profile(request: Request):
     """Return stable facts about the user — baseline system prompt context."""
-    facts = await asyncio.to_thread(get_profile_facts, "chris", 8)
+    facts = await asyncio.to_thread(get_profile_facts, ZEUS_USER_ID, 8)
     if not facts:
         return ProfileResponse(
-            user_id="chris",
+            user_id=ZEUS_USER_ID,
             summary="Profile not yet populated. Run iris ingest first.",
             facts=[],
         )
 
     summary = " ".join(facts[:3])
     return ProfileResponse(
-        user_id="chris",
+        user_id=ZEUS_USER_ID,
         summary=summary,
         facts=facts,
     )

@@ -114,7 +114,7 @@ class GoogleCalendarSource:
         token_path: str | None = None,
         days_back: int = 90,
         days_forward: int = 30,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.credentials_path = credentials_path or os.getenv("GCAL_CREDENTIALS_PATH", _DEFAULT_CREDENTIALS)
         self.token_path = token_path or os.getenv("GCAL_TOKEN_PATH", _DEFAULT_TOKEN)

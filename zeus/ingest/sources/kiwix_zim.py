@@ -28,6 +28,18 @@ from zeus.ingest.types import Chunk
 logger = logging.getLogger("iris.kiwix_zim")
 
 
+def _viewer_url(book_stem: str, path: str) -> str:
+    """Build a deep-link URL to the article in the live kiwix-serve viewer.
+
+    Uses ZEUS_KIWIX_URL if set so the ingested URL matches the host the
+    Reference layer talks to; falls back to a relative path otherwise.
+    """
+    base = os.getenv("ZEUS_KIWIX_URL", "").rstrip("/")
+    if not base:
+        return f"/viewer#{book_stem}/{path}"
+    return f"{base}/viewer#{book_stem}/{path}"
+
+
 def _html_to_text(html: str) -> str:
     """Strip tags to plain text. Returns empty string on parse failure."""
     if not html:
@@ -59,7 +71,7 @@ class KiwixZimSource:
         max_zim_mb: int | None = None,
         chunk_size: int = 512,
         chunk_overlap: int = 64,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.zim_dir = Path(zim_dir or os.getenv("ZEUS_KIWIX_ZIM_DIR", ""))
         self.books: set[str] | None = set(books) if books else None
@@ -149,7 +161,7 @@ class KiwixZimSource:
                             "title": title,
                             "type": "kiwix_zim",
                             "book": book_stem,
-                            "url": f"https://kiwix-nomad.chrislawrence.ca/viewer#{book_stem}/{path}",
+                            "url": _viewer_url(book_stem, path),
                         },
                         user_id=self.user_id,
                     )

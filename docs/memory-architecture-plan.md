@@ -1,7 +1,6 @@
 # Zeus Memory Architecture Rework: Planning & TODO
 
 Status: **Phase 1 shipped, MemoryStore live, migration task K landed on `frontend-improvements`**
-Owner: Chris
 Last updated: 2026-04-18
 
 > **Context (2026-04-18):** mem0 was removed in April 2026 and replaced by the hand-rolled [`zeus/memory/store.py`](../zeus/memory/store.py) (`MemoryStore`). The memory layer now calls `small_llm_call` for fact extraction; the knowledge layer in [`zeus/memory/library.py`](../zeus/memory/library.py) uses dense + BM25 RRF hybrid with an optional BGE-reranker. The reference layer (Phase 2) shipped as [`zeus/memory/reference.py`](../zeus/memory/reference.py) with `KiwixClient` and `NomadClient`. This doc remains the authoritative narrative for **why** the split happened; for current code layout see [`CLAUDE.md`](../CLAUDE.md) and [`zeus/docs/architecture.md`](../zeus/docs/architecture.md). mem0 references below are historical.
@@ -10,7 +9,7 @@ This doc is the working plan for splitting Zeus's single `zeus_memories` collect
 
 ## Why we're doing this
 
-The current `zeus_memories` collection (396 points in Qdrant) was populated by running `zeus.ingest.run` over bulk sources (Obsidian vault, class notes, jobkit archive, chatgpt exports, newsletters) through mem0's `Memory.add()`. mem0 runs an LLM fact-extraction pass on every chunk and produces atomic claims. That is the right shape for conversational memory ("Chris prefers plain text in Telegram") and the wrong shape for bulk documents, we ended up with thousands of disconnected trivia statements like `byte = 8 bits`, `A graph with no cycles is acyclic or a forest`, plus a chunk of garbled Chinese characters that are almost certainly OCR errors from screenshot-based notes (Chris only writes in English).
+The current `zeus_memories` collection (396 points in Qdrant) was populated by running `zeus.ingest.run` over bulk sources (Obsidian vault, class notes, jobkit archive, chatgpt exports, newsletters) through mem0's `Memory.add()`. mem0 runs an LLM fact-extraction pass on every chunk and produces atomic claims. That is the right shape for conversational memory ("the user prefers plain text in Telegram") and the wrong shape for bulk documents, we ended up with thousands of disconnected trivia statements like `byte = 8 bits`, `A graph with no cycles is acyclic or a forest`, plus a chunk of garbled Chinese characters that are almost certainly OCR errors from screenshot-based notes (the user only writes in English).
 
 Result: `QueryEngine` retrieves five "memories" per turn and none of them are useful profile context, so the chat model keeps answering "I don't have that in memory."
 
@@ -26,7 +25,7 @@ We also want to be able to ingest much larger bulk corpora later (Wikipedia ZIM,
 
 The Memory layer stays small and high-signal. The Knowledge layer is a dumb but fast RAG store, no extraction, no dedup pass, just chunk → embed → upsert. The Reference layer hits authoritative external sources at retrieval time so we never re-index them.
 
-`QueryEngine.query()` retrieves from all layers in parallel and renders them as **separately labelled blocks** in the system prompt: `Profile`, `Memories`, `Knowledge`, `Reference`. The model is told which block is which so it stops confusing a class-note fragment for a fact about Chris.
+`QueryEngine.query()` retrieves from all layers in parallel and renders them as **separately labelled blocks** in the system prompt: `Profile`, `Memories`, `Knowledge`, `Reference`. The model is told which block is which so it stops confusing a class-note fragment for a profile fact about the user.
 
 ### Token budget
 
@@ -64,7 +63,7 @@ New file: `zeus/ingest/config.yaml`. Declarative per-source routing and per-fold
 ```yaml
 # zeus/ingest/config.yaml
 defaults:
-  user_id: chris
+  user_id: user
   chunk_size: 512
   chunk_overlap: 64
 

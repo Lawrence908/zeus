@@ -60,7 +60,7 @@ class ObsidianSource:
         exclude_dirs: list[str] | None = None,
         chunk_size: int = 512,
         chunk_overlap: int = 64,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.vault_path = Path(vault_path or os.getenv("OBSIDIAN_VAULT_PATH", ""))
         self.exclude_dirs = set(exclude_dirs or _DEFAULT_EXCLUDE)

@@ -113,7 +113,7 @@ class EmailSource:
         config: EmailConfig,
         chunk_size: int = 512,
         chunk_overlap: int = 64,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.config = config
         self.chunk_size = chunk_size

@@ -95,7 +95,7 @@ class BookmarksSource:
         self,
         export_path: str | Path | None = None,
         fetch_content: bool = False,
-        user_id: str = "chris",
+        user_id: str = "user",
     ) -> None:
         self.export_path = Path(export_path or os.getenv("BOOKMARKS_EXPORT_PATH", _DEFAULT_EXPORT))
         self.fetch_content = fetch_content  # reserved for future use

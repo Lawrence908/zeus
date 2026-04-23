@@ -99,7 +99,7 @@ class SourceConfig(BaseModel):
 class Defaults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    user_id: str = "chris"
+    user_id: str = "user"
     chunk_size: int = 512
     chunk_overlap: int = 64
 
