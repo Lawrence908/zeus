@@ -49,6 +49,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [ingest-guide.md](../zeus/docs/ingest-guide.md) | product | Priority order for feeding Iris; memory vs knowledge routing; retrieval eval. |
 | [ingest-paths.md](../zeus/docs/ingest-paths.md) | ops | `zeus/data/raw/` layout, symlink table, cron patterns. |
 | [mcp-server-spec.md](../zeus/docs/mcp-server-spec.md) | product | MCP tool catalog (`zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_memory_search`, `zeus_ingest_trigger`). |
+| [meshtastic-bridge.md](../zeus/docs/meshtastic-bridge.md) | product | LoRa mesh into `/chat/message` via MQTT uplink + Node-RED + TCP sender sidecar. Topics, session id, allowlist, Aegis wiring. |
 | [model-comparison.md](../zeus/docs/model-comparison.md) | product | Measured tok/s, TTFT, VRAM fit per Ollama model on the 3080. |
 | [obsidian-livesync-ingest.md](../zeus/docs/obsidian-livesync-ingest.md) | ops | CouchDB to local vault to ingest: LiveSync CLI setup, headless troubleshooting. |
 | [orpheus-spec.md](../zeus/docs/orpheus-spec.md) | product | Voice pipeline: wake, STT, TTS, streaming LLM, Phaos emitter. |

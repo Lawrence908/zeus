@@ -5,8 +5,10 @@
 # swallowed (empty list, WARN log) so reference outages cannot break a chat turn.
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any
@@ -63,27 +65,100 @@ class KiwixClient:
             # Cloudflare Access service-token auth.
             self._headers["CF-Access-Client-Id"] = cf_client_id
             self._headers["CF-Access-Client-Secret"] = cf_client_secret
+        # Book UUIDs to search across, cached after first discovery. Refreshed
+        # periodically so newly-loaded ZIMs get picked up without a restart.
+        self._book_ids: list[str] | None = None
+        self._books_fetched_at: float = 0.0
+        self._books_lock = asyncio.Lock()
+
+    async def _discover_book_ids(self, client: httpx.AsyncClient) -> list[str]:
+        # kiwix-serve's /search endpoint ignores `books.filter.lang`; passing a
+        # naked cross-book search on a multilingual catalog returns 400 with
+        # "Two or more books in different languages". So we fetch the OPDS
+        # catalog, filter by language client-side, and pass repeated
+        # `books.id=UUID` params to scope the search.
+        ttl = 900.0  # 15 minutes
+        if (
+            self._book_ids is not None
+            and (time.monotonic() - self._books_fetched_at) < ttl
+        ):
+            return self._book_ids
+        async with self._books_lock:
+            if (
+                self._book_ids is not None
+                and (time.monotonic() - self._books_fetched_at) < ttl
+            ):
+                return self._book_ids
+            lang = os.getenv("ZEUS_KIWIX_LANG", "eng").strip()
+            book_name_filter = os.getenv("ZEUS_KIWIX_BOOK", "").strip()
+            try:
+                resp = await client.get(
+                    f"{self._base_url}/catalog/v2/entries",
+                    params={"count": "-1"},
+                )
+                resp.raise_for_status()
+                root = ET.fromstring(resp.text)
+            except Exception as exc:
+                if self._book_ids is not None:
+                    logger.warning(
+                        "kiwix catalog fetch failed, using cached book ids: %s", exc
+                    )
+                    return self._book_ids
+                logger.warning("kiwix catalog fetch failed: %s", exc)
+                return []
+
+            ids: list[str] = []
+            for entry in root.findall("a:entry", _ATOM_NS):
+                entry_id = (
+                    entry.findtext("a:id", default="", namespaces=_ATOM_NS) or ""
+                ).strip()
+                uid = (
+                    entry_id[len("urn:uuid:") :]
+                    if entry_id.startswith("urn:uuid:")
+                    else entry_id
+                )
+                if not uid:
+                    continue
+                entry_lang = (
+                    entry.findtext("a:language", default="", namespaces=_ATOM_NS) or ""
+                ).strip()
+                entry_name = (
+                    entry.findtext("a:name", default="", namespaces=_ATOM_NS) or ""
+                ).strip()
+                entry_tags = (
+                    entry.findtext("a:tags", default="", namespaces=_ATOM_NS) or ""
+                )
+                if book_name_filter and book_name_filter != entry_name:
+                    continue
+                if lang and entry_lang != lang:
+                    continue
+                # Books without a full-text index can still match the search
+                # endpoint, but scanning them is several seconds of server-side
+                # work per book. Skipping them keeps search under the timeout.
+                if "_ftindex:no" in entry_tags:
+                    continue
+                ids.append(uid)
+
+            self._book_ids = ids
+            self._books_fetched_at = time.monotonic()
+            if ids:
+                logger.info(
+                    "kiwix: %d searchable books (lang=%s, name=%s)",
+                    len(ids),
+                    lang or "any",
+                    book_name_filter or "any",
+                )
+            else:
+                logger.warning(
+                    "kiwix: no books matched filter (lang=%s, name=%s)",
+                    lang or "any",
+                    book_name_filter or "any",
+                )
+            return ids
 
     async def search(self, query: str, top_k: int = 5) -> list[ReferenceHit]:
         if not query.strip():
             return []
-        # Cross-book search: /search?pattern=<q>&pageLength=<k>&format=xml
-        # (format=xml returns OPDS Atom instead of the default HTML UI).
-        # Scope to a single book with books.name=<name> if needed later.
-        # Scope to a single language (default: English) so kiwix doesn't refuse
-        # cross-language searches. Override with ZEUS_KIWIX_LANG, or set it to
-        # empty to fall back to books.name scoping via ZEUS_KIWIX_BOOK.
-        lang = os.getenv("ZEUS_KIWIX_LANG", "eng").strip()
-        book = os.getenv("ZEUS_KIWIX_BOOK", "").strip()
-        params: dict[str, str] = {
-            "pattern": query,
-            "pageLength": str(max(1, min(20, top_k))),
-            "format": "xml",
-        }
-        if book:
-            params["books.name"] = book
-        elif lang:
-            params["books.filter.lang"] = lang
         url = f"{self._base_url}/search"
         try:
             async with httpx.AsyncClient(
@@ -91,6 +166,16 @@ class KiwixClient:
                 follow_redirects=True,
                 headers=self._headers or None,
             ) as client:
+                book_ids = await self._discover_book_ids(client)
+                if not book_ids:
+                    return []
+                # /search accepts repeated books.id= params to scope the query.
+                params: list[tuple[str, str]] = [
+                    ("pattern", query),
+                    ("pageLength", str(max(1, min(20, top_k)))),
+                    ("format", "xml"),
+                ]
+                params.extend(("books.id", uid) for uid in book_ids)
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()
                 body = resp.text

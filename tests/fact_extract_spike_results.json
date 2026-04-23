@@ -1,0 +1,1096 @@
+{
+  "summary": {
+    "gemini_paid": {
+      "n": 20,
+      "schema_ok_rate": 0.6,
+      "schema_invalid_rate": 0.4,
+      "mean_facts": 1.92,
+      "median_facts": 2.0,
+      "empty_extractions": 1,
+      "latency_p50_ms": 1629,
+      "latency_p95_ms": 2796,
+      "total_cost_usd": 0.0038,
+      "total_tokens_out": 2974,
+      "avg_confidence": 0.936,
+      "errors": [
+        "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+        "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+        "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+        "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+        "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+      ]
+    },
+    "anthropic_haiku": {
+      "n": 20,
+      "schema_ok_rate": 1.0,
+      "schema_invalid_rate": 0.0,
+      "mean_facts": 1.35,
+      "median_facts": 1.0,
+      "empty_extractions": 3,
+      "latency_p50_ms": 2155,
+      "latency_p95_ms": 7043,
+      "total_cost_usd": 0.0653,
+      "total_tokens_out": 4112,
+      "avg_confidence": 0.95,
+      "errors": []
+    },
+    "ollama": {
+      "n": 20,
+      "schema_ok_rate": 0.0,
+      "schema_invalid_rate": 1.0,
+      "mean_facts": 0.0,
+      "median_facts": 0.0,
+      "empty_extractions": 0,
+      "latency_p50_ms": null,
+      "latency_p95_ms": null,
+      "total_cost_usd": 0,
+      "total_tokens_out": 0,
+      "avg_confidence": null,
+      "errors": [
+        "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+        "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+        "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+        "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+        "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: "
+      ]
+    }
+  },
+  "rows": [
+    {
+      "message_id": "m01",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 1688,
+      "latency_ms": 1629,
+      "tokens_in": 2166,
+      "tokens_out": 181,
+      "cost_usd": 0.00028900000000000003,
+      "n_facts": 2,
+      "avg_confidence": 1.0,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris Lawrence's name is Chris Lawrence.",
+          "category": "identity",
+          "confidence": 1.0,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris Lawrence lives in Victoria, BC.",
+          "category": "identity",
+          "confidence": 1.0,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m02",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 2815,
+      "latency_ms": 2796,
+      "tokens_in": 2175,
+      "tokens_out": 433,
+      "cost_usd": 0.0003907,
+      "n_facts": 3,
+      "avg_confidence": 0.933,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris is a software developer.",
+          "category": "identity",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris is a data-science student.",
+          "category": "identity",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris is finishing his degree in spring 2026.",
+          "category": "event",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m03",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 1511,
+      "latency_ms": 1487,
+      "tokens_in": 2166,
+      "tokens_out": 260,
+      "cost_usd": 0.0003206,
+      "n_facts": 3,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris prefers plain text in Telegram replies.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris prefers no markdown in Telegram replies.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris prefers no emojis in Telegram replies.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m04",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 1184,
+      "latency_ms": 1166,
+      "tokens_in": 2167,
+      "tokens_out": 168,
+      "cost_usd": 0.0002839,
+      "n_facts": 1,
+      "avg_confidence": 0.9,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris does not want emdashes used in generated text for his projects.",
+          "category": "preference",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m05",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 2001,
+      "latency_ms": 1986,
+      "tokens_in": 2187,
+      "tokens_out": 502,
+      "cost_usd": 0.00041950000000000006,
+      "n_facts": 3,
+      "avg_confidence": 0.9,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Zeus runs on Olympus (RTX 3080, 10GB VRAM) in production.",
+          "category": "other",
+          "confidence": 0.9,
+          "contains_pii": false
+        },
+        {
+          "text": "Olympus has an RTX 3080 with 10GB VRAM.",
+          "category": "other",
+          "confidence": 0.9,
+          "contains_pii": false
+        },
+        {
+          "text": "Zeus runs on the 5080 tower in development.",
+          "category": "other",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m06",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 2287,
+      "latency_ms": 2267,
+      "tokens_in": 2176,
+      "tokens_out": 196,
+      "cost_usd": 0.00029600000000000004,
+      "n_facts": 2,
+      "avg_confidence": 0.925,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris uses Tailscale to reach his homelab.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris runs OPNsense on a mini-PC for the firewall.",
+          "category": "skill",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m07",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 2525,
+      "latency_ms": 2505,
+      "tokens_in": 2189,
+      "tokens_out": 176,
+      "cost_usd": 0.00028930000000000004,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 1,
+      "facts_preview": [
+        {
+          "text": "Chris has a meeting with Sarah Chen on 2026-05-03 at 14:00 PT.",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": true
+        }
+      ]
+    },
+    {
+      "message_id": "m08",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 1921,
+      "latency_ms": 1909,
+      "tokens_in": 2179,
+      "tokens_out": 476,
+      "cost_usd": 0.0004083,
+      "n_facts": 3,
+      "avg_confidence": 0.933,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris switched from mem0 to a hand-rolled MemoryStore in April 2026.",
+          "category": "decision",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris uses a hand-rolled MemoryStore.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "mem0 shipped breaking changes in April 2026.",
+          "category": "event",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m09",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 1089,
+      "latency_ms": 1069,
+      "tokens_in": 2169,
+      "tokens_out": 130,
+      "cost_usd": 0.00026890000000000003,
+      "n_facts": 1,
+      "avg_confidence": 0.9,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris must ship the Ruflo v3.5 agent runtime by the end of Q2.",
+          "category": "task",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m10",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 1116,
+      "latency_ms": 1101,
+      "tokens_in": 2172,
+      "tokens_out": 124,
+      "cost_usd": 0.0002668,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris believes privacy-preserving local AI will matter more by 2027.",
+          "category": "belief",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m11",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 1650,
+      "latency_ms": 1629,
+      "tokens_in": 2180,
+      "tokens_out": 323,
+      "cost_usd": 0.0003472,
+      "n_facts": 3,
+      "avg_confidence": 0.95,
+      "n_pii": 2,
+      "facts_preview": [
+        {
+          "text": "Chris's family physician is Dr. Michael Tang.",
+          "category": "relationship",
+          "confidence": 0.95,
+          "contains_pii": true
+        },
+        {
+          "text": "Dr. Michael Tang lives in Victoria.",
+          "category": "identity",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris has Dr. Michael Tang's phone number +1-250-555-0199.",
+          "category": "relationship",
+          "confidence": 0.95,
+          "contains_pii": true
+        }
+      ]
+    },
+    {
+      "message_id": "m12",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m13",
+      "provider": "gemini_paid",
+      "ok": true,
+      "provider_used": "gemini_paid",
+      "model_used": "gemini-2.5-flash-lite",
+      "wall_ms": 675,
+      "latency_ms": 654,
+      "tokens_in": 2178,
+      "tokens_out": 5,
+      "cost_usd": 0.00021979999999999998,
+      "n_facts": 0,
+      "avg_confidence": null,
+      "n_pii": 0,
+      "facts_preview": []
+    },
+    {
+      "message_id": "m14",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m15",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m16",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m17",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m18",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m19",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m20",
+      "provider": "gemini_paid",
+      "ok": false,
+      "error": "all providers failed: gemini_paid(gemini-2.5-flash-lite): HTTPStatusError: Client error '429 Too Many Requests' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m01",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 2524,
+      "latency_ms": 2508,
+      "tokens_in": 2227,
+      "tokens_out": 105,
+      "cost_usd": 0.002752,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris Lawrence lives in Victoria, BC.",
+          "category": "identity",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m02",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 2663,
+      "latency_ms": 2652,
+      "tokens_in": 2233,
+      "tokens_out": 432,
+      "cost_usd": 0.004393,
+      "n_facts": 3,
+      "avg_confidence": 0.94,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris is a software developer.",
+          "category": "identity",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris is a data-science student.",
+          "category": "identity",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris will finish his degree in spring 2026.",
+          "category": "event",
+          "confidence": 0.92,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m03",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1237,
+      "latency_ms": 1221,
+      "tokens_in": 2230,
+      "tokens_out": 120,
+      "cost_usd": 0.00283,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris prefers plain text in Telegram replies without markdown or emojis.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m04",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1518,
+      "latency_ms": 1489,
+      "tokens_in": 2228,
+      "tokens_out": 173,
+      "cost_usd": 0.003093,
+      "n_facts": 1,
+      "avg_confidence": 0.98,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris does not want emdashes used in generated text for any of his projects.",
+          "category": "preference",
+          "confidence": 0.98,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m05",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 2883,
+      "latency_ms": 2859,
+      "tokens_in": 2246,
+      "tokens_out": 491,
+      "cost_usd": 0.004701,
+      "n_facts": 3,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Zeus runs on Olympus (RTX 3080, 10GB VRAM) in production.",
+          "category": "other",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Zeus runs on the 5080 tower in development.",
+          "category": "other",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Olympus has an RTX 3080 GPU with 10GB VRAM.",
+          "category": "other",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m06",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 7064,
+      "latency_ms": 7043,
+      "tokens_in": 2242,
+      "tokens_out": 214,
+      "cost_usd": 0.003312,
+      "n_facts": 2,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris uses Tailscale to reach his homelab.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris runs OPNsense on a mini-PC for the firewall.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m07",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1549,
+      "latency_ms": 1531,
+      "tokens_in": 2249,
+      "tokens_out": 217,
+      "cost_usd": 0.003334,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 1,
+      "facts_preview": [
+        {
+          "text": "Chris has a meeting with Sarah Chen scheduled for 2026-05-03 at 14:00 PT.",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": true
+        }
+      ]
+    },
+    {
+      "message_id": "m08",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 2799,
+      "latency_ms": 2780,
+      "tokens_in": 2243,
+      "tokens_out": 485,
+      "cost_usd": 0.004668,
+      "n_facts": 3,
+      "avg_confidence": 0.933,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris switched from mem0 to a hand-rolled MemoryStore in April 2026.",
+          "category": "decision",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris uses a hand-rolled MemoryStore for memory management as of April 2026.",
+          "category": "skill",
+          "confidence": 0.92,
+          "contains_pii": false
+        },
+        {
+          "text": "mem0 shipped breaking changes that prompted Chris to switch systems.",
+          "category": "event",
+          "confidence": 0.93,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m09",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1511,
+      "latency_ms": 1494,
+      "tokens_in": 2232,
+      "tokens_out": 180,
+      "cost_usd": 0.0031320000000000002,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris is shipping the Ruflo v3.5 agent runtime by end of Q2.",
+          "category": "task",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m10",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 6989,
+      "latency_ms": 6967,
+      "tokens_in": 2232,
+      "tokens_out": 127,
+      "cost_usd": 0.0028669999999999998,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris believes privacy-preserving local AI will be increasingly important by 202",
+          "category": "belief",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m11",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1934,
+      "latency_ms": 1912,
+      "tokens_in": 2235,
+      "tokens_out": 163,
+      "cost_usd": 0.0030499999999999998,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 1,
+      "facts_preview": [
+        {
+          "text": "Dr. Michael Tang is Chris's family physician in Victoria.",
+          "category": "relationship",
+          "confidence": 0.95,
+          "contains_pii": true
+        }
+      ]
+    },
+    {
+      "message_id": "m12",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 776,
+      "latency_ms": 759,
+      "tokens_in": 2241,
+      "tokens_out": 13,
+      "cost_usd": 0.002306,
+      "n_facts": 0,
+      "avg_confidence": null,
+      "n_pii": 0,
+      "facts_preview": []
+    },
+    {
+      "message_id": "m13",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1377,
+      "latency_ms": 1361,
+      "tokens_in": 2246,
+      "tokens_out": 13,
+      "cost_usd": 0.002311,
+      "n_facts": 0,
+      "avg_confidence": null,
+      "n_pii": 0,
+      "facts_preview": []
+    },
+    {
+      "message_id": "m14",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 6055,
+      "latency_ms": 6039,
+      "tokens_in": 2235,
+      "tokens_out": 13,
+      "cost_usd": 0.0023,
+      "n_facts": 0,
+      "avg_confidence": null,
+      "n_pii": 0,
+      "facts_preview": []
+    },
+    {
+      "message_id": "m15",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1269,
+      "latency_ms": 1251,
+      "tokens_in": 2237,
+      "tokens_out": 138,
+      "cost_usd": 0.002927,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 1,
+      "facts_preview": [
+        {
+          "text": "Chris renewed his apartment lease at 123 Fort Street, Victoria, until 2027-03-31",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": true
+        }
+      ]
+    },
+    {
+      "message_id": "m16",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 2415,
+      "latency_ms": 2399,
+      "tokens_in": 2235,
+      "tokens_out": 323,
+      "cost_usd": 0.00385,
+      "n_facts": 2,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris and his partner Alex adopted a cat named Mochi on 2026-01-15.",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris has a partner named Alex.",
+          "category": "relationship",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m17",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 2526,
+      "latency_ms": 2507,
+      "tokens_in": 2238,
+      "tokens_out": 421,
+      "cost_usd": 0.004343,
+      "n_facts": 3,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris uses Obsidian for personal notes.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris uses VS Code for Python development.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris uses Claude Code as his AI coding assistant.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m18",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 6708,
+      "latency_ms": 6693,
+      "tokens_in": 2235,
+      "tokens_out": 128,
+      "cost_usd": 0.002875,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris paused the AstrID project until he finishes Zeus's Phase 2 retrieval work.",
+          "category": "decision",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m19",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1730,
+      "latency_ms": 1712,
+      "tokens_in": 2241,
+      "tokens_out": 202,
+      "cost_usd": 0.003251,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris decided to stop running n8n on daedalus due to a port 5678 conflict with z",
+          "category": "decision",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m20",
+      "provider": "anthropic_haiku",
+      "ok": true,
+      "provider_used": "anthropic_haiku",
+      "model_used": "claude-haiku-4-5-20251001",
+      "wall_ms": 1540,
+      "latency_ms": 1523,
+      "tokens_in": 2237,
+      "tokens_out": 154,
+      "cost_usd": 0.003007,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris has a birthday dinner with his mom at The Marina Restaurant on 2026-06-12 ",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m01",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m02",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m03",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m04",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m05",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m06",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m07",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m08",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m09",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m10",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m11",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m12",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m13",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m14",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m15",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m16",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m17",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m18",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m19",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    },
+    {
+      "message_id": "m20",
+      "provider": "ollama",
+      "ok": false,
+      "error": "all providers failed: ollama(qwen2.5:7b-instruct): ReadTimeout: ",
+      "wall_ms": null
+    }
+  ]
+}

@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import sqlite3
 import time
 from contextlib import closing
@@ -378,7 +379,10 @@ async def _call_ollama(
         "stream": False,
         "options": {"num_predict": max_tokens, "temperature": 0.1},
     }
-    timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+    # Structured-output prompts (schema + examples) can push qwen2.5:7b past
+    # 120s cold. Keep the default loose; bound on a bigger host via env.
+    read_s = float(os.getenv("ZEUS_OLLAMA_SMALL_READ_TIMEOUT_SEC", "300"))
+    timeout = httpx.Timeout(connect=10.0, read=read_s, write=10.0, pool=10.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(f"{url}/api/chat", json=body)
         resp.raise_for_status()
@@ -419,10 +423,50 @@ async def _call_openai_compat(
     if extra_headers:
         headers.update(extra_headers)
     timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+
+    # 429 backoff with jitter — keeps cheap tier-1 providers (Gemini paid in
+    # particular) in play under burst load instead of immediately falling
+    # through to more expensive providers. Comma-separated ms delays; empty
+    # disables retries entirely.
+    default_delays_ms = [2000, 5000, 15000]
+    delays_ms_raw = os.getenv("ZEUS_SMALL_LLM_RETRY_DELAYS_MS", "2000,5000,15000")
+    if delays_ms_raw.strip() == "":
+        delays_ms = []
+    else:
+        delays_ms = []
+        invalid_delay_tokens: list[str] = []
+        for x in delays_ms_raw.split(","):
+            token = x.strip()
+            if not token:
+                continue
+            try:
+                delays_ms.append(int(token))
+            except ValueError:
+                invalid_delay_tokens.append(token)
+        if invalid_delay_tokens:
+            logger.warning(
+                "Ignoring invalid ZEUS_SMALL_LLM_RETRY_DELAYS_MS token(s): %s",
+                ", ".join(invalid_delay_tokens),
+            )
+        if not delays_ms:
+            logger.warning(
+                "ZEUS_SMALL_LLM_RETRY_DELAYS_MS had no valid integer delays; "
+                "falling back to default retry delays: %s",
+                default_delays_ms,
+            )
+            delays_ms = default_delays_ms
+
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            f"{base_url.rstrip('/')}/chat/completions", json=body, headers=headers
-        )
+        for attempt in range(len(delays_ms) + 1):
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions", json=body, headers=headers
+            )
+            if resp.status_code != 429 or attempt == len(delays_ms):
+                break
+            await resp.aclose()
+            delay = delays_ms[attempt] / 1000.0
+            delay *= 0.8 + 0.4 * random.random()  # ±20% jitter
+            await asyncio.sleep(delay)
         resp.raise_for_status()
         data = resp.json()
     choices = data.get("choices") or []
