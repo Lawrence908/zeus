@@ -57,6 +57,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [project-nomad-integration.md](../zeus/docs/project-nomad-integration.md) | product | N.O.M.A.D. reference-layer integration plan (live proxy, optional metadata ingest). |
 | [roadmap.md](../zeus/docs/roadmap.md) | ticket | Current-state snapshot + near-term pointers to the ticket plan. |
 | [sessions-spec.md](../zeus/docs/sessions-spec.md) | product | Session model, packing, rolling summary, storage backends. |
+| [tool-use-spec.md](../zeus/docs/tool-use-spec.md) | product | Chat-path tool-call loop: registry, per-provider adapters, Aegis policy, feature flags. |
 
 ## zeus/docs/legacy/
 

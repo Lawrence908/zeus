@@ -368,6 +368,7 @@ zeus/
 | LAB-291 | Telegram Bot Backend             | Feature, iris      | 5    |
 | LAB-292 | Telegram Frontend Integration    | Feature, oracle    | 3    |
 | LAB-293 | React Settings Page              | Feature, oracle    | 3    |
+| LAB-396 | Tools UI in React SPA            | Feature, oracle    | 5    |
 
 ### LAB-286: React App Scaffold
 **Files:** `zeus/frontend/` (new) · **Priority:** High · **Blocks:** LAB-287, LAB-288, LAB-290, LAB-293
@@ -436,6 +437,23 @@ Files: `zeus/core/main.py`, `zeus/core/runtime_settings.py`, `zeus/frontend/src/
 
 **Still open:** wiring the Aegis policy dropdown to a `PATCH /admin/settings {aegis: {...}}` section, and moving the Sessions prefs off localStorage onto the runtime store.
 
+### LAB-396: Tools UI in React SPA
+**Files:** `zeus/frontend/src/pages/ToolsPage.tsx` (new), `src/components/tools/` (new), `zeus/core/admin.py`, `zeus/core/tools/recorder.py` (new) · **Priority:** Medium · **Status (Apr 2026):** Planned. Depends on chat-path tool-use (LAB-395) being merged.
+
+A `/tools` route in the React SPA giving the operator visibility and dev-aid for chat-path tools. Four surfaces: tool directory, recent invocations feed, cache controls, and a dev-aid form for direct invocation (gated, off by default).
+
+Backend prerequisites: `GET /admin/tools` (split out of `/admin/tool_cache/stats`), `GET /admin/tools/invocations` (ring buffer populated inside `run_tool_loop._execute_one`), `POST /admin/tools/{name}/invoke` (behind `ZEUS_ADMIN_INVOKE_ENABLED=0`).
+
+| Sub | Title | Notes |
+|-----|-------|-------|
+| LAB-403 | `GET /admin/tools` directory endpoint | Clean split from `/admin/tool_cache/stats`; returns name, description, parameters, cacheable, aegis_policy, timeout_seconds |
+| LAB-404 | Invocation ring buffer + `GET /admin/tools/invocations` | `zeus/core/tools/recorder.py`; deque maxlen 200; populated from `_execute_one`; includes cache hits + Aegis rejects |
+| LAB-405 | `POST /admin/tools/{name}/invoke` (gated) | `ZEUS_ADMIN_INVOKE_ENABLED=0` default off; reuses `_execute_one`; Aegis still gates args + results |
+| LAB-406 | `/tools` route, `ToolsPage` shell, `toolsStore` | Two-column layout; polling paused via Page Visibility API |
+| LAB-407 | Directory table + invocations feed + cache controls + invoke form | Five React components under `components/tools/`; demo loop: invoke → cache miss → invoke again → cache hit → clear → cache miss |
+
+**Cross-links:** LAB-395 (Zeus 10) — depends on the registry + cache surface landing first. LAB-310 (ToolCallFeed) — the invocations feed reuses the same pattern for chat-path calls.
+
 ---
 
 ## Project 10: Agentic Resilience
@@ -449,6 +467,7 @@ Files: `zeus/core/main.py`, `zeus/core/runtime_settings.py`, `zeus/frontend/src/
 | LAB-328 | Olympian Tool Pack Expansion | Feature, olympians, aegis | 4 |
 | LAB-329 | Session Persistence Backend | Feature, oracle, mnemosyne | 3 |
 | LAB-330 | KAIROS Background Agent Daemon | Feature, olympians | 4 |
+| LAB-395 | Chat-path tool-use loop | Feature, oracle, aegis | 6 |
 
 ### LAB-326: Aegis Pre-Hook (Tool Argument Validation)
 **Files:** `zeus/orchestration/hooks.py`, `zeus/safety/integration.py`, `zeus/safety/policy_engine.py` · **Priority:** High · **Blocks:** LAB-330 (KAIROS safety gates)
@@ -543,6 +562,40 @@ All four tools registered in `server.py` via `@mcp.tool()`. Shell tool env-gated
 | LAB-357 | KAIROS safety gates + `/orchestration/kairos/status` | Tool allowlist; status endpoint |
 
 **Cross-links:** LAB-327 (reflection loop for KAIROS decide step), LAB-144 (TaskRunner reuse)
+
+### LAB-395: Chat-path tool-use loop
+**Files:** `zeus/core/tools/` (new package), `zeus/core/query.py`, `zeus/core/chat.py`, `zeus/core/main.py`, `zeus/core/admin.py`, `zeus/safety/policies/tool_arguments.yaml`, `tests/test_tool_loop.py`, `tests/test_chat_async.py`, `tests/test_classify.py`, `zeus/docs/tool-use-spec.md` · **Priority:** High · **Status (Apr 2026):** Implemented end-to-end on the `tools` branch; awaiting commit + merge to main.
+
+Lets `QueryEngine.query()` itself call concrete tools (web_search, current_time) during a single `/chat/message` round-trip and fold results back into the reply. Behind `ZEUS_TOOLS_ENABLED=0` default off so chat is byte-identical to pre-tool-use until opted in. Sibling family to LAB-326 (Aegis pre-hook) and LAB-328 (olympian tool pack), but on the **chat path**, not the agent / KAIROS path.
+
+**Locked decisions:**
+1. Both Anthropic (dev) and Ollama (prod) supported from day one via per-provider adapters in `zeus/core/tools/adapters.py` (`input_schema` vs `parameters`; `tool_use_id` vs synthesized `f"{name}-{turn}-{i}"` for Ollama; `tool_result` blocks first in user message vs `role="tool"` follow-ups).
+2. Reflection loop is **skipped** when any tool fired — a tool-informed reply is treated as authoritative; reflection still runs for tool-free empty/refusal replies.
+3. Per-query tool-call cap `ZEUS_TOOLS_MAX_CALLS_PER_QUERY=5` doubles as iteration cap.
+4. Every tool argument dict + every tool result text passes through Aegis via the new `tool_arguments` policy; `evaluate_payload()` is reused as-is from LAB-343.
+5. Tool-result cache is opt-in per `ToolSpec.cacheable` (`web_search` yes, `current_time` no); TTL-LRU at `ZEUS_TOOL_CACHE_TTL_SECONDS` (default 300, `0` disables) and `ZEUS_TOOL_CACHE_MAX_ENTRIES` (default 256); errors never cached.
+6. Streaming + tools deferred: `query_stream()` is untouched in this round.
+
+**New endpoints:**
+- `POST /chat/async` — fire-and-forget, returns `{job_id, status, session_id, created_at}` immediately; optional `callback_url` POSTed with the final `ChatMessageResponse`; ring buffer maxlen 100. Built for Meshtastic LoRa bridge.
+- `GET /chat/async/{job_id}` — poll status (`queued|running|done|error`) + result or error + `callback_status`.
+- `POST /classify` — tier-1 small-LLM intent classifier returning `{intent, estimated_ms, tool_hint, reasoning}` with a safe `chat` fallback; bridges call this first to pick a specific ack.
+- `GET /admin/tool_cache/stats`, `POST /admin/tool_cache/clear` — ops handles for cache visibility.
+
+| Sub | Title | Notes |
+|-----|-------|-------|
+| LAB-397 | Tool registry + base types + provider adapters | `zeus/core/tools/base.py`, `registry.py`, `adapters.py` |
+| LAB-398 | `_run_llm_with_tools()` + `run_tool_loop()` driver | `zeus/core/query.py`, `zeus/core/tools/loop.py`; Ollama tool-routing `temperature=0.2` for Qwen Q4 stability |
+| LAB-399 | QueryEngine integration + `ZEUS_TOOLS_ENABLED` + `tool_arguments.yaml` | Flag-off path is byte-identical to pre-tool-use |
+| LAB-400 | `web_search` + `current_time` tools + `ToolCache` | Brave 1 qps debounce; IANA tz via `ZEUS_DEFAULT_TIMEZONE`; LRU+TTL cache |
+| LAB-401 | `/chat/async` + `/classify` + `/admin/tool_cache/*` endpoints | Background `asyncio.Task`; optional callback POST; tier-1 small-LLM with fallback |
+| LAB-402 | Tests + docs (tool-use-spec, chat-interface-spec, INDEX, CLAUDE.md) | 26 new unit tests, 179 total passing |
+
+**Known follow-ups (not blocking):**
+- Qwen2.5-7B Q4_K_M drops optional args between calls (e.g. emits `count:3` then omits it next turn), causing cache key mismatches and cache misses on what should be repeat queries. Mitigation lands in the prompt-polish round — strengthen the `web_search` description and add a "keep optional args consistent across turns" nudge.
+- Tool activity log lines are at INFO; root logger defaults to WARNING in the container, so `docker compose logs` doesn't surface cache hits. Address via explicit logging config or a dedicated `ZEUS_LOG_LEVEL` env var.
+
+**Cross-links:** LAB-326 (Aegis pre-hook, reuses same engine), LAB-343 (`evaluate_payload` reused unchanged), LAB-328 (olympian tool pack — sibling agent-path tools), LAB-396 (Tools UI in Zeus 9 — consumes the registry + cache surfaces shipped here).
 
 
 ---

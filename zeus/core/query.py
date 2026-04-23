@@ -23,6 +23,13 @@ _FAILED_REPLY_RE = re.compile(
 
 from zeus.core.prompts import render as render_prompt
 from zeus.core.sessions import SessionManager, Turn
+from zeus.core.tools.adapters import (
+    parse_anthropic_message,
+    parse_ollama_message,
+    tools_to_anthropic,
+    tools_to_ollama,
+)
+from zeus.core.tools.base import ToolCall, ToolSpec
 from zeus.memory.search import (
     KNOWLEDGE_SEARCH_TOP_K,
     MEMORY_SEARCH_TOP_K,
@@ -124,6 +131,7 @@ class QueryResult(BaseModel):
     topic: str | None = None
     reflection_attempts: int = 0
     aegis_flags: list[str] = Field(default_factory=list)
+    tool_calls: list[dict] = Field(default_factory=list)
 
 
 def _chat_use_claude() -> bool:
@@ -174,6 +182,58 @@ async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
         data = r.json()
         msg = data.get("message") or {}
         return str(msg.get("content") or "").strip()
+
+
+async def _run_llm_with_tools(
+    *,
+    system: str,
+    messages: list[dict],
+    tools: list[ToolSpec],
+    max_tokens: int,
+    turn_idx: int,
+) -> tuple[str, list[ToolCall], str]:
+    """Single tool-aware round-trip. Sibling to _run_llm; caller drives the loop.
+
+    Returns (text, tool_calls, stop_reason). `messages` is the full conversation
+    so far (user turn, any prior assistant turns with tool_use, and tool_result
+    follow-ups). `turn_idx` is the loop iteration — used only to synthesise
+    unique call_ids on the Ollama path (Ollama has no native tool_use_id).
+    """
+    if _chat_use_claude():
+        import anthropic
+
+        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        msg = await client.messages.create(
+            model=ZEUS_DEV_MODEL,
+            max_tokens=max_tokens,
+            system=system,
+            tools=tools_to_anthropic(tools),
+            messages=messages,
+        )
+        return parse_anthropic_message(msg)
+
+    base = _ollama_url()
+    model = _ollama_model()
+    # Ollama wants the system prompt inside the messages array.
+    ollama_messages: list[dict] = [{"role": "system", "content": system}, *messages]
+    payload = {
+        "model": model,
+        "messages": ollama_messages,
+        "tools": tools_to_ollama(tools),
+        "stream": False,
+        # Qwen2.5-7B Q4_K_M is unreliable above ~0.3 on tool routing (schema
+        # drift, argument fabrication). See zeus/docs/tool-use-spec.md.
+        "options": {"num_predict": max_tokens, "temperature": 0.2},
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{base}/api/chat", json=payload, timeout=_ollama_http_timeout()
+        )
+        if r.status_code == 404:
+            body = (r.text or "")[:300]
+            raise RuntimeError(_ollama_model_missing_message(detail=body))
+        r.raise_for_status()
+        return parse_ollama_message(r.json(), turn_idx=turn_idx)
 
 
 async def _run_llm_stream(
@@ -460,19 +520,49 @@ class QueryEngine:
         t_llm = time.monotonic()
         reflection_attempts = 0
         current_prompt = user_prompt
-        reply = await _run_llm(system=system, user_prompt=current_prompt, max_tokens=max_tokens)
-        for attempt in range(2, MAX_REFLECT + 1):
-            if not _is_empty_or_failed_reply(reply):
-                break
-            reflection_attempts += 1
-            backoff = _REFLECT_BACKOFF[attempt - 2] if attempt - 2 < len(_REFLECT_BACKOFF) else _REFLECT_BACKOFF[-1]
-            logger.info(
-                "Reflection attempt %d/%d (backoff %.1fs) — reply was: %r",
-                attempt, MAX_REFLECT, backoff, reply[:100],
+
+        # Tool-use path (ZEUS_TOOLS_ENABLED=1). Skips the reflection loop when
+        # any tool fired -- a tool-informed reply is treated as authoritative.
+        from zeus.core.tools import registry as tool_registry
+        from zeus.core.tools import tools_enabled, tools_max_calls
+
+        tool_calls_out: list[dict] = []
+        skip_reflection = False
+        if tools_enabled() and tool_registry.available():
+            from zeus.core.tools.loop import run_tool_loop
+
+            loop_result = await run_tool_loop(
+                system=system,
+                user_prompt=current_prompt,
+                tools=tool_registry.list_specs(),
+                max_tokens=max_tokens,
+                max_calls=tools_max_calls(),
+                use_claude=_chat_use_claude(),
             )
-            await asyncio.sleep(backoff)
-            current_prompt = _build_reflection_prompt(user_prompt, reply, attempt)
+            reply = loop_result.reply
+            if loop_result.tool_calls:
+                skip_reflection = True
+                sources.extend(f"tool:{c.name}" for c in loop_result.tool_calls)
+                tool_calls_out = [
+                    {"name": c.name, "arguments": c.arguments}
+                    for c in loop_result.tool_calls
+                ]
+        else:
             reply = await _run_llm(system=system, user_prompt=current_prompt, max_tokens=max_tokens)
+
+        if not skip_reflection:
+            for attempt in range(2, MAX_REFLECT + 1):
+                if not _is_empty_or_failed_reply(reply):
+                    break
+                reflection_attempts += 1
+                backoff = _REFLECT_BACKOFF[attempt - 2] if attempt - 2 < len(_REFLECT_BACKOFF) else _REFLECT_BACKOFF[-1]
+                logger.info(
+                    "Reflection attempt %d/%d (backoff %.1fs) — reply was: %r",
+                    attempt, MAX_REFLECT, backoff, reply[:100],
+                )
+                await asyncio.sleep(backoff)
+                current_prompt = _build_reflection_prompt(user_prompt, reply, attempt)
+                reply = await _run_llm(system=system, user_prompt=current_prompt, max_tokens=max_tokens)
         _log_timing("llm.call", (time.monotonic() - t_llm) * 1000)
         aegis_flags: list[str] = []
         if aegis_enabled():
@@ -507,6 +597,7 @@ class QueryEngine:
             topic=session_after.topic,
             reflection_attempts=reflection_attempts,
             aegis_flags=aegis_flags,
+            tool_calls=tool_calls_out,
         )
 
     async def query_stream(

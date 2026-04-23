@@ -16,6 +16,9 @@ Provide a minimal local web chat interface for Zeus that shares the same context
 - `GET /viz` -> standalone Phaos (voice-state orb) page; links to chat
 - `POST /chat/message` -> JSON chat API (non-streaming)
 - `POST /chat/stream` -> SSE streaming (`text/event-stream`; events: `token`, `done`, `phase`, `error`)
+- `POST /chat/async` -> fire-and-forget; returns `{job_id, status, session_id, created_at}` immediately, runs the query in the background, optionally POSTs the final `ChatMessageResponse` to a caller-supplied `callback_url`. Built for long tool-using queries (Meshtastic bridge, etc.) where a synchronous connection for 30+ seconds is impractical.
+- `GET /chat/async/{job_id}` -> poll a backgrounded job. Returns `ChatJob` with `status` in `queued | running | done | error`, `result` (populated on done), `error` (populated on error), `callback_status` (`pending | ok | failed | skipped`). Jobs live in an in-memory LRU of 100; older ones are evicted and return 404.
+- `POST /classify` -> lightweight intent classifier. Body `{message, session_id?}` → `{intent, estimated_ms, tool_hint, reasoning}`. Intents: `chat | search | recall | write | compute`. Falls back to a safe `chat` classification if the small-LLM chain is down. Uses `small_llm_call` at `min_privacy_tier=1` so PII never reaches tier-2 providers. Bridges call this first to pick a specific ack string before sending the real query to `/chat/async`.
 - `POST /voice/interact` -> multipart form: `audio` (WAV), optional `session_id`, `use_context`, `max_tokens`; returns JSON `transcript` + `assistant_message` (React chat: mic push-to-talk encodes browser audio to 16 kHz mono WAV)
 - `GET /chat/sessions` -> list recent sessions (query `limit`)
 - `GET /chat/sessions/{session_id}` -> full session (turns, `topic`, …)
