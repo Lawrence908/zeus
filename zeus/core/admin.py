@@ -135,6 +135,33 @@ async def admin_diagnostics(request: Request) -> dict[str, Any]:
     return out
 
 
+@router.get("/tool_cache/stats")
+async def tool_cache_stats(request: Request) -> dict[str, Any]:
+    """Expose chat-path tool-result cache counters for ops / smoke tests."""
+    from zeus.core.tools import registry as tool_registry
+    from zeus.core.tools.cache import _max_entries, _ttl_seconds, get_cache
+
+    stats = get_cache().stats()
+    return {
+        **stats,
+        "ttl_seconds": _ttl_seconds(),
+        "max_entries": _max_entries(),
+        "registered_tools": [
+            {"name": s.name, "cacheable": s.cacheable}
+            for s in tool_registry.list_specs()
+        ],
+    }
+
+
+@router.post("/tool_cache/clear")
+async def tool_cache_clear(request: Request) -> dict[str, Any]:
+    """Drop every cached tool result. Handy during smoke tests."""
+    from zeus.core.tools.cache import get_cache
+
+    get_cache().clear()
+    return {"ok": True, "stats": get_cache().stats()}
+
+
 @router.post("/query-log/clear")
 async def admin_query_log_clear(request: Request) -> dict[str, str]:
     """Clear the in-process admin query log ring buffer (observability only)."""
