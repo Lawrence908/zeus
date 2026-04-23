@@ -1,0 +1,139 @@
+# zeus/compose.yaml — Zeus service stack
+# Usage: docker compose up -d
+#
+# Ollama is configured for one NVIDIA GPU via deploy.resources (requires
+# nvidia-container-toolkit on the host). For a CPU-only host, remove the
+# `deploy:` block under `ollama` or use a machine without the NVIDIA stack.
+
+services:
+  # --- Mnemosyne: Vector DB ---
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: zeus-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      # Fewer lines than default INFO (every HTTP request); warnings/errors still show
+      - QDRANT__LOG_LEVEL=${QDRANT_LOG_LEVEL:-WARN}
+    restart: unless-stopped
+    networks:
+      - web
+
+  # --- Ollama: Local LLM runtime ---
+  # Prod: serves Qwen2.5-7B-Instruct Q4_K_M on RTX 3080
+  # Dev: serves test models on RTX 5080
+  ollama:
+    image: ollama/ollama:latest
+    container_name: zeus-ollama
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+      # Zeus uses Ollama for both nomic-embed-text and the chat model; 1 forces
+      # constant unload/reload on the GPU (very slow). 2 fits ~10GB cards (Qwen 7B Q4 + embed).
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      # Quieter llama.cpp / GGUF load traces in logs (unset or "info" when debugging loads)
+      - GGML_LOG_LEVEL=${OLLAMA_GGML_LOG_LEVEL:-error}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      web:
+        aliases:
+          - nomad_ollama  # Allows NOMAD to reach Zeus's Ollama as http://nomad_ollama:11434
+
+  # --- Orpheus STT: WhisperLiveKit (WebSocket) ---
+  whisper:
+    image: ghcr.io/collabora/whisperlive-cpu:latest
+    container_name: zeus-whisper
+    # REST API transcribes uploads with vad_filter=False; WebSocket path often runs Silero VAD
+    # and strips whole short clips. Zeus /voice/interact uses WHISPER_REST_URL when set.
+    command:
+      - python
+      - run_server.py
+      - --enable_rest
+      - --rest_port
+      - "8000"
+      - --port
+      - "9090"
+    ports:
+      - "${WHISPER_PORT:-9090}:9090"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WHISPER_DEVICE=cpu
+    restart: unless-stopped
+    # Raw TCP checks hit the WebSocket port without an Upgrade handshake; the server
+    # logs ERROR on every probe. Rely on restart policy instead of port health.
+    healthcheck:
+      disable: true
+    networks:
+      - web
+
+  # --- Orpheus TTS: Voicebox/LuxTTS ---
+  # Not defined here yet (no stable public image). Run Voicebox on the same host
+  # as Orpheus and point VOICEBOX_URL at it (see zeus/docs/orpheus-spec.md).
+
+  # --- Aegis: NemoClaw + OpenShell (LAB-119) ---
+  # Not a compose service: NVIDIA ships NemoClaw via host installer (Node + Docker
+  # sandboxes + OpenShell). See https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
+  # Zeus applies in-process YAML policies from zeus/safety/policies/ when
+  # ZEUS_AEGIS_ENABLED=1. Optional NEMOCLAW_RUNTIME_URL reserved for a future HTTP sidecar.
+
+  # --- Zeus Core: FastAPI API bus ---
+  zeus-core:
+    build:
+      context: .
+      dockerfile: zeus/core/Dockerfile
+    container_name: zeus-core
+    ports:
+      - "${ZEUS_CORE_PORT:-8203}:8000"
+    env_file:
+      - .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_URL=http://ollama:11434
+      - WHISPER_URL=ws://whisper:9090
+      - WHISPER_REST_URL=http://whisper:8000
+    volumes:
+      - zeus_data:/app/zeus/data
+    depends_on:
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    # /health = process up only. /status still probes Qdrant + Ollama (use for real checks).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - web
+
+volumes:
+  qdrant_data:
+  ollama_data:
+  zeus_data:
+
+networks:
+  web:
+    external: true
+    name: homelab-web

@@ -1,0 +1,41 @@
+# zeus/orchestration/agents/orpheus.yaml — Voice interface agent
+# Orpheus handles the full voice loop: wake word → STT → LLM → TTS → output.
+# It is stateless per utterance; memory is handled by mnemosyne.
+
+name: orpheus
+description: "Voice interface: wake word detection, STT, LLM dispatch, TTS response"
+model:
+  dev: claude-sonnet-4-6
+  prod: qwen2.5:7b-instruct-q4_K_M
+
+tools:
+  - bus_call           # dispatch to oracle for context, mnemosyne for memory writes
+  - tts_speak          # POST to Voicebox REST API
+  - stt_stream         # pull from WhisperLiveKit WebSocket
+
+context:
+  - oracle             # fetches relevant context before each LLM call
+
+safety:
+  policy: voice        # stricter — output goes directly to audio, no review step
+
+config:
+  wake_word:
+    model: hey_zeus
+    threshold: 0.5
+    device: cpu         # openWakeWord always on CPU, STT/TTS use GPU
+
+  stt:
+    provider: whisperlivekit
+    model: large-v3
+    language: en
+    mode: simul_streaming
+
+  tts:
+    provider: voicebox
+    engine: luxtts
+    voice_id: "${ORPHEUS_VOICE_ID}"
+    speed: 1.0
+
+  # Max tokens for conversational response — keep low for latency
+  max_response_tokens: 512

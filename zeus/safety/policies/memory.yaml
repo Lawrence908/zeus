@@ -1,0 +1,7 @@
+name: memory
+description: Mnemosyne-facing — flag patterns that suggest writing secrets into memory.
+rules:
+  - name: credential_like
+    pattern: '(?i)(api[_-]?key|password|secret|bearer\s+[a-z0-9_-]{20,})\s*[:=]\s*\S+'
+    action: flag_for_review
+    message: ""

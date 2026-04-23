@@ -1,0 +1,15 @@
+name: standard
+description: Default bus / oracle policy — block egregious destructive shell and obvious secret patterns.
+rules:
+  - name: no_rm_rf_root
+    pattern: 'rm\s+-rf\s+/(\s|$)'
+    action: reject
+    message: "Refusing to surface instructions that delete system paths."
+  - name: hardcoded_credential
+    pattern: '(?i)(api[_-]?key|password|secret)\s*=\s*[''"][^''"]{8,}[''"]'
+    action: flag_for_review
+    message: ""
+  - name: prompt_injection_attempt
+    pattern: '(?i)(ignore previous instructions|disregard your system prompt|act as .{0,40} without restrictions)'
+    action: reject
+    message: "Prompt injection pattern detected"

@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zeus Chat</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('zeus.chat.theme');
+        if (t === 'light' || t === 'dark') {
+          document.documentElement.setAttribute('data-theme', t);
+        } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        } else {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+  <style>
+    :root,
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #07090d;
+      --panel: #0e1218;
+      --border: #1c2530;
+      --fg: #e8eef8;
+      --muted: #6b7a90;
+      --accent: #5c9eff;
+      --msg-strong: #9ebdff;
+      --btn-ghost-bg: #1a2434;
+      --btn-ghost-border: #2a3848;
+      --btn-primary-bg: #1a2f4d;
+      --btn-primary-border: #2a5080;
+      --toast-err-bg: #3d1515;
+      --toast-err-border: #662222;
+      --toast-err-fg: #ffcccc;
+      --toast-ok-bg: #143d1f;
+      --toast-ok-border: #226632;
+      --toast-ok-fg: #ccffdd;
+      --code-bg: #151b26;
+      --link-hover: #8ebfff;
+    }
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f0f2f7;
+      --panel: #ffffff;
+      --border: #d5dbe6;
+      --fg: #1a2230;
+      --muted: #5a6578;
+      --accent: #2563c4;
+      --msg-strong: #1e4a8c;
+      --btn-ghost-bg: #e8ecf4;
+      --btn-ghost-border: #c5cddc;
+      --btn-primary-bg: #d8e6ff;
+      --btn-primary-border: #7aa8e8;
+      --toast-err-bg: #fde8e8;
+      --toast-err-border: #e8a0a0;
+      --toast-err-fg: #5c1010;
+      --toast-ok-bg: #e0f5e8;
+      --toast-ok-border: #8cc9a0;
+      --toast-ok-fg: #0d3d1a;
+      --code-bg: #eef1f7;
+      --link-hover: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    header nav {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+    header nav a { color: var(--accent); margin-left: 0.65rem; }
+    #theme-toggle {
+      font-size: 1.1rem;
+      padding: 0.25rem 0.5rem;
+      background: var(--btn-ghost-bg);
+      border: 1px solid var(--btn-ghost-border);
+      border-radius: 6px;
+      color: var(--fg);
+      cursor: pointer;
+      line-height: 1;
+    }
+    button:focus-visible,
+    #msg-input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    button:focus:not(:focus-visible) {
+      outline: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .thinking-dots span,
+      #mic-btn.recording {
+        animation: none;
+      }
+    }
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0;
+      min-height: 0;
+    }
+    .layout > * {
+      min-width: 0;
+    }
+    @media (min-width: 900px) {
+      .layout {
+        grid-template-columns: minmax(280px, 38%) 1fr;
+      }
+    }
+    #phaos-wrap {
+      min-height: 130px;
+      max-height: 160px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #0a0e14 0%, #07090d 100%);
+      display: flex;
+      flex-direction: column;
+      padding: 0.5rem 0.75rem;
+      flex-shrink: 0;
+    }
+    html[data-theme="light"] #phaos-wrap {
+      background: linear-gradient(180deg, #e4e9f2 0%, #f0f2f7 100%);
+    }
+    @media (min-width: 900px) {
+      #phaos-wrap {
+        border-bottom: none;
+        border-right: 1px solid var(--border);
+        min-height: 100%;
+        max-height: none;
+        padding: 0.75rem;
+      }
+    }
+    #phaos-root {
+      flex: 1;
+      min-height: 90px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      position: relative;
+    }
+    @media (min-width: 900px) {
+      #phaos-root {
+        min-height: 220px;
+      }
+    }
+    .phaos-hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 0.35rem 0 0;
+    }
+    #chat-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 0.75rem 1rem 1rem;
+    }
+    @media (max-width: 899px) {
+      #chat-panel {
+        padding-bottom: 5.5rem;
+      }
+    }
+    .chat-inner {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 0.65rem;
+      min-height: 0;
+    }
+    .chat-main {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
+    }
+    .session-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.35rem;
+      min-width: 0;
+    }
+    #session-tablist {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.25rem;
+      overflow-x: auto;
+      flex: 1;
+      min-width: 0;
+      padding: 0.1rem 0;
+      border: none;
+      margin: 0;
+    }
+    #session-tablist button[role="tab"] {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      padding: 0.3rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--btn-ghost-border);
+      background: var(--btn-ghost-bg);
+      color: var(--muted);
+      cursor: pointer;
+      max-width: 11rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #session-tablist button[role="tab"][aria-selected="true"] {
+      border-color: var(--btn-primary-border);
+      color: var(--accent);
+      background: var(--btn-primary-bg);
+    }
+    #session-tablist button[role="tab"]:hover {
+      color: var(--fg);
+    }
+    .toolbar-actions {
+      display: flex;
+      gap: 0.35rem;
+      flex-shrink: 0;
+    }
+    .toolbar-actions button {
+      font-size: 0.72rem;
+      padding: 0.3rem 0.45rem;
+      background: var(--btn-ghost-bg);
+      border: 1px solid var(--btn-ghost-border);
+      border-radius: 4px;
+      color: var(--fg);
+      cursor: pointer;
+    }
+    #session-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      min-width: 0;
+    }
+    #session-id {
+      color: var(--accent);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: min(100%, 32rem);
+      flex: 1;
+      min-width: 0;
+    }
+    #transcript {
+      flex: 1;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem;
+      background: var(--panel);
+      margin-bottom: 0.65rem;
+      min-height: 200px;
+    }
+    .transcript-placeholder {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.5;
+      max-width: 36rem;
+    }
+    .msg {
+      margin-bottom: 0.65rem;
+      line-height: 1.45;
+      font-size: 0.9rem;
+      position: relative;
+    }
+    .msg-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.2rem;
+    }
+    .msg strong { color: var(--msg-strong); }
+    .msg-copy {
+      flex-shrink: 0;
+      font-size: 0.65rem;
+      padding: 0.15rem 0.4rem;
+      background: var(--btn-ghost-bg);
+      border: 1px solid var(--btn-ghost-border);
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.12s;
+    }
+    .msg:hover .msg-copy,
+    .msg:focus-within .msg-copy {
+      opacity: 1;
+    }
+    .msg-copy:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .msg-body {
+      word-break: break-word;
+    }
+    .msg-body-user {
+      white-space: pre-wrap;
+    }
+    .msg-body-md :first-child { margin-top: 0; }
+    .msg-body-md :last-child { margin-bottom: 0; }
+    .msg-body-md pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.55rem 0.65rem;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+    .msg-body-md code {
+      font-family: ui-monospace, monospace;
+      font-size: 0.84em;
+      background: var(--code-bg);
+      padding: 0.12rem 0.28rem;
+      border-radius: 4px;
+    }
+    .msg-body-md pre code {
+      padding: 0;
+      background: none;
+      font-size: inherit;
+    }
+    .msg-body-md a {
+      color: var(--accent);
+    }
+    .msg-body-md a:hover {
+      color: var(--link-hover);
+    }
+    .msg-body-md blockquote {
+      margin: 0.4rem 0;
+      padding-left: 0.65rem;
+      border-left: 3px solid var(--border);
+      color: var(--muted);
+    }
+    .msg-body-md ul,
+    .msg-body-md ol {
+      margin: 0.35rem 0;
+      padding-left: 1.25rem;
+    }
+    .msg-body-md table {
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      margin: 0.4rem 0;
+    }
+    .msg-body-md th,
+    .msg-body-md td {
+      border: 1px solid var(--border);
+      padding: 0.25rem 0.45rem;
+    }
+    .msg-meta {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+    .thinking-dots {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      margin-right: 0.35rem;
+      vertical-align: middle;
+    }
+    .thinking-dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: dot-pulse 1.2s ease-in-out infinite;
+    }
+    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dot-pulse {
+      0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+      40% { opacity: 1; transform: scale(1); }
+    }
+    .composer {
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-end;
+    }
+    #msg-input {
+      flex: 1;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--fg);
+      padding: 0.55rem 0.65rem;
+      font-size: 0.9rem;
+      font-family: inherit;
+      line-height: 1.45;
+      resize: none;
+      overflow-y: auto;
+      min-height: 2.4rem;
+      max-height: calc(1.45em * 5 + 1.1rem);
+    }
+    #msg-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    button#send,
+    button#stop-btn {
+      background: var(--btn-primary-bg);
+      border: 1px solid var(--btn-primary-border);
+      color: var(--fg);
+      padding: 0 0.85rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 500;
+      height: 2.4rem;
+      flex-shrink: 0;
+    }
+    button#stop-btn {
+      background: var(--btn-ghost-bg);
+      border-color: #804040;
+      color: #e8a0a0;
+    }
+    html[data-theme="light"] button#stop-btn {
+      border-color: #c45c5c;
+      color: #9a2020;
+    }
+    button#send:disabled,
+    button#stop-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      max-width: 320px;
+      display: none;
+      z-index: 200;
+      border: 1px solid var(--toast-err-border);
+      background: var(--toast-err-bg);
+      color: var(--toast-err-fg);
+    }
+    .toast.toast-ok {
+      border-color: var(--toast-ok-border);
+      background: var(--toast-ok-bg);
+      color: var(--toast-ok-fg);
+    }
+    .toast.show { display: block; }
+    #mic-btn {
+      background: var(--btn-ghost-bg);
+      border: 1px solid var(--btn-ghost-border);
+      border-radius: 50%;
+      color: var(--accent);
+      cursor: pointer;
+      width: 2.4rem;
+      height: 2.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      flex-shrink: 0;
+      user-select: none;
+      touch-action: none;
+      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, color 0.15s;
+    }
+    #mic-btn .mic-icon {
+      display: block;
+      width: 1.15rem;
+      height: 1.15rem;
+    }
+    #mic-btn:hover { border-color: var(--accent); color: var(--link-hover); }
+    #mic-btn.recording {
+      background: #3d1010;
+      border-color: #e05050;
+      color: #ff6b6b;
+      animation: mic-pulse 1s ease-in-out infinite;
+    }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(224,80,80,0.5); }
+      50%       { box-shadow: 0 0 0 8px rgba(224,80,80,0); }
+    }
+    @media (max-width: 899px) {
+      #mic-btn {
+        position: fixed;
+        bottom: 1.25rem;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 3.5rem;
+        height: 3.5rem;
+        z-index: 100;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+        background: var(--btn-primary-bg);
+        border-color: var(--btn-primary-border);
+      }
+      #mic-btn .mic-icon {
+        width: 1.45rem;
+        height: 1.45rem;
+      }
+    }
+    #voice-status {
+      font-size: 0.72rem;
+      color: var(--muted);
+      min-height: 1rem;
+      margin-top: 0.25rem;
+      text-align: right;
+    }
+    #session-picker {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0;
+      background: var(--panel);
+      color: var(--fg);
+      max-width: min(96vw, 420px);
+    }
+    #session-picker::backdrop {
+      background: rgba(0, 0, 0, 0.45);
+    }
+    #session-picker header {
+      padding: 0.6rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      margin: 0;
+    }
+    #session-picker .picker-body {
+      padding: 0.5rem;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+    #session-picker ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    #session-picker li button {
+      width: 100%;
+      text-align: left;
+      font-size: 0.8rem;
+      padding: 0.45rem 0.5rem;
+      margin-bottom: 0.25rem;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+      font-family: inherit;
+    }
+    #session-picker li button:hover {
+      background: var(--code-bg);
+    }
+    #session-picker .picker-close {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.45rem;
+      background: var(--btn-ghost-bg);
+      border: 1px solid var(--btn-ghost-border);
+      border-radius: 4px;
+      color: var(--fg);
+      cursor: pointer;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+      "marked": "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm",
+      "dompurify": "https://cdn.jsdelivr.net/npm/dompurify@3.1.7/+esm"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>Zeus</h1>
+    <nav>
+      <button type="button" id="theme-toggle" title="Toggle light/dark theme" aria-label="Toggle theme">◐</button>
+      <span id="env-badge" class="muted"></span>
+      <a href="/viz">Phaos</a>
+      <a href="/status">Status</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside id="phaos-wrap">
+      <div id="phaos-root" aria-label="Voice visualization"></div>
+      <p class="phaos-hint">Phaos reacts to <code>/ws/voice-state</code>. Mic levels blend in while <em>listening</em> (click page once if audio is suspended).</p>
+    </aside>
+    <main id="chat-panel">
+      <div class="chat-inner">
+        <div class="chat-main">
+          <div class="session-toolbar">
+            <div id="session-tablist" role="tablist" aria-label="Chat sessions"></div>
+            <div class="toolbar-actions">
+              <button type="button" id="session-all-btn" title="Browse all sessions">All sessions…</button>
+              <button type="button" id="refresh-sessions" title="Refresh session list">Refresh</button>
+              <button type="button" id="new-session">New</button>
+            </div>
+          </div>
+          <div id="session-row">
+            <span style="flex-shrink:0;">Active:</span> <span id="session-id">—</span>
+          </div>
+          <div id="transcript" aria-live="polite" aria-relevant="additions text"></div>
+          <form class="composer" id="chat-form" aria-label="Send message to Zeus">
+            <textarea id="msg-input" placeholder="Message Zeus…" autocomplete="off" rows="1"></textarea>
+            <button type="button" id="mic-btn" title="Hold to talk" aria-label="Hold to talk">
+              <svg class="mic-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
+              </svg>
+            </button>
+            <button type="button" id="stop-btn" hidden>Stop</button>
+            <button type="submit" id="send">Send</button>
+          </form>
+          <div id="voice-status"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <dialog id="session-picker">
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+      <span>All sessions</span>
+      <button type="button" class="picker-close" id="session-picker-close">Close</button>
+    </header>
+    <div class="picker-body">
+      <ul id="session-picker-list"></ul>
+    </div>
+  </dialog>
+
+  <script type="module">
+    import { initPhaos } from '/static/viz/phaos.js';
+    import { renderAssistantMarkdown } from '/static/chat-markdown.js';
+
+    const transcript = document.getElementById('transcript');
+    const sessionEl = document.getElementById('session-id');
+    const input = document.getElementById('msg-input');
+    const form = document.getElementById('chat-form');
+    const sendBtn = document.getElementById('send');
+    const stopBtn = document.getElementById('stop-btn');
+    const toast = document.getElementById('toast');
+    const phaosRoot = document.getElementById('phaos-root');
+    const tablist = document.getElementById('session-tablist');
+    const sessionPicker = document.getElementById('session-picker');
+    const sessionPickerList = document.getElementById('session-picker-list');
+    const micBtn = document.getElementById('mic-btn');
+
+    const DRAFT_PREFIX = 'zeus.chat.draft.';
+    function draftKey(sid) {
+      return DRAFT_PREFIX + (sid || 'new');
+    }
+
+    let sessionId = null;
+    let composerBusy = false;
+    let streamAbortController = null;
+    let sessionsCache = [];
+    let draftSaveTimer = 0;
+
+    function setComposerBusy(busy) {
+      composerBusy = busy;
+      form.setAttribute('aria-busy', busy ? 'true' : 'false');
+      input.disabled = busy;
+      sendBtn.disabled = busy;
+      micBtn.disabled = busy;
+      // Only show Stop when busy *and* a streaming AbortController is active.
+      // Non-streaming fetches have no abort signal, so the button would be a no-op.
+      stopBtn.hidden = !busy || !streamAbortController;
+      stopBtn.disabled = false;
+    }
+
+    function migrateDraftNewToSession(newSid) {
+      const from = draftKey(null);
+      const to = draftKey(newSid);
+      const v = sessionStorage.getItem(from);
+      if (v != null && sessionStorage.getItem(to) == null) {
+        sessionStorage.setItem(to, v);
+      }
+      sessionStorage.removeItem(from);
+    }
+
+    function saveDraftNow() {
+      try {
+        sessionStorage.setItem(draftKey(sessionId), input.value);
+      } catch (_) {}
+    }
+
+    function loadDraftForCurrentSession() {
+      try {
+        input.value = sessionStorage.getItem(draftKey(sessionId)) || '';
+      } catch (_) {
+        input.value = '';
+      }
+      autoResizeInput();
+    }
+
+    function flushDraftBeforeSessionChange(prevSid) {
+      try {
+        sessionStorage.setItem(draftKey(prevSid), input.value);
+      } catch (_) {}
+    }
+
+    function syncTranscriptPlaceholder() {
+      const hasMsg = transcript.querySelector('.msg');
+      let ph = transcript.querySelector('.transcript-placeholder');
+      if (!hasMsg) {
+        if (!ph) {
+          ph = document.createElement('p');
+          ph.className = 'transcript-placeholder';
+          ph.textContent =
+            'Type a message or hold the mic to talk. Use the tabs above or All sessions to switch chats.';
+          transcript.appendChild(ph);
+        }
+      } else if (ph) {
+        ph.remove();
+      }
+    }
+
+    function shortSessionId(id) {
+      return id ? `${id.slice(0, 8)}…` : '—';
+    }
+
+    function setSessionLabel(topic, id) {
+      const t = topic && String(topic).trim();
+      sessionEl.textContent = t || shortSessionId(id);
+      sessionEl.title = id ? `id: ${id}` : '';
+    }
+
+    function showToast(msg, kind) {
+      toast.textContent = msg;
+      toast.className = 'toast show' + (kind === 'ok' ? ' toast-ok' : '');
+      const ms = kind === 'ok' ? 2200 : 5000;
+      setTimeout(() => {
+        toast.classList.remove('show');
+        toast.classList.remove('toast-ok');
+      }, ms);
+    }
+
+    async function copyMessageText(raw) {
+      const t = raw || '';
+      try {
+        await navigator.clipboard.writeText(t);
+        showToast('Copied', 'ok');
+      } catch {
+        showToast('Copy failed');
+      }
+    }
+
+    function makeCopyButton(onClick) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'msg-copy';
+      btn.setAttribute('aria-label', 'Copy message');
+      btn.title = 'Copy';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', () => onClick());
+      return btn;
+    }
+
+    function appendMessage(role, text, metaText) {
+      const div = document.createElement('div');
+      div.className = 'msg' + (role === 'Zeus' ? ' msg-assistant' : ' msg-user');
+      const raw = text || '';
+      div.dataset.copyText = raw;
+
+      const header = document.createElement('div');
+      header.className = 'msg-header';
+      const strong = document.createElement('strong');
+      strong.textContent = role === 'Zeus' ? 'Zeus:' : 'You:';
+      const copyBtn = makeCopyButton(() => copyMessageText(div.dataset.copyText));
+      header.appendChild(strong);
+      header.appendChild(copyBtn);
+
+      const body = document.createElement('div');
+      body.className = 'msg-body ' + (role === 'Zeus' ? 'msg-body-md' : 'msg-body-user');
+      if (role === 'Zeus') {
+        body.innerHTML = renderAssistantMarkdown(raw);
+      } else {
+        body.textContent = raw;
+      }
+
+      div.appendChild(header);
+      div.appendChild(body);
+      if (metaText) {
+        const meta = document.createElement('div');
+        meta.className = 'msg-meta';
+        meta.textContent = metaText;
+        div.appendChild(meta);
+      }
+      transcript.appendChild(div);
+      syncTranscriptPlaceholder();
+      transcript.scrollTop = transcript.scrollHeight;
+      return div;
+    }
+
+    function appendAssistantStreaming() {
+      const div = document.createElement('div');
+      div.className = 'msg msg-assistant';
+      div.dataset.copyText = '';
+
+      const header = document.createElement('div');
+      header.className = 'msg-header';
+      const strong = document.createElement('strong');
+      strong.textContent = 'Zeus:';
+      const copyBtn = makeCopyButton(() => copyMessageText(div.dataset.copyText));
+      copyBtn.disabled = true;
+      header.appendChild(strong);
+      header.appendChild(copyBtn);
+
+      const body = document.createElement('div');
+      body.className = 'msg-body msg-body-md';
+      const dots = document.createElement('span');
+      dots.className = 'thinking-dots';
+      dots.innerHTML = '<span></span><span></span><span></span>';
+      const bodyEl = document.createElement('span');
+      bodyEl.className = 'assistant-body';
+      body.appendChild(dots);
+      body.appendChild(bodyEl);
+
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+
+      div.appendChild(header);
+      div.appendChild(body);
+      div.appendChild(meta);
+      transcript.appendChild(div);
+      syncTranscriptPlaceholder();
+      transcript.scrollTop = transcript.scrollHeight;
+      return { div, bodyEl, metaEl: meta, copyBtn };
+    }
+
+    function renderSessionTabs() {
+      tablist.innerHTML = '';
+      sessionsCache.forEach((s, i) => {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.setAttribute('role', 'tab');
+        tab.id = `tab-sess-${i}`;
+        const label = (s.topic && String(s.topic).trim()) || shortSessionId(s.id);
+        tab.textContent = label;
+        tab.title = `${s.id} · ${s.turn_count} turns`;
+        const selected = s.id === sessionId;
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+        tab.tabIndex = selected ? 0 : -1;
+        tab.addEventListener('click', () => loadSession(s.id));
+        tablist.appendChild(tab);
+      });
+    }
+
+    function fillSessionPicker() {
+      sessionPickerList.innerHTML = '';
+      sessionsCache.forEach((s) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const label = (s.topic && String(s.topic).trim()) || shortSessionId(s.id);
+        btn.textContent = `${label} · ${s.turn_count} turns`;
+        btn.title = s.id;
+        btn.addEventListener('click', () => {
+          sessionPicker.close();
+          loadSession(s.id);
+        });
+        li.appendChild(btn);
+        sessionPickerList.appendChild(li);
+      });
+    }
+
+    tablist.addEventListener('keydown', (e) => {
+      const tabs = [...tablist.querySelectorAll('button[role="tab"]')];
+      if (!tabs.length) return;
+      const i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const dir = e.key === 'ArrowRight' ? 1 : -1;
+        const nextIdx = (i + dir + tabs.length) % tabs.length;
+        const next = tabs[nextIdx];
+        tabs.forEach((t) => {
+          t.tabIndex = t === next ? 0 : -1;
+        });
+        next.focus();
+      }
+    });
+
+    async function refreshSessionList() {
+      try {
+        const r = await fetch('/chat/sessions?limit=15');
+        if (!r.ok) return;
+        const data = await r.json();
+        sessionsCache = data.sessions || [];
+        renderSessionTabs();
+        fillSessionPicker();
+      } catch (_) {}
+    }
+
+    async function loadSession(id) {
+      try {
+        flushDraftBeforeSessionChange(sessionId);
+        const r = await fetch(`/chat/sessions/${encodeURIComponent(id)}`);
+        if (!r.ok) {
+          showToast('Could not load session');
+          return;
+        }
+        const s = await r.json();
+        transcript.innerHTML = '';
+        sessionId = s.id;
+        setSessionLabel(s.topic, sessionId);
+        loadDraftForCurrentSession();
+        (s.turns || []).forEach((t) => {
+          appendMessage('You', t.user || '');
+          const meta = typeof t.latency_ms === 'number' ? `${t.latency_ms} ms` : '';
+          appendMessage('Zeus', t.assistant || '', meta);
+        });
+        syncTranscriptPlaceholder();
+        renderSessionTabs();
+        await refreshSessionList();
+      } catch (e) {
+        showToast(String(e));
+      }
+    }
+
+    async function sendNonStreaming(text) {
+      const r = await fetch('/chat/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          message: text,
+          use_context: true,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        showToast(data.detail || `Error ${r.status}`);
+        return;
+      }
+      const prevSid = sessionId;
+      sessionId = data.session_id;
+      if (prevSid !== sessionId) migrateDraftNewToSession(sessionId);
+      setSessionLabel(data.topic, sessionId);
+      const meta =
+        data.model_used && data.latency_ms != null
+          ? `${data.model_used} · ${data.latency_ms} ms (~${data.token_estimate} tok)`
+          : '';
+      appendMessage('Zeus', data.assistant_message || '', meta);
+      await refreshSessionList();
+    }
+
+    async function sendStreaming(text) {
+      streamAbortController = new AbortController();
+      const signal = streamAbortController.signal;
+      let r;
+      try {
+        r = await fetch('/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            message: text,
+            use_context: true,
+          }),
+          signal,
+        });
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          streamAbortController = null;
+          return;
+        }
+        showToast(String(err));
+        streamAbortController = null;
+        return;
+      }
+      if (!r.ok || !r.body) {
+        streamAbortController = null;
+        await sendNonStreaming(text);
+        return;
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      const { div: assistantDiv, bodyEl, metaEl, copyBtn } = appendAssistantStreaming();
+      let gotDone = false;
+      let accumulated = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            const raw = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const lines = raw.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              let payload;
+              try {
+                payload = JSON.parse(line.slice(6));
+              } catch {
+                continue;
+              }
+              if (payload.type === 'token' && payload.content) {
+                const dots = assistantDiv.querySelector('.thinking-dots');
+                if (dots) dots.remove();
+                accumulated += payload.content;
+                bodyEl.textContent = accumulated;
+                transcript.scrollTop = transcript.scrollHeight;
+              } else if (payload.type === 'done') {
+                gotDone = true;
+                const prevSid = sessionId;
+                if (payload.session_id) sessionId = payload.session_id;
+                if (prevSid !== sessionId) migrateDraftNewToSession(sessionId);
+                if (payload.topic != null && payload.topic !== '') {
+                  setSessionLabel(payload.topic, sessionId);
+                } else {
+                  setSessionLabel(null, sessionId);
+                }
+                assistantDiv.dataset.copyText = accumulated;
+                bodyEl.innerHTML = renderAssistantMarkdown(accumulated);
+                copyBtn.disabled = false;
+                const parts = [];
+                if (payload.model_used) parts.push(payload.model_used);
+                if (payload.latency_ms != null) parts.push(`${payload.latency_ms} ms`);
+                if (payload.token_estimate != null) parts.push(`~${payload.token_estimate} tok`);
+                metaEl.textContent = parts.join(' · ');
+              } else if (payload.type === 'phase') {
+                /* keep-alive */
+              } else if (payload.type === 'error') {
+                showToast(payload.detail || 'Stream error');
+                const dots = assistantDiv.querySelector('.thinking-dots');
+                if (dots) dots.remove();
+                if (assistantDiv.parentNode) transcript.removeChild(assistantDiv);
+                streamAbortController = null;
+                await sendNonStreaming(text);
+                return;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          if (assistantDiv.parentNode) transcript.removeChild(assistantDiv);
+          syncTranscriptPlaceholder();
+          streamAbortController = null;
+          return;
+        }
+        showToast(String(err));
+      }
+      streamAbortController = null;
+      if (signal.aborted) {
+        if (assistantDiv.parentNode) transcript.removeChild(assistantDiv);
+        syncTranscriptPlaceholder();
+        return;
+      }
+      if (!gotDone) {
+        if (assistantDiv.parentNode) transcript.removeChild(assistantDiv);
+        syncTranscriptPlaceholder();
+        showToast('Stream interrupted before completion. Try again.');
+        return;
+      }
+      await refreshSessionList();
+    }
+
+    stopBtn.addEventListener('click', () => {
+      streamAbortController?.abort();
+    });
+
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', cur);
+      try {
+        localStorage.setItem('zeus.chat.theme', cur);
+      } catch (_) {}
+    });
+
+    const phaos = await initPhaos({ container: phaosRoot, enableMic: true, enableXR: true });
+
+    document.body.addEventListener(
+      'click',
+      () => {
+        phaos.resumeAudio?.();
+      },
+      { once: true },
+    );
+
+    function autoResizeInput() {
+      input.style.height = 'auto';
+      const lineHeight = parseFloat(getComputedStyle(input).lineHeight) || 20;
+      const paddingY = parseFloat(getComputedStyle(input).paddingTop) + parseFloat(getComputedStyle(input).paddingBottom);
+      const maxH = lineHeight * 5 + paddingY;
+      input.style.height = Math.min(input.scrollHeight, maxH) + 'px';
+    }
+
+    input.addEventListener('input', () => {
+      autoResizeInput();
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = setTimeout(saveDraftNow, 200);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.dispatchEvent(new Event('submit'));
+      }
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      input.style.height = '';
+      saveDraftNow();
+      appendMessage('You', text);
+      setComposerBusy(true);
+      try {
+        await sendStreaming(text);
+      } catch (err) {
+        if (err.name !== 'AbortError') showToast(String(err));
+      } finally {
+        setComposerBusy(false);
+        streamAbortController = null;
+        input.focus();
+      }
+    });
+
+    document.getElementById('new-session').addEventListener('click', () => {
+      flushDraftBeforeSessionChange(sessionId);
+      sessionId = null;
+      setSessionLabel(null, null);
+      transcript.innerHTML = '';
+      syncTranscriptPlaceholder();
+      loadDraftForCurrentSession();
+      refreshSessionList();
+      input.focus();
+    });
+
+    document.getElementById('refresh-sessions').addEventListener('click', () => refreshSessionList());
+    document.getElementById('session-all-btn').addEventListener('click', () => {
+      fillSessionPicker();
+      sessionPicker.showModal();
+    });
+    document.getElementById('session-picker-close').addEventListener('click', () => sessionPicker.close());
+
+    refreshSessionList();
+    syncTranscriptPlaceholder();
+    loadDraftForCurrentSession();
+
+    // ── Browser voice capture (hold-to-talk → POST /voice/interact) ────────
+    const voiceStatusEl = document.getElementById('voice-status');
+    // AudioWorklet captures mic PCM (ScriptProcessorNode is deprecated).
+    const VOICE_PCM_WORKLET = `
+class ZeusPcmCaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) return true;
+    const channel = input[0];
+    const len = channel.length;
+    const i16 = new Int16Array(len);
+    for (let i = 0; i < len; i++) {
+      const s = channel[i];
+      i16[i] = Math.max(-32768, Math.min(32767, Math.round(s * 32768)));
+    }
+    this.port.postMessage(i16.buffer, [i16.buffer]);
+    return true;
+  }
+}
+registerProcessor('zeus-pcm-capture', ZeusPcmCaptureProcessor);
+`;
+
+    let voiceAudioCtx = null;
+    let voiceStream = null;
+    let voiceProcessor = null;
+    let voicePCMChunks = [];
+    let voiceRecording = false;
+
+    function setVoiceStatus(msg) { voiceStatusEl.textContent = msg; }
+
+    async function publishVoiceState(state, metadata = {}) {
+      try {
+        await fetch('/voice-state/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, metadata }),
+        });
+      } catch (_) {}
+    }
+
+    function pcmChunksToWav(chunks, sampleRate) {
+      const totalSamples = chunks.reduce((s, c) => s + c.length, 0);
+      const dataBytes = totalSamples * 2;
+      const buf = new ArrayBuffer(44 + dataBytes);
+      const v = new DataView(buf);
+      const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+      str(0, 'RIFF'); v.setUint32(4, 36 + dataBytes, true);
+      str(8, 'WAVE'); str(12, 'fmt ');
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      str(36, 'data'); v.setUint32(40, dataBytes, true);
+      let off = 44;
+      for (const chunk of chunks) {
+        for (let i = 0; i < chunk.length; i++) { v.setInt16(off, chunk[i], true); off += 2; }
+      }
+      return buf;
+    }
+
+    async function resampleInt16ChunksTo16k(int16Chunks, sourceSampleRate) {
+      const total = int16Chunks.reduce((s, c) => s + c.length, 0);
+      if (total === 0) return new Float32Array(0);
+      const mono = new Float32Array(total);
+      let o = 0;
+      for (const c of int16Chunks) {
+        for (let i = 0; i < c.length; i++) mono[o++] = c[i] / 32768;
+      }
+      if (sourceSampleRate === 16000) return mono;
+      const outLen = Math.max(1, Math.ceil((total / sourceSampleRate) * 16000));
+      const offline = new OfflineAudioContext(1, outLen, 16000);
+      const inBuf = offline.createBuffer(1, total, sourceSampleRate);
+      inBuf.copyToChannel(mono, 0);
+      const src = offline.createBufferSource();
+      src.buffer = inBuf;
+      src.connect(offline.destination);
+      src.start(0);
+      const rendered = await offline.startRendering();
+      return rendered.getChannelData(0);
+    }
+
+    function float32ToInt16Array(f32) {
+      const out = new Int16Array(f32.length);
+      for (let i = 0; i < f32.length; i++) {
+        out[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32768)));
+      }
+      return out;
+    }
+
+    async function startVoiceCapture() {
+      if (voiceRecording || composerBusy) return;
+      try {
+        voiceStream = await navigator.mediaDevices.getUserMedia({
+          audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        });
+      } catch (err) {
+        showToast('Mic access denied: ' + err.message);
+        return;
+      }
+      const targetRate = 16000;
+      voiceAudioCtx = new AudioContext({ sampleRate: targetRate });
+      const workletBlob = new Blob([VOICE_PCM_WORKLET], { type: 'application/javascript' });
+      const workletUrl = URL.createObjectURL(workletBlob);
+      try {
+        await voiceAudioCtx.audioWorklet.addModule(workletUrl);
+      } finally {
+        URL.revokeObjectURL(workletUrl);
+      }
+      const source = voiceAudioCtx.createMediaStreamSource(voiceStream);
+      voiceProcessor = new AudioWorkletNode(voiceAudioCtx, 'zeus-pcm-capture', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        channelCount: 1,
+      });
+      voicePCMChunks = [];
+      voiceRecording = true;
+      voiceProcessor.port.onmessage = (e) => {
+        if (!voiceRecording) return;
+        const i16 = new Int16Array(e.data);
+        const copy = new Int16Array(i16.length);
+        copy.set(i16);
+        voicePCMChunks.push(copy);
+      };
+      const mute = voiceAudioCtx.createGain();
+      mute.gain.value = 0;
+      source.connect(voiceProcessor);
+      voiceProcessor.connect(mute);
+      mute.connect(voiceAudioCtx.destination);
+      micBtn.classList.add('recording');
+      setVoiceStatus('Recording…');
+      publishVoiceState('listening');
+    }
+
+    async function stopVoiceCapture() {
+      if (!voiceRecording) return;
+      const sourceSampleRate = voiceAudioCtx != null ? voiceAudioCtx.sampleRate : 16000;
+      voiceRecording = false;
+      voiceProcessor?.disconnect();
+      voiceAudioCtx?.close();
+      voiceStream?.getTracks().forEach((t) => t.stop());
+      voiceAudioCtx = null; voiceStream = null; voiceProcessor = null;
+      micBtn.classList.remove('recording');
+
+      const chunks = voicePCMChunks;
+      voicePCMChunks = [];
+      const rawTotal = chunks.reduce((s, c) => s + c.length, 0);
+      if (rawTotal < 800) {
+        setVoiceStatus('');
+        publishVoiceState('idle');
+        return;
+      }
+
+      setVoiceStatus('Processing…');
+      publishVoiceState('processing');
+      micBtn.disabled = true;
+      sendBtn.disabled = true;
+
+      try {
+        const f16k = await resampleInt16ChunksTo16k(chunks, sourceSampleRate);
+        if (f16k.length < 16000) {
+          setVoiceStatus('Hold the mic ~1 second or more, then release.');
+          publishVoiceState('idle');
+          micBtn.disabled = false;
+          sendBtn.disabled = false;
+          return;
+        }
+        const wav = pcmChunksToWav([float32ToInt16Array(f16k)], 16000);
+        const fd = new FormData();
+        fd.append('audio', new Blob([wav], { type: 'audio/wav' }), 'voice.wav');
+        if (sessionId) fd.append('session_id', sessionId);
+
+        const r = await fetch('/voice/interact', { method: 'POST', body: fd });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || `Error ${r.status}`);
+
+        const prevSid = sessionId;
+        if (data.session_id) {
+          sessionId = data.session_id;
+          if (prevSid !== sessionId) migrateDraftNewToSession(sessionId);
+          setSessionLabel(data.topic, sessionId);
+        }
+        appendMessage('You', data.transcript || '(no transcript)');
+        const meta = data.model_used && data.latency_ms != null
+          ? `${data.model_used} · ${data.latency_ms} ms`
+          : '';
+        appendMessage('Zeus', data.assistant_message || '', meta);
+        setVoiceStatus('');
+        await refreshSessionList();
+      } catch (err) {
+        showToast(String(err));
+        setVoiceStatus('Voice error — try again');
+      } finally {
+        micBtn.disabled = false;
+        sendBtn.disabled = false;
+        publishVoiceState('idle');
+      }
+    }
+
+    micBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startVoiceCapture(); });
+    micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startVoiceCapture(); }, { passive: false });
+    micBtn.addEventListener('mouseup', stopVoiceCapture);
+    micBtn.addEventListener('mouseleave', stopVoiceCapture);
+    micBtn.addEventListener('touchend', stopVoiceCapture);
+    micBtn.addEventListener('touchcancel', stopVoiceCapture);
+
+    fetch('/status')
+      .then((r) => r.json())
+      .then((s) => {
+        document.getElementById('env-badge').textContent = s.environment || '';
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

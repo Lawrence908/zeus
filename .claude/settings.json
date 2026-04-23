@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dpkg -l)",
+      "Bash(docker info:*)",
+      "Bash(pip index *)",
+      "Bash(find . -name \"*.py\" -path \"*/tests/*\" -exec grep -l \"memory\\\\|mem0\" {} \\\\;)",
+      "Bash(curl -sS -X DELETE http://localhost:6333/collections/zeus_knowledge)",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/scroll -H 'Content-Type: application/json' -d '{\"limit\":20,\"with_payload\":true,\"with_vector\":false}')",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/scroll -H 'Content-Type: application/json' -d '{\"limit\":1000,\"with_payload\":true,\"with_vector\":false}')",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/scroll -H 'Content-Type: application/json' -d '{\"limit\":1000,\"with_payload\":true,\"with_vector\":false,\"offset\":2000}')",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/scroll -H 'Content-Type: application/json' -d '{\"limit\":200,\"with_payload\":true,\"with_vector\":false,\"filter\":{\"must\":[{\"key\":\"source\",\"match\":{\"value\":\"git\"}}]}}')",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/scroll -H 'Content-Type: application/json' -d '{\"limit\":200,\"with_payload\":true,\"with_vector\":false,\"filter\":{\"must\":[{\"key\":\"source\",\"match\":{\"value\":\"newsletter\"}}]}}')",
+      "Bash(.venv/bin/python -m pytest tests/retrieval_eval.py -k \"not live\" -q)",
+      "Bash(ZEUS_RUN_RETRIEVAL_EVAL=1 ZEUS_RETRIEVAL_EVAL_OUT=./tests/retrieval_eval_baseline.json .venv/bin/python -m pytest tests/retrieval_eval.py::test_live_retrieval_metrics -s)",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/scroll -H 'Content-Type: application/json' -d '{\"limit\":500,\"with_payload\":true,\"with_vector\":false}')",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(curl -s http://localhost:11435/api/embeddings -d '{\"model\":\"nomic-embed-text\",\"prompt\":\"test\"}')",
+      "Bash(.venv/bin/python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('embed len:', len\\(d.get\\('embedding',[]\\)\\), 'error:', d.get\\('error'\\)\\)\")",
+      "Bash(.venv/bin/python -c \"import FlagEmbedding; print\\('FlagEmbedding:', FlagEmbedding.__version__\\)\")",
+      "Bash(.venv/bin/python -m zeus.ingest.run --help)",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/count -H 'Content-Type: application/json' -d '{\"filter\":{\"must\":[{\"key\":\"source\",\"match\":{\"value\":\"markdown\"}}]},\"exact\":true}')",
+      "Bash(curl -s -X POST http://localhost:6333/collections/zeus_knowledge/points/scroll -H 'Content-Type: application/json' -d '{\"limit\":5,\"with_payload\":true,\"with_vector\":false,\"filter\":{\"must\":[{\"key\":\"source\",\"match\":{\"value\":\"markdown\"}},{\"key\":\"source_id\",\"match\":{\"value\":\"markdown:CLAUDE.md\"}}]}}')",
+      "Bash(.venv/bin/python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('existing CLAUDE.md chunks:', len\\(d['result']['points']\\)\\)\")",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -c \"import FlagEmbedding; print\\('ok:', FlagEmbedding.__version__\\)\")",
+      "Bash(chmod +x ./scripts/check-docs.sh)",
+      "Bash(./scripts/check-docs.sh)",
+      "Bash(ln -sf ../../scripts/check-docs.sh .git/hooks/pre-commit)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(curl -s -X POST http://localhost:8203/memory/search -H 'Content-Type: application/json' -d '{\"query\":\"what is the retrieval eval baseline\",\"limit\":3}')",
+      "Bash(curl -s -X POST http://localhost:8203/context/query -H 'Content-Type: application/json' -d '{\"query\":\"what is the retrieval eval baseline hit@5\",\"top_k\":5}')",
+      "Bash(curl -s -X POST http://localhost:8203/chat/message -H 'Content-Type: application/json' -d '{\"session_id\":\"smoke-sources\",\"message\":\"What is the default ZEUS_KAIROS_TOOL_ALLOWLIST? Cite briefly.\"}')"
+    ]
+  }
+}

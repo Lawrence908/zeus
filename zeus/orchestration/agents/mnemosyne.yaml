@@ -1,0 +1,32 @@
+# zeus/orchestration/agents/mnemosyne.yaml — Memory layer agent
+# Mnemosyne is the gatekeeper for curated personal facts: MemoryStore over the
+# `zeus_memories` Qdrant collection with bi-temporal payloads and LLM fact
+# extraction via small_llm_call. Bulk knowledge goes to athena, not here.
+
+name: mnemosyne
+description: "Memory layer: bi-temporal personal facts via MemoryStore (Qdrant zeus_memories)"
+model:
+  dev: claude-sonnet-4-6
+  prod: qwen2.5:7b-instruct-q4_K_M
+
+tools:
+  - memory_search
+  - memory_write
+  - memory_get
+
+context:
+  - self   # mnemosyne has access to its own memory namespace for meta-queries
+
+safety:
+  policy: memory       # blocks PII writes without explicit user consent flag
+
+endpoints:
+  - path: /memory/search
+    method: POST
+    description: "Semantic search over personal memory"
+  - path: /memory/ingest
+    method: POST
+    description: "Store new memories (called by iris for curated fact sources)"
+  - path: /memory/get
+    method: GET
+    description: "Retrieve memory by ID or namespace"

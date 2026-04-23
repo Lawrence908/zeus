@@ -1,0 +1,52 @@
+# zeus/orchestration/agents/iris.yaml — Ingest pipeline agent
+# Iris ingests raw data from sources, chunks it, embeds it, and routes by source:
+# curated fact sources (context_pack, gcal) → mnemosyne (LLM fact extraction);
+# bulk sources (obsidian, chatgpt, markdown, email, newsletter, bookmarks, git)
+# → athena (raw chunks, no LLM). Iris never writes to Qdrant directly.
+
+name: iris
+description: "Data ingest pipeline: reads sources, chunks, embeds, routes to mnemosyne (facts) or athena (library)"
+model:
+  dev: claude-sonnet-4-6
+  prod: qwen2.5:7b-instruct-q4_K_M
+
+tools:
+  - file_read          # read raw export files from zeus/data/raw/
+  - bus_call           # POST to mnemosyne /ingest endpoint
+
+context: []            # Iris produces context, it doesn't consume it
+
+safety:
+  policy: ingest       # permissive — input is trusted personal data
+
+triggers:
+  - type: manual       # invoked via CLI: ruflo run iris
+  - type: webhook
+    path: /iris/ingest
+
+config:
+  chunk_size: 512      # tokens
+  chunk_overlap: 64
+  sources:
+    - type: markdown
+      glob: "zeus/data/raw/**/*.md"
+    - type: chatgpt
+      path: "zeus/data/raw/chatgpt_export.json"
+    - type: context_pack
+      path: "zeus/data/raw/context_pack.md"
+    # Sprint 10 sources (require env vars / files to be present)
+    - type: obsidian
+      vault_path: "${OBSIDIAN_VAULT_PATH}"
+      exclude_dirs: [".obsidian", "templates", "archive"]
+    - type: git
+      repo_path: "."
+      author_email: "${GIT_AUTHOR_EMAIL}"
+      max_commits: 500
+    - type: gcal
+      credentials_path: "zeus/data/gcal_credentials.json"
+      token_path: "zeus/data/gcal_token.json"
+      days_back: 90
+      days_forward: 30
+    - type: bookmarks
+      export_path: "zeus/data/raw/bookmarks.html"
+      fetch_content: false

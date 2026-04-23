@@ -1,0 +1,11 @@
+name: personal
+description: Personal assistant agent — standard guardrails.
+rules:
+  - name: no_rm_rf_root
+    pattern: 'rm\s+-rf\s+/(\s|$)'
+    action: reject
+    message: "Code that deletes system files is not allowed."
+  - name: hardcoded_credential
+    pattern: '(?i)(password|api_key|secret)\s*=\s*[''"][^''"]+[''"]'
+    action: reject
+    message: "Hardcoded credentials are not allowed."

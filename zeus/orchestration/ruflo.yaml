@@ -1,0 +1,67 @@
+# zeus/orchestration/ruflo.yaml — Ruflo v3.5 entrypoint config
+# This file is the swarm controller. Ruflo reads it to know what agents exist,
+# how they communicate, and what environment they're running in.
+
+version: "3.5"
+
+# System identity
+system:
+  name: zeus
+  description: "Self-hosted voice-first personal AI assistant"
+  claude_md: "../CLAUDE.md"   # Ruflo reads this for project context
+
+# Environment is read from ZEUS_ENV at runtime.
+# Ruflo passes it to every agent so they can self-configure.
+environment:
+  source: env
+  key: ZEUS_ENV
+  valid: [dev, prod]
+  default: dev
+
+# API bus — all agent→agent and agent→service communication goes here
+bus:
+  provider: fastapi
+  base_url: "${ZEUS_CORE_URL:-http://localhost:8000}"
+
+# Agents in the olympian swarm.
+# Each entry maps to a definition in orchestration/agents/<name>.yaml
+agents:
+  - name: iris
+    definition: agents/iris.yaml
+    auto_start: false          # started manually during ingest runs
+
+  - name: mnemosyne
+    definition: agents/mnemosyne.yaml
+    auto_start: false          # invoked by other agents via bus
+
+  - name: athena
+    definition: agents/athena.yaml
+    auto_start: false          # invoked by other agents via bus
+
+  - name: oracle
+    definition: agents/oracle.yaml
+    auto_start: true           # always running — serves context to swarm
+
+  - name: orpheus
+    definition: agents/orpheus.yaml
+    auto_start: false          # started when voice interface is active
+
+# Safety: all LLM output is filtered through aegis before reaching the user
+safety:
+  provider: aegis
+  policy_dir: "../safety/policies"
+  default_policy: standard
+  # Hard-block: aegis rejects outputs regardless of policy
+  hard_blocks:
+    - pii_leak
+    - self_harm
+    - tool_abuse
+
+# Logging
+logging:
+  dev:
+    level: DEBUG
+    format: text
+  prod:
+    level: INFO
+    format: json

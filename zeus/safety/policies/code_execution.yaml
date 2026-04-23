@@ -1,0 +1,15 @@
+name: code_execution
+description: Dev agent — stricter code suggestions.
+rules:
+  - name: no_rm_rf_root
+    pattern: 'rm\s+-rf\s+/(\s|$)'
+    action: reject
+    message: "Code that deletes system files is not allowed."
+  - name: sql_injection_smell
+    pattern: 'SELECT\s+.*FROM\s+.*WHERE.*\$\{'
+    action: flag_for_review
+    message: ""
+  - name: hardcoded_credential
+    pattern: '(?i)(password|api_key|secret)\s*=\s*[''"][^''"]+[''"]'
+    action: reject
+    message: "Hardcoded credentials are not allowed."

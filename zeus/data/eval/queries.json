@@ -1,0 +1,64 @@
+[
+  {
+    "query": "What is Zeus and what problem does it solve for Chris?",
+    "expected_sources": [
+      "context_pack",
+      "markdown:"
+    ],
+    "tags": ["zeus", "project", "overview"]
+  },
+  {
+    "query": "What are the main Zeus subsystems and their Greek names?",
+    "expected_sources": [
+      "context_pack",
+      "markdown:"
+    ],
+    "tags": ["architecture", "greek-naming"]
+  },
+  {
+    "query": "Where does Zeus store memories and what vector DB does it use?",
+    "expected_sources": [
+      "context_pack",
+      "markdown:"
+    ],
+    "tags": ["memory", "qdrant", "mem0"]
+  },
+  {
+    "query": "What is my Obsidian LiveSync vault and how does it get ingested?",
+    "expected_sources": [
+      "markdown:notes/obsidian-vault",
+      "markdown:"
+    ],
+    "tags": ["obsidian", "ingest", "iris"]
+  },
+  {
+    "query": "What models are used in dev vs prod for Zeus?",
+    "expected_sources": [
+      "context_pack",
+      "markdown:"
+    ],
+    "tags": ["models", "ollama", "claude"]
+  },
+  {
+    "query": "What ports does the Zeus stack typically run on (core, qdrant, ollama)?",
+    "expected_sources": [
+      "markdown:"
+    ],
+    "tags": ["ports", "compose"]
+  },
+  {
+    "query": "How do I run Iris ingest for markdown notes with a dry-run preview?",
+    "expected_sources": [
+      "markdown:"
+    ],
+    "tags": ["iris", "ingest", "cli"]
+  },
+  {
+    "query": "What is Project N.O.M.A.D. and how will Zeus integrate with it?",
+    "expected_sources": [
+      "markdown:project-nomad-integration.md"
+    ],
+    "tags": ["nomad", "integration"]
+  }
+]
+

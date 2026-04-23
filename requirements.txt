@@ -1,0 +1,36 @@
+# zeus/requirements.txt — Core dependencies for Sprint 0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+pydantic>=2.0.0
+# mem0ai removed April 2026 — MemoryStore (zeus/memory/store.py) now owns the
+# memory layer on Qdrant directly. Do NOT re-add without a migration plan.
+# LiteLLM is explicitly forbidden due to the March 2026 supply-chain attack.
+ollama>=0.4.0
+qdrant-client>=1.17.0
+# Hybrid retrieval: BM25 sparse embeddings for KnowledgeStore (Qdrant/bm25 model).
+fastembed>=0.3.6
+# Cross-encoder reranker: BAAI/bge-reranker-v2-m3, gated by ZEUS_KNOWLEDGE_RERANK=1.
+FlagEmbedding>=1.2.10
+python-dotenv>=1.0.0
+rich>=13.0.0
+anthropic>=0.30.0
+websockets>=12.0
+mcp>=1.0.0
+python-multipart>=0.0.14
+pyyaml>=6.0
+# Sprint 9 — Observability + Scheduled Ingest
+apscheduler>=3.10.0
+# Sprint 10 — Additional Ingest Sources
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.2.0
+beautifulsoup4>=4.12.0
+gitpython>=3.1.0
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.2.0
+pytest>=8.0.0
+pdfminer.six>=20221105
+# Iris integrations
+python-telegram-bot>=21.0
+# Kiwix ZIM ingest (KiwixZimSource → zeus_knowledge). Requires libzim-dev at build.
+libzim>=3.1.0

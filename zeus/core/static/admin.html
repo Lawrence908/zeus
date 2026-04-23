@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zeus Admin</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --accent: #7c3aed;
+      --green: #10b981;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 13px;
+      padding: 24px;
+    }
+    h1 { font-size: 20px; color: var(--accent); margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 11px; margin-bottom: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 12px; }
+    .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: var(--muted); }
+    .stat-val { font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; color: var(--muted); font-weight: 400; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 8px 8px; }
+    td { padding: 6px 8px; border-top: 1px solid var(--border); vertical-align: top; }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+    }
+    .badge-running  { background: #10b98120; color: var(--green); }
+    .badge-stopped  { background: #64748b20; color: var(--muted); }
+    .badge-error    { background: #ef444420; color: var(--red); }
+    .badge-starting { background: #f59e0b20; color: var(--yellow); }
+    .full { grid-column: 1 / -1; }
+    .refresh-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; color: var(--muted); font-size: 11px; }
+    #refresh-btn {
+      background: var(--accent); color: white; border: none; border-radius: 4px;
+      padding: 4px 12px; cursor: pointer; font-size: 11px; font-family: inherit;
+    }
+    #refresh-btn:hover { opacity: 0.85; }
+    #last-updated { margin-left: auto; }
+    .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+    .err { color: var(--red); }
+  </style>
+</head>
+<body>
+  <h1>⚡ Zeus Admin</h1>
+  <p class="subtitle">Observability dashboard — auto-refreshes every 30s</p>
+
+  <div class="refresh-bar">
+    <button id="refresh-btn" onclick="load()">Refresh</button>
+    <button id="reset-log-btn" type="button" style="background:var(--border);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:11px;font-family:inherit;">Reset query log</button>
+    <a href="/ingest" style="color:var(--accent);text-decoration:none;font-size:11px;">Iris ingest (app UI) →</a>
+    <span id="last-updated">Loading…</span>
+  </div>
+
+  <!-- Row 0: Diagnostics (Ollama / Zeus scope) -->
+  <div class="grid">
+    <div class="card full" id="diag-card">
+      <h2>Diagnostics</h2>
+      <div id="diag-content"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- Row 1: Uptime stats + Scheduler -->
+  <div class="grid">
+    <div class="card" id="sys-card">
+      <h2>System</h2>
+      <div id="sys-content"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="card" id="sched-card">
+      <h2>Scheduler</h2>
+      <div id="sched-content"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- Row 2: Agent swarm (full width) -->
+  <div class="grid">
+    <div class="card full" id="agents-card">
+      <h2>Agent Swarm</h2>
+      <div id="agents-content"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- Row 3: Ingest stats + Recent queries -->
+  <div class="grid">
+    <div class="card" id="ingest-card">
+      <h2>Ingest / Mnemosyne</h2>
+      <div id="ingest-content"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="card" id="queries-card">
+      <h2>Recent Queries</h2>
+      <div id="queries-content"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+
+<script>
+function badge(status) {
+  const cls = {running: 'badge-running', stopped: 'badge-stopped', error: 'badge-error', starting: 'badge-starting'}[status] || 'badge-stopped';
+  return `<span class="badge ${cls}">${status}</span>`;
+}
+
+function ts(ms) {
+  return new Date(ms).toLocaleTimeString();
+}
+
+async function loadMetrics() {
+  const r = await fetch('/admin/metrics');
+  if (!r.ok) throw new Error(`metrics ${r.status}`);
+  return r.json();
+}
+
+async function loadIngest() {
+  const r = await fetch('/admin/ingest/stats');
+  if (!r.ok) throw new Error(`ingest ${r.status}`);
+  return r.json();
+}
+
+async function loadDiagnostics() {
+  const r = await fetch('/admin/diagnostics');
+  if (!r.ok) throw new Error(`diagnostics ${r.status}`);
+  return r.json();
+}
+
+async function clearQueryLog() {
+  const r = await fetch('/admin/query-log/clear', { method: 'POST' });
+  if (!r.ok) throw new Error(`clear ${r.status}`);
+  return r.json();
+}
+
+function renderDiagnostics(d) {
+  const rows = [
+    ['Zeus PID (this process)', d.zeus_pid],
+    ['Ollama loaded models', d.ollama_running_model_count != null ? d.ollama_running_model_count : '—'],
+  ];
+  let err = '';
+  if (d.ollama_ps_error) err = `<div class="err" style="margin-top:8px">Ollama /api/ps: ${d.ollama_ps_error}</div>`;
+  const note = `<p style="color:var(--muted);font-size:11px;margin-top:10px;line-height:1.4">${d.scope_note || ''}</p>`;
+  return rows.map(([l, v]) =>
+    `<div class="stat-row"><span class="stat-label">${l}</span><span class="stat-val">${v}</span></div>`
+  ).join('') + err + note;
+}
+
+function renderSystem(data) {
+  const rows = [
+    ['Uptime', `${Math.floor(data.uptime_seconds / 60)}m ${Math.floor(data.uptime_seconds % 60)}s`],
+    ['Recent queries', data.recent_query_count],
+    ['Avg latency', data.avg_latency_ms != null ? `${data.avg_latency_ms} ms` : '—'],
+  ];
+  return rows.map(([l, v]) =>
+    `<div class="stat-row"><span class="stat-label">${l}</span><span class="stat-val">${v}</span></div>`
+  ).join('');
+}
+
+function renderScheduler(sched) {
+  if (!sched || !sched.running) return '<div class="empty">Scheduler not running</div>';
+  if (!sched.jobs || sched.jobs.length === 0) return '<div class="empty">No scheduled jobs</div>';
+  return `<table><thead><tr><th>Job</th><th>Next run</th></tr></thead><tbody>` +
+    sched.jobs.map(j =>
+      `<tr><td>${j.id}</td><td>${j.next_run ? new Date(j.next_run).toLocaleString() : '—'}</td></tr>`
+    ).join('') +
+    `</tbody></table>`;
+}
+
+function renderAgents(data) {
+  const env = data.environment || 'dev';
+  const agents = data.agents || {};
+  const names = Object.keys(agents);
+  if (names.length === 0) return '<div class="empty">No agents loaded</div>';
+  const envLabel = env === 'prod' ? '⬡ LOCAL' : '☁ CLOUD';
+  const activeModel = data.active_model || '—';
+  return `<div style="margin-bottom:8px;font-size:11px;color:var(--muted)">
+    Environment: <strong style="color:var(--fg)">${env.toUpperCase()}</strong>
+    (${envLabel}) — active model: <strong style="color:#00d4ff">${activeModel}</strong>
+    (switch via Settings &rarr; Model)
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th>Status</th><th>Active Model</th><th>Policy</th><th>Description</th></tr></thead>
+    <tbody>` +
+    names.map(n => {
+      const a = agents[n];
+      const isLocal = !(a.model || '').includes('claude');
+      const modelStyle = isLocal ? 'color:#00d4ff' : 'color:#f5a623';
+      return `<tr>
+        <td><strong>${n}</strong></td>
+        <td>${badge(a.status)}</td>
+        <td style="${modelStyle}">${a.model || '—'}</td>
+        <td>${a.safety_policy || '—'}</td>
+        <td style="color:var(--muted)">${a.description || ''}</td>
+      </tr>`;
+    }).join('') +
+    `</tbody></table>`;
+}
+
+function renderIngest(data) {
+  if (data.error) return `<div class="err">${data.error}</div>`;
+  const cols = data.collections || {};
+  const names = Object.keys(cols);
+  if (names.length === 0) return '<div class="empty">No collections found</div>';
+  return `<table>
+    <thead><tr><th>Collection</th><th>Points</th><th>Status</th></tr></thead>
+    <tbody>` +
+    names.map(n => {
+      const c = cols[n];
+      return `<tr>
+        <td>${n}</td>
+        <td>${c.points_count ?? c.vectors_count ?? '—'}</td>
+        <td>${c.status}</td>
+      </tr>`;
+    }).join('') +
+    `</tbody></table>`;
+}
+
+function renderQueries(queries) {
+  if (!queries || queries.length === 0) return '<div class="empty">No queries yet</div>';
+  const rows = [...queries].reverse().slice(0, 15);
+  return `<table>
+    <thead><tr><th>ID</th><th>Path</th><th>Latency</th><th>Status</th></tr></thead>
+    <tbody>` +
+    rows.map(q =>
+      `<tr>
+        <td style="color:var(--muted)">${q.request_id || '—'}</td>
+        <td>${q.path}</td>
+        <td>${q.latency_ms} ms</td>
+        <td>${q.status}</td>
+      </tr>`
+    ).join('') +
+    `</tbody></table>`;
+}
+
+async function load() {
+  try {
+    const [metrics, ingest, diag] = await Promise.all([loadMetrics(), loadIngest(), loadDiagnostics()]);
+
+    document.getElementById('diag-content').innerHTML = renderDiagnostics(diag);
+    document.getElementById('sys-content').innerHTML = renderSystem(metrics);
+    document.getElementById('sched-content').innerHTML = renderScheduler(metrics.scheduler);
+    document.getElementById('agents-content').innerHTML = renderAgents(metrics.agents);
+    document.getElementById('ingest-content').innerHTML = renderIngest(ingest);
+    document.getElementById('queries-content').innerHTML = renderQueries(metrics.recent_queries);
+
+    document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+  } catch (err) {
+    document.getElementById('last-updated').textContent = `Error: ${err.message}`;
+  }
+}
+
+document.getElementById('reset-log-btn').addEventListener('click', async () => {
+  try {
+    await clearQueryLog();
+    await load();
+  } catch (e) {
+    document.getElementById('last-updated').textContent = 'Reset error: ' + (e instanceof Error ? e.message : String(e));
+  }
+});
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
