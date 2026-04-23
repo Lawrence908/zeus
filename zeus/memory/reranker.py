@@ -64,10 +64,15 @@ class BgeReranker:
         self.model_id = model_id
         self.device = device
 
-    def score_pairs(self, pairs: Sequence[tuple[str, str]]) -> list[float]:
+    def score_pairs(
+        self,
+        pairs: Sequence[tuple[str, str]],
+        *,
+        batch_size: int = 32,
+    ) -> list[float]:
         if not pairs:
             return []
-        raw = self._model.predict(list(pairs))
+        raw = self._model.predict(list(pairs), batch_size=batch_size)
         try:
             return [float(x) for x in raw]
         except TypeError:

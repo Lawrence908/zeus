@@ -300,6 +300,10 @@ class KnowledgeStore:
 
         cand_k = candidate_k or max(top_k * 4, 20)
         cand_k = min(cand_k, 40)
+        # CPU reranker scales linearly with candidates; 20 is enough for the
+        # rerank pass while staying within conversational latency budgets.
+        if RERANK_ENABLED:
+            cand_k = min(cand_k, 20)
 
         qfilter = self._build_filter(user_id=user_id, sources=sources)
 
