@@ -34,13 +34,15 @@ def embed_texts(
         try:
             parsed_num_ctx = int(raw_num_ctx.strip())
             if parsed_num_ctx <= 0:
-                raise ValueError("num_ctx must be a positive integer")
+                raise ValueError(
+                    f"ZEUS_EMBED_NUM_CTX must be positive, got {parsed_num_ctx}"
+                )
             num_ctx = parsed_num_ctx
         except ValueError:
             logger.warning(
                 "Invalid ZEUS_EMBED_NUM_CTX=%r; falling back to default %d",
                 raw_num_ctx,
-                num_ctx,
+                DEFAULT_EMBED_NUM_CTX,
             )
 
     vectors: list[list[float]] = []
