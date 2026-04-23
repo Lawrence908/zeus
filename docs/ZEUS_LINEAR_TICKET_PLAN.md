@@ -757,10 +757,6 @@ Re-enable `ZEUS_KNOWLEDGE_RERANK=1` in prod only when median rerank latency on a
 
 ---
 
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
->>>>>>> Stashed changes
 ## Key Dependencies
 
 - **LAB-48 (Context API)** blocks Projects 3, 4, 5, 6, 7, 8
