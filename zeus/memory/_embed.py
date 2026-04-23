@@ -6,6 +6,9 @@ import os
 import httpx
 
 DEFAULT_EMBED_DIMS = 768  # nomic-embed-text
+# nomic-embed-text:v1.5 was trained with n_ctx=2048; asking for more triggers a
+# llama.cpp "requested context size too large" warning and wastes KV-cache VRAM.
+DEFAULT_EMBED_NUM_CTX = 2048
 
 
 def _timeout() -> httpx.Timeout:
@@ -22,13 +25,20 @@ def embed_texts(
     """Embed each text via Ollama's /api/embeddings. Ollama has no batch endpoint."""
     url = (ollama_url or os.getenv("OLLAMA_URL", "http://localhost:11435")).rstrip("/")
     embed_model = model or os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text")
+    keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
+    num_ctx = int(os.getenv("ZEUS_EMBED_NUM_CTX", str(DEFAULT_EMBED_NUM_CTX)))
 
     vectors: list[list[float]] = []
     with httpx.Client(timeout=_timeout()) as client:
         for text in texts:
             resp = client.post(
                 f"{url}/api/embeddings",
-                json={"model": embed_model, "prompt": text},
+                json={
+                    "model": embed_model,
+                    "prompt": text,
+                    "keep_alive": keep_alive,
+                    "options": {"num_ctx": num_ctx},
+                },
             )
             resp.raise_for_status()
             emb = resp.json().get("embedding")

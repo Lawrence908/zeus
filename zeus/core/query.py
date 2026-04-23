@@ -294,6 +294,8 @@ async def _collect_retrieval_context(
         )
 
     async def _prof_task() -> list[str]:
+        if not use_context:
+            return []
         return await asyncio.to_thread(
             get_profile_facts, user_id=ZEUS_USER_ID, top_k=8
         )
