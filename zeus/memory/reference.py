@@ -99,6 +99,11 @@ class KiwixClient:
                 resp.raise_for_status()
                 root = ET.fromstring(resp.text)
             except Exception as exc:
+                if self._book_ids is not None:
+                    logger.warning(
+                        "kiwix catalog fetch failed, using cached book ids: %s", exc
+                    )
+                    return self._book_ids
                 logger.warning("kiwix catalog fetch failed: %s", exc)
                 return []
 
