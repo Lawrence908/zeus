@@ -1,6 +1,7 @@
 # zeus/memory/_embed.py — Shared Ollama embedding helper for MemoryStore + KnowledgeStore.
 from __future__ import annotations
 
+import logging
 import os
 
 import httpx
@@ -9,6 +10,7 @@ DEFAULT_EMBED_DIMS = 768  # nomic-embed-text
 # nomic-embed-text:v1.5 was trained with n_ctx=2048; asking for more triggers a
 # llama.cpp "requested context size too large" warning and wastes KV-cache VRAM.
 DEFAULT_EMBED_NUM_CTX = 2048
+logger = logging.getLogger(__name__)
 
 
 def _timeout() -> httpx.Timeout:
@@ -26,7 +28,20 @@ def embed_texts(
     url = (ollama_url or os.getenv("OLLAMA_URL", "http://localhost:11435")).rstrip("/")
     embed_model = model or os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text")
     keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
-    num_ctx = int(os.getenv("ZEUS_EMBED_NUM_CTX", str(DEFAULT_EMBED_NUM_CTX)))
+    raw_num_ctx = os.getenv("ZEUS_EMBED_NUM_CTX")
+    num_ctx = DEFAULT_EMBED_NUM_CTX
+    if raw_num_ctx is not None:
+        try:
+            parsed_num_ctx = int(raw_num_ctx.strip())
+            if parsed_num_ctx <= 0:
+                raise ValueError("num_ctx must be a positive integer")
+            num_ctx = parsed_num_ctx
+        except ValueError:
+            logger.warning(
+                "Invalid ZEUS_EMBED_NUM_CTX=%r; falling back to default %d",
+                raw_num_ctx,
+                num_ctx,
+            )
 
     vectors: list[list[float]] = []
     with httpx.Client(timeout=_timeout()) as client:
