@@ -676,6 +676,62 @@ Extend the existing retrieval eval with labelled ground-truth queries (`profile_
 
 ---
 
+## Retrieval + Fact-Extraction Spikes (April 2026) — results + tabled follow-ups
+
+Four pre-implementation spikes from the hand-rolled memory / small-LLM / hybrid-retrieval plan (`/home/chris/.claude/plans/ok-i-tried-another-serene-lagoon.md`) ran against the live corpus (10,580 → 275k knowledge chunks across chatgpt, obsidian, markdown, newsletter, git). Summaries below; results JSONs under `tests/`.
+
+### Spike 1: 30-query retrieval baseline ✅ Done
+**Files:** `tests/retrieval_eval.py`, `tests/retrieval_eval_baseline.json`, `tests/retrieval_eval_dense_only.json`
+
+Dense-only baseline on the existing `KnowledgeStore`: hit@1 = 0.60, hit@5 = 0.867, hit@10 = 0.933, MRR@10 = 0.71 over 30 hand-written queries covering Zeus system docs, astronomy coursework, homelab, chatgpt conversations, TLDR newsletter, git. Eval writes per-query report + aggregate JSON; optional `ZEUS_RETRIEVAL_MIN_HIT5` gate for CI.
+
+### Spike 2: Hybrid (dense + BM25 RRF) vs dense-only ✅ Done
+**Files:** `tests/retrieval_eval_baseline.json` (hybrid run)
+
+No measurable lift at top-10 on this query set (keyword criterion already saturated at 86.7% headroom). Hybrid is kept on by default (`ZEUS_KNOWLEDGE_HYBRID=1`) because it's free, pairs well with rerank, and the eval's keyword-match criterion is a blunt instrument — a ground-truth extension (LAB-NEW-D) should give hybrid a fairer comparison.
+
+### Spike 3: BGE-reranker-v2-m3 on CPU ✅ Done (rerank tabled for prod)
+**Files:** `zeus/memory/reranker.py`, `tests/retrieval_eval_hybrid_rerank.json`
+
+Real lift: hit@1 0.60 → **0.867**, MRR@10 0.71 → **0.875**. But CPU latency was 59 min for 30 queries × 40 candidates — ~2 min/query, unusable in a live chat path. Also uncovered one regression (Amazon Leo antenna query lost its top-10 hit to reranker score noise).
+
+Action: `ZEUS_KNOWLEDGE_RERANK` stays `0` in prod. See LAB-NEW-F below for the GPU path that makes this viable.
+
+### Spike 4: Fact-extraction provider shootout ✅ Done (2 router fixes tabled)
+**Files:** `tests/fact_extract_spike.py`, `tests/fact_extract_spike_results.json`
+
+20 representative messages × {gemini_paid, anthropic_haiku, ollama} with `response_format=FactExtraction, min_privacy_tier=1`:
+
+| Provider | Schema OK | p50 / p95 | Cost (20 calls) | Failure mode |
+|---|---|---|---|---|
+| gemini_paid (2.5-flash-lite) | 12/20 | 1.6s / 2.8s | $0.0038 | HTTP 429 after ~12 rapid calls |
+| anthropic_haiku (4.5) | **20/20** | 2.2s / 7.0s | $0.0653 | none |
+| ollama (qwen2.5:7b) | 0/20 | — | $0 | ReadTimeout on every call |
+
+Chain order `gemini_paid → anthropic_haiku → ollama` is confirmed as the right default for tier-1 fact extraction; two router fixes are needed before the chain is trustworthy in prod (LAB-NEW-E).
+
+### LAB-NEW-E: `small_llm_call` router hardening (tabled)
+**Files:** `zeus/core/small_llm.py` · **Priority:** Medium · **Parent:** LAB-NEW-A
+
+Two targeted fixes before Spike 4 numbers can be trusted in prod:
+
+1. **Gemini 429 backoff + jitter.** On HTTP 429 from `gemini_paid`, retry with exponential backoff (2s, 5s, 15s + jitter) up to 3 attempts before falling through to the next provider. Current behaviour is fail-fast, which burned $0.06 on the shootout because Haiku absorbed every Gemini rate-limit.
+2. **Ollama structured-output timeout.** Raise `_call_ollama` read timeout from the default 120s to 300s (or stream + assemble) — qwen2.5:7b with a full extraction prompt + JSON schema exceeds 120s cold. After this, re-run Spike 4; if qwen still fails schema, ollama is empty-only fallback until we move to qwen2.5:14b on a larger GPU.
+
+Verify: re-run `tests/fact_extract_spike.py` after each fix lands; Gemini row should be 20/20; ollama row should be schema_ok > 0.
+
+### LAB-NEW-F: Reranker GPU sidecar (tabled)
+**Files:** TBD — likely a small FastAPI service on the 5080 (WSL) or a separate box · **Priority:** Low · **Parent:** LAB-NEW-A
+
+Spike 3 showed +26.7 pp hit@1 and +0.165 MRR when reranker is on — the quality is there. CPU latency isn't. Prod path: run `BAAI/bge-reranker-v2-m3` on a GPU that isn't the 3080 (olympus keeps 10 GB dedicated to qwen2.5:7b). Two options, listed by effort:
+
+- **Option A** (small): Tailscale the dev 5080 tower, expose a tiny `/rerank` endpoint, swap `zeus/memory/reranker.py` to HTTP-call mode. Works until the 5080 box is off.
+- **Option B** (proper): A dedicated reranker service in `compose.yaml` on a host with spare VRAM (Jetson, second 3080, cloud GPU).
+
+Re-enable `ZEUS_KNOWLEDGE_RERANK=1` in prod only when median rerank latency on a 20-candidate pass stays under 500 ms.
+
+---
+
 ## Key Dependencies
 
 - **LAB-48 (Context API)** blocks Projects 3, 4, 5, 6, 7, 8
