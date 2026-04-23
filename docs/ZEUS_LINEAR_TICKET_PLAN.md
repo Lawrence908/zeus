@@ -751,7 +751,6 @@ Conclusion: chain `gemini_paid → anthropic_haiku → ollama` works in prod as 
 
 ### LAB-NEW-F: Reranker GPU sidecar (tabled)
 
->>>>>>> Stashed changes
 **Files:** TBD — likely a small FastAPI service on the 5080 (WSL) or a separate box · **Priority:** Low · **Parent:** LAB-NEW-A
 
 Spike 3 showed +26.7 pp hit@1 and +0.165 MRR when reranker is on — the quality is there. CPU latency isn't. Prod path: run `BAAI/bge-reranker-v2-m3` on a GPU that isn't the 3080 (olympus keeps 10 GB dedicated to qwen2.5:7b). Two options, listed by effort:
