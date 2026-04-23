@@ -48,11 +48,16 @@ _SCHEMA: dict[str, Any] = {
 _SPEC = ToolSpec(
     name="web_search",
     description=(
-        "Search the public web for current information (news, facts, docs, "
-        "events). Use when the user asks for something that depends on "
-        "up-to-date information outside your training data or the user's "
-        "personal context. Returns a short list of title + URL + snippet. "
-        "If a required detail is unclear, ask the user before searching."
+        "Search the public web for current, up-to-date information. Call "
+        "this tool whenever the user asks about news, current events, "
+        "recent releases, live prices, weather, scores, or anything whose "
+        "correct answer has likely changed since your training data. "
+        "Ground your reply in the returned snippets — do NOT blend them "
+        "with prior training knowledge, which may be stale or contradict "
+        "the live results. Returns a short list of title + URL + snippet. "
+        "When calling this tool more than once with the same topic, keep "
+        "the arguments identical (including optional `count`) so cached "
+        "results can be reused."
     ),
     parameters=_SCHEMA,
     aegis_policy="tool_arguments",

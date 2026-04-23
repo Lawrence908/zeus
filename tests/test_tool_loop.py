@@ -499,12 +499,24 @@ class TestCurrentTime:
         spec, _ = entry
         assert spec.cacheable is False
 
-    def test_iso_default(self) -> None:
+    def test_human_is_default(self) -> None:
         register_current_time()
         _, handler = registry.get("current_time")  # type: ignore[misc]
         result = asyncio.run(handler({}))
         assert result.is_error is False
-        # ISO 8601 with offset: contains 'T' and either 'Z', '+', or '-' after digits.
+        # Human default: "HH:MM:SS TZ on Weekday, Month Day, Year"
+        # Contains "on " separator and a 4-digit year.
+        assert " on " in result.content
+        assert "2026" in result.content or "2027" in result.content
+        # 24-hour clock: first char should be 0-2.
+        assert result.content[0].isdigit()
+
+    def test_iso_format_explicit(self) -> None:
+        register_current_time()
+        _, handler = registry.get("current_time")  # type: ignore[misc]
+        result = asyncio.run(handler({"format": "iso"}))
+        assert result.is_error is False
+        # ISO 8601 with offset: contains 'T' between date and time.
         assert "T" in result.content
 
     def test_unix_format(self) -> None:
@@ -515,13 +527,21 @@ class TestCurrentTime:
         assert result.content.isdigit()
         assert int(result.content) > 1_700_000_000  # sanity: post-2023
 
-    def test_explicit_timezone(self) -> None:
+    def test_explicit_timezone_iso(self) -> None:
+        register_current_time()
+        _, handler = registry.get("current_time")  # type: ignore[misc]
+        result = asyncio.run(handler({"timezone": "UTC", "format": "iso"}))
+        assert result.is_error is False
+        # UTC isoformat ends with '+00:00'
+        assert result.content.endswith("+00:00")
+
+    def test_explicit_timezone_human_includes_abbr(self) -> None:
         register_current_time()
         _, handler = registry.get("current_time")  # type: ignore[misc]
         result = asyncio.run(handler({"timezone": "UTC"}))
         assert result.is_error is False
-        # UTC isoformat ends with '+00:00'
-        assert result.content.endswith("+00:00")
+        # Human format with UTC tz should include the 'UTC' abbreviation.
+        assert "UTC" in result.content
 
     def test_invalid_timezone_returns_error(self) -> None:
         register_current_time()
@@ -529,14 +549,6 @@ class TestCurrentTime:
         result = asyncio.run(handler({"timezone": "Nowhere/Nonexistent"}))
         assert result.is_error is True
         assert "timezone" in result.content.lower()
-
-    def test_human_format(self) -> None:
-        register_current_time()
-        _, handler = registry.get("current_time")  # type: ignore[misc]
-        result = asyncio.run(handler({"format": "human", "timezone": "UTC"}))
-        assert result.is_error is False
-        # "Monday, ..." etc.
-        assert "," in result.content
 
 
 # ---------------------------------------------------------------------------

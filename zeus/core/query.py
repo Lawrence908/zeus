@@ -423,6 +423,7 @@ def _build_system_prompt(
     conversation_section: str,
     knowledge_section: str = "",
     reference_section: str = "",
+    tools_section: str = "",
 ) -> str:
     """Render zeus/core/prompts/chat_system.md with the current runtime context.
 
@@ -438,7 +439,28 @@ def _build_system_prompt(
         knowledge_section=knowledge_section.strip() or "(No knowledge hits for this query.)",
         reference_section=reference_section.strip() or "(No reference hits — kiwix/NOMAD returned nothing or are unreachable.)",
         conversation_section=conversation_section.strip() or "(No prior turns in this session.)",
+        tools_section=tools_section.strip() or "(No tools available for this turn.)",
     )
+
+
+def _build_tools_section() -> str:
+    """Format the registered-tools list for the system prompt when tools are enabled.
+
+    Returns an empty string when tools are disabled or no tools are registered
+    so the chat_system.md template falls back to "(No tools available for this turn.)".
+    """
+    from zeus.core.tools import registry as tool_registry
+    from zeus.core.tools import tools_enabled
+
+    if not (tools_enabled() and tool_registry.available()):
+        return ""
+    lines: list[str] = []
+    for spec in tool_registry.list_specs():
+        # First sentence of the description is usually the most load-bearing —
+        # keep the whole thing for Qwen since it needs the forceful "you must
+        # call this" language that lives in the full description.
+        lines.append(f"- `{spec.name}` — {spec.description}")
+    return "\n".join(lines)
 
 
 def _is_empty_or_failed_reply(reply: str) -> bool:
@@ -515,6 +537,7 @@ class QueryEngine:
             conversation_section=conversation_section,
             knowledge_section=knowledge_section,
             reference_section=reference_section,
+            tools_section=_build_tools_section(),
         )
         user_prompt = f"User: {message}\nAssistant:"
         t_llm = time.monotonic()
@@ -646,6 +669,7 @@ class QueryEngine:
             conversation_section=conversation_section,
             knowledge_section=knowledge_section,
             reference_section=reference_section,
+            tools_section=_build_tools_section(),
         )
         user_prompt = f"User: {message}\nAssistant:"
 
