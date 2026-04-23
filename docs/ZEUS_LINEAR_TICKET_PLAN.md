@@ -710,6 +710,7 @@ Action: `ZEUS_KNOWLEDGE_RERANK` stays `0` in prod. See LAB-NEW-F below for the G
 
 Chain order `gemini_paid → anthropic_haiku → ollama` is confirmed as the right default for tier-1 fact extraction; two router fixes are needed before the chain is trustworthy in prod (LAB-NEW-E).
 
+<<<<<<< Updated upstream
 ### LAB-NEW-E: `small_llm_call` router hardening (tabled)
 **Files:** `zeus/core/small_llm.py` · **Priority:** Medium · **Parent:** LAB-NEW-A
 
@@ -721,6 +722,30 @@ Two targeted fixes before Spike 4 numbers can be trusted in prod:
 Verify: re-run `tests/fact_extract_spike.py` after each fix lands; Gemini row should be 20/20; ollama row should be schema_ok > 0.
 
 ### LAB-NEW-F: Reranker GPU sidecar (tabled)
+=======
+### LAB-NEW-E: `small_llm_call` router hardening ✅ Done (April 2026)
+
+**Files:** `zeus/core/small_llm.py`, `.env.example`, `tests/fact_extract_spike_results_v2.json`, `tests/fact_extract_spike_ollama_only.json` · **Priority:** Medium · **Parent:** LAB-NEW-A
+
+Two fixes landed:
+
+1. **Gemini 429 backoff + jitter** — new `ZEUS_SMALL_LLM_RETRY_DELAYS_MS` (default `2000,5000,15000`, ±20% jitter) retries 429s inside `_call_openai_compat` before falling through to the next provider. Applies to all OpenAI-compat providers (gemini_paid, groq, openrouter).
+2. **Ollama structured-output timeout** — `ZEUS_OLLAMA_SMALL_READ_TIMEOUT_SEC` (default `300`) replaces the hard-coded 120s read timeout in `_call_ollama`. Cold qwen2.5:7b loads that evict behind embeddings/reranker now have headroom.
+
+Verification (v2 re-run + isolated ollama run):
+
+| Provider        | v1               | v2 (router fixes, combined)          | v2-isolated (ollama)                                |
+| --------------- | ---------------- | ------------------------------------ | --------------------------------------------------- |
+| gemini_paid     | 12/20 (429s)     | 11/20 (persistent quota, 429/503)    | —                                                   |
+| anthropic_haiku | 20/20            | 20/20 (p50 2.2s, p95 7.0s)           | —                                                   |
+| ollama          | 0/20 (timeout)   | 0/20 (cold-reload after 15 min idle) | **20/20** (p50 2.8s, p95 5.1s, avg_conf 0.957)      |
+
+Conclusion: chain `gemini_paid → anthropic_haiku → ollama` works in prod as long as qwen stays warm. Remaining Gemini failures are upstream quota (Google API key tier), not retryable in-process; per-minute quota tuning is out of scope for this ticket.
+
+**Follow-up LAB-NEW-G**: VRAM contention between chat model (qwen2.5:7b), embedder (nomic-embed-text:v1.5), and reranker when it's enabled. On the 3080's 10 GB, `OLLAMA_MAX_LOADED_MODELS=2` means one of the three gets evicted under load and subsequent cold-reloads blow through 300s. Prod options: pin qwen + nomic with ollama preload; move reranker to a sidecar (LAB-NEW-F covers this for the 5080 path).
+
+### LAB-NEW-F: Reranker GPU sidecar (tabled)
+
 **Files:** TBD — likely a small FastAPI service on the 5080 (WSL) or a separate box · **Priority:** Low · **Parent:** LAB-NEW-A
 
 Spike 3 showed +26.7 pp hit@1 and +0.165 MRR when reranker is on — the quality is there. CPU latency isn't. Prod path: run `BAAI/bge-reranker-v2-m3` on a GPU that isn't the 3080 (olympus keeps 10 GB dedicated to qwen2.5:7b). Two options, listed by effort:

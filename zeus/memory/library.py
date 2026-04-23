@@ -155,12 +155,34 @@ class KnowledgeStore:
 
     def _embed_dense(self, texts: list[str]) -> list[list[float]]:
         """Call Ollama /api/embeddings once per text (no batch endpoint)."""
+        keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
+        # nomic-embed-text:v1.5 trains to 2048 tokens; pin num_ctx so Ollama
+        # doesn't allocate an 8192-slot KV cache (especially with NUM_PARALLEL>1).
+        raw_num_ctx = os.getenv("ZEUS_EMBED_NUM_CTX")
+        num_ctx = 2048
+        if raw_num_ctx is not None:
+            try:
+                parsed_num_ctx = int(raw_num_ctx.strip())
+                if parsed_num_ctx <= 0:
+                    raise ValueError("num_ctx must be a positive integer")
+                num_ctx = parsed_num_ctx
+            except ValueError:
+                logger.warning(
+                    "Invalid ZEUS_EMBED_NUM_CTX=%r; falling back to default %d",
+                    raw_num_ctx,
+                    num_ctx,
+                )
         vectors: list[list[float]] = []
         with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)) as client:
             for text in texts:
                 resp = client.post(
                     f"{self.ollama_url}/api/embeddings",
-                    json={"model": self.embed_model, "prompt": text},
+                    json={
+                        "model": self.embed_model,
+                        "prompt": text,
+                        "keep_alive": keep_alive,
+                        "options": {"num_ctx": num_ctx},
+                    },
                 )
                 resp.raise_for_status()
                 data = resp.json()
