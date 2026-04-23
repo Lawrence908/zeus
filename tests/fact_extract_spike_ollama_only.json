@@ -1,0 +1,517 @@
+{
+  "rows": [
+    {
+      "message_id": "m01",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2450,
+      "latency_ms": 2423,
+      "tokens_in": 1970,
+      "tokens_out": 119,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 1.0,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris Lawrence lives in Victoria, BC.",
+          "category": "identity",
+          "confidence": 1.0,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m02",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 5082,
+      "latency_ms": 5066,
+      "tokens_in": 1978,
+      "tokens_out": 354,
+      "cost_usd": 0.0,
+      "n_facts": 3,
+      "avg_confidence": 1.0,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris is a software developer.",
+          "category": "identity",
+          "confidence": 1.0,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris is a data-science student.",
+          "category": "identity",
+          "confidence": 1.0,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris will finish his degree in spring 2026.",
+          "category": "event",
+          "confidence": 1.0,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m03",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2212,
+      "latency_ms": 2190,
+      "tokens_in": 1970,
+      "tokens_out": 127,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris prefers plain text in Telegram replies.",
+          "category": "preference",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m04",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2329,
+      "latency_ms": 2290,
+      "tokens_in": 1971,
+      "tokens_out": 132,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 1.0,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris prefers not to use emdashes in any of his projects.",
+          "category": "preference",
+          "confidence": 1.0,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m05",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 4379,
+      "latency_ms": 4339,
+      "tokens_in": 1991,
+      "tokens_out": 291,
+      "cost_usd": 0.0,
+      "n_facts": 2,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Zeus runs on Olympus in production.",
+          "category": "other",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Zeus runs on the 5080 tower during development.",
+          "category": "other",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m06",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 3845,
+      "latency_ms": 3828,
+      "tokens_in": 1982,
+      "tokens_out": 244,
+      "cost_usd": 0.0,
+      "n_facts": 2,
+      "avg_confidence": 0.925,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris uses Tailscale to reach his homelab.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris runs OPNsense on a mini-PC for the firewall.",
+          "category": "skill",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m07",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 3041,
+      "latency_ms": 3001,
+      "tokens_in": 1994,
+      "tokens_out": 189,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 1,
+      "facts_preview": [
+        {
+          "text": "Chris has a meeting with Sarah Chen on 2026-05-03 at 14:00 PT.",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": true
+        }
+      ]
+    },
+    {
+      "message_id": "m08",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2968,
+      "latency_ms": 2643,
+      "tokens_in": 1983,
+      "tokens_out": 160,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 1.0,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris switched from mem0 to a hand-rolled MemoryStore in April 2026.",
+          "category": "decision",
+          "confidence": 1.0,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m09",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2632,
+      "latency_ms": 2600,
+      "tokens_in": 1973,
+      "tokens_out": 154,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Ship the Ruflo v3.5 agent runtime by end of Q2.",
+          "category": "task",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m10",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2708,
+      "latency_ms": 2527,
+      "tokens_in": 1976,
+      "tokens_out": 143,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris believes privacy-preserving local AI will matter more than ever by 2027.",
+          "category": "belief",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m11",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2411,
+      "latency_ms": 2385,
+      "tokens_in": 1984,
+      "tokens_out": 140,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 1,
+      "facts_preview": [
+        {
+          "text": "Chris's family physician is Dr. Michael Tang.",
+          "category": "identity",
+          "confidence": 0.95,
+          "contains_pii": true
+        }
+      ]
+    },
+    {
+      "message_id": "m12",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2349,
+      "latency_ms": 1946,
+      "tokens_in": 1980,
+      "tokens_out": 106,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris knows the recursive definition of Fibonacci sequence.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m13",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 738,
+      "latency_ms": 719,
+      "tokens_in": 1984,
+      "tokens_out": 5,
+      "cost_usd": 0.0,
+      "n_facts": 0,
+      "avg_confidence": null,
+      "n_pii": 0,
+      "facts_preview": []
+    },
+    {
+      "message_id": "m14",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 3927,
+      "latency_ms": 3904,
+      "tokens_in": 1976,
+      "tokens_out": 259,
+      "cost_usd": 0.0,
+      "n_facts": 2,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "A hash table supports average-case O(1) lookups.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "A hash table supports O(n) worst case lookups.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m15",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 4388,
+      "latency_ms": 4368,
+      "tokens_in": 1985,
+      "tokens_out": 290,
+      "cost_usd": 0.0,
+      "n_facts": 2,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris renewed his apartment lease at 123 Fort Street, Victoria.",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris's apartment lease is valid until 2027-03-31.",
+          "category": "other",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m16",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 3452,
+      "latency_ms": 2848,
+      "tokens_in": 1982,
+      "tokens_out": 167,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris adopted a cat named Mochi on 2026-01-15.",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m17",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 5037,
+      "latency_ms": 5002,
+      "tokens_in": 1979,
+      "tokens_out": 329,
+      "cost_usd": 0.0,
+      "n_facts": 3,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris uses Obsidian for personal notes.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris uses VS Code for Python.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris uses Claude Code as his AI coding assistant.",
+          "category": "skill",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m18",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 4486,
+      "latency_ms": 4462,
+      "tokens_in": 1975,
+      "tokens_out": 267,
+      "cost_usd": 0.0,
+      "n_facts": 2,
+      "avg_confidence": 0.925,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "The AstrID project is on pause.",
+          "category": "task",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "Chris will resume the AstrID project after completing Zeus's Phase 2.",
+          "category": "task",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m19",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 4404,
+      "latency_ms": 4380,
+      "tokens_in": 1985,
+      "tokens_out": 279,
+      "cost_usd": 0.0,
+      "n_facts": 2,
+      "avg_confidence": 0.925,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris decided to stop running n8n on daedalus.",
+          "category": "decision",
+          "confidence": 0.95,
+          "contains_pii": false
+        },
+        {
+          "text": "The reason for stopping n8n was a conflict with zeus-core on port 5678.",
+          "category": "other",
+          "confidence": 0.9,
+          "contains_pii": false
+        }
+      ]
+    },
+    {
+      "message_id": "m20",
+      "provider": "ollama",
+      "ok": true,
+      "provider_used": "ollama",
+      "model_used": "qwen2.5:7b-instruct",
+      "wall_ms": 2906,
+      "latency_ms": 2731,
+      "tokens_in": 1985,
+      "tokens_out": 165,
+      "cost_usd": 0.0,
+      "n_facts": 1,
+      "avg_confidence": 0.95,
+      "n_pii": 0,
+      "facts_preview": [
+        {
+          "text": "Chris had a birthday dinner with his mom at The Marina Restaurant.",
+          "category": "event",
+          "confidence": 0.95,
+          "contains_pii": false
+        }
+      ]
+    }
+  ]
+}
