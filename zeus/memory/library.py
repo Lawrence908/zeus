@@ -158,7 +158,20 @@ class KnowledgeStore:
         keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
         # nomic-embed-text:v1.5 trains to 2048 tokens; pin num_ctx so Ollama
         # doesn't allocate an 8192-slot KV cache (especially with NUM_PARALLEL>1).
-        num_ctx = int(os.getenv("ZEUS_EMBED_NUM_CTX", "2048"))
+        raw_num_ctx = os.getenv("ZEUS_EMBED_NUM_CTX")
+        num_ctx = 2048
+        if raw_num_ctx is not None:
+            try:
+                parsed_num_ctx = int(raw_num_ctx.strip())
+                if parsed_num_ctx <= 0:
+                    raise ValueError("num_ctx must be a positive integer")
+                num_ctx = parsed_num_ctx
+            except ValueError:
+                logger.warning(
+                    "Invalid ZEUS_EMBED_NUM_CTX=%r; falling back to default %d",
+                    raw_num_ctx,
+                    num_ctx,
+                )
         vectors: list[list[float]] = []
         with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)) as client:
             for text in texts:
