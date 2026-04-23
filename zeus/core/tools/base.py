@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-# snake_case, 2..40 chars, starts with a letter. Matches OpenAI / Anthropic /
+# snake_case, 2..41 chars, starts with a letter. Matches OpenAI / Anthropic /
 # Ollama tool-name conventions and is safe to drop into URLs and log lines.
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 

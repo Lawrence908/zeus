@@ -6,6 +6,7 @@
 # role="tool" follow-ups, associated by name + emission order).
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from zeus.core.tools.base import ToolCall, ToolResult, ToolSpec
@@ -97,8 +98,6 @@ def parse_ollama_message(msg: dict[str, Any], turn_idx: int) -> tuple[str, list[
         # Ollama's native endpoint returns a parsed object; the OpenAI-compat
         # endpoint returns a JSON string. Accept either.
         if isinstance(args_field, str):
-            import json
-
             try:
                 args = json.loads(args_field)
             except json.JSONDecodeError:

@@ -66,15 +66,23 @@ async def run_tool_loop(
 
     # Hard upper bound on loop iterations so a buggy model that keeps emitting
     # tool calls without progress cannot spin forever. max_calls is the
-    # per-query tool-call budget; each iteration can emit multiple calls.
-    iteration_cap = max(1, max_calls)
+    # per-query tool-call BUDGET (each iteration may emit multiple calls);
+    # iteration_cap gives one extra model turn so the model can compose a
+    # final reply after the last allowed tool call. Without the +1, callers
+    # using max_calls=1 would only ever get the pre-tool preamble back.
+    iteration_cap = max(2, max_calls + 1)
 
     while iterations < iteration_cap:
         iterations += 1
+        # Once the per-query tool-call budget is exhausted, withhold tools so
+        # the model is forced to compose a final reply from the results it
+        # already has, rather than emitting more calls that just become
+        # "cap reached" errors.
+        available_tools = [] if len(all_calls) >= max_calls else tools
         text, calls, stop_reason = await _run_llm_with_tools(
             system=system,
             messages=messages,
-            tools=tools,
+            tools=available_tools,
             max_tokens=max_tokens,
             turn_idx=iterations,
         )

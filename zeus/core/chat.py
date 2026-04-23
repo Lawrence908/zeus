@@ -13,7 +13,7 @@ from typing import Any, AsyncIterator, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger("zeus.chat")
 
@@ -59,7 +59,26 @@ class ChatAsyncRequest(BaseModel):
     # If set, the final ChatMessageResponse is POSTed to this URL once the
     # background query finishes. Meshtastic bridge uses this so Node-RED never
     # holds an HTTP connection open for long tool-using queries.
+    #
+    # Security: limited to http:// and https://. Private-IP and DNS rebinding
+    # protection is NOT enforced here because docker-internal hostnames
+    # (e.g. http://node-red:1880/...) and Tailscale addresses are valid
+    # callback targets in this homelab. If this endpoint is ever exposed past
+    # the trust boundary, gate this field behind an env-driven allowlist.
     callback_url: str | None = Field(None, max_length=2048)
+
+    @field_validator("callback_url", mode="before")
+    @classmethod
+    def _normalize_callback_url(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        lower = s.lower()
+        if not (lower.startswith("http://") or lower.startswith("https://")):
+            raise ValueError("callback_url must start with http:// or https://")
+        return s
 
 
 class ChatAsyncCreatedResponse(BaseModel):
@@ -218,7 +237,9 @@ async def _run_chat_job_background(
         return
 
     # Best-effort callback — one attempt, log the outcome, do not let a bad
-    # callback URL wedge the job record.
+    # callback URL wedge the job record. Prefer the shared app.state.http_client
+    # so we don't churn TCP connections per job; fall back to a per-call
+    # AsyncClient that is properly closed via `async with`.
     import httpx
 
     payload: dict[str, Any] = {
@@ -232,8 +253,11 @@ async def _run_chat_job_background(
         payload["error"] = job.error
 
     try:
-        client = http_client if http_client is not None else httpx.AsyncClient()
-        r = await client.post(callback_url, json=payload, timeout=10.0)
+        if http_client is not None:
+            r = await http_client.post(callback_url, json=payload, timeout=10.0)
+        else:
+            async with httpx.AsyncClient() as fallback:
+                r = await fallback.post(callback_url, json=payload, timeout=10.0)
         r.raise_for_status()
         job.callback_status = "ok"
     except Exception as exc:

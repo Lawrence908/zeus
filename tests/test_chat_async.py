@@ -96,6 +96,30 @@ class TestChatAsyncCreate:
         )
         assert resp.status_code == 202
 
+    def test_rejects_non_http_callback_url(self, client: TestClient) -> None:
+        # Validator must block file://, javascript:, gopher://, etc. — any
+        # scheme other than http/https is a foot-gun for SSRF.
+        for bad in ("file:///etc/passwd", "javascript:alert(1)", "ftp://internal/x", "no-scheme"):
+            r = client.post("/chat/async", json={"message": "hi", "callback_url": bad})
+            assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+
+    def test_normalizes_empty_callback_url_to_none(self, client: TestClient) -> None:
+        # Empty string and whitespace-only must collapse to None so the job
+        # never gets stuck in callback_status='pending' waiting on a callback
+        # that will never fire. (Copilot review on LAB-401.)
+        for empty in ("", "   ", "\n\t"):
+            r = client.post("/chat/async", json={"message": "hi", "callback_url": empty})
+            assert r.status_code == 202, f"expected 202 for {empty!r}"
+            job_id = r.json()["job_id"]
+            # Poll briefly for completion so callback_status settles.
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                j = client.get(f"/chat/async/{job_id}").json()
+                if j["status"] in ("done", "error"):
+                    break
+                time.sleep(0.05)
+            assert j["callback_status"] == "skipped", f"got {j['callback_status']} for {empty!r}"
+
 
 # ---------------------------------------------------------------------------
 # GET /chat/async/{job_id} — status + 404

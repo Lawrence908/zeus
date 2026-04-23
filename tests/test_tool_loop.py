@@ -313,7 +313,12 @@ class TestRunToolLoop:
     def test_max_calls_cap(self) -> None:
         _register_echo()
 
-        async def always_calls(*, system, messages, tools, max_tokens, turn_idx):
+        async def model(*, system, messages, tools, max_tokens, turn_idx):
+            # Realistic: model only emits tool calls when tools are offered.
+            # The loop withholds tools once the budget is spent so the model
+            # can compose a final reply from results it already has.
+            if not tools:
+                return ("Final composed answer.", [], "end_turn")
             return (
                 "",
                 [
@@ -326,9 +331,7 @@ class TestRunToolLoop:
                 "tool_use",
             )
 
-        with patch(
-            "zeus.core.query._run_llm_with_tools", side_effect=always_calls
-        ):
+        with patch("zeus.core.query._run_llm_with_tools", side_effect=model):
             out = asyncio.run(
                 run_tool_loop(
                     system="sys",
@@ -339,9 +342,43 @@ class TestRunToolLoop:
                     use_claude=False,
                 )
             )
-        # Three tool calls fire; iteration_cap == max_calls also bounds loops.
+        # 3 tool calls fire across iterations 1..3, then iteration 4 composes
+        # with tools=[] and produces the final reply.
         assert len(out.tool_calls) == 3
-        assert out.iterations == 3
+        assert out.iterations == 4
+        assert out.reply == "Final composed answer."
+        assert out.truncated is False  # no extra calls attempted after budget
+
+    def test_max_calls_one_still_gets_compose_turn(self) -> None:
+        """Regression: with max_calls=1 the loop must give the model a final
+        composing turn rather than returning the pre-tool preamble. (Copilot
+        review on LAB-398.)"""
+        _register_echo()
+
+        async def model(*, system, messages, tools, max_tokens, turn_idx):
+            if not tools:
+                return ("Composed reply after tool.", [], "end_turn")
+            return (
+                "I'll check.",
+                [ToolCall(call_id=f"c{turn_idx}", name="echo", arguments={"text": "hi"})],
+                "tool_use",
+            )
+
+        with patch("zeus.core.query._run_llm_with_tools", side_effect=model):
+            out = asyncio.run(
+                run_tool_loop(
+                    system="sys",
+                    user_prompt="x",
+                    tools=registry.list_specs(),
+                    max_tokens=128,
+                    max_calls=1,
+                    use_claude=False,
+                )
+            )
+        assert len(out.tool_calls) == 1
+        assert out.iterations == 2  # tool call + composition turn
+        assert out.reply == "Composed reply after tool."
+        assert out.truncated is False
 
     def test_unknown_tool_returns_error_result(self) -> None:
         # Registry is empty by default (conftest autouse fixture).
