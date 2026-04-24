@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from zeus.memory.search import search_memories
@@ -79,6 +80,79 @@ class KairosState:
             "last_action_summary": self.last_action_summary,
             "last_observations": list(self.last_observations),
         }
+
+
+# ------------------------------------------------------------------
+# Olympian read-side dispatch helpers
+# ------------------------------------------------------------------
+
+
+def _core_url() -> str:
+    return os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+
+
+async def _http_get_json(path: str, params: dict[str, Any] | None = None, timeout: float = 10.0) -> Any:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.get(f"{_core_url()}{path}", params=params)
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def _http_post_json(path: str, payload: dict[str, Any], timeout: float = 15.0) -> Any:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(f"{_core_url()}{path}", json=payload)
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def _dispatch_status_read(args: dict[str, Any]) -> Any:
+    return await _http_get_json("/admin/status_file")
+
+
+async def _dispatch_server_health(args: dict[str, Any]) -> Any:
+    return await _http_get_json("/admin/system")
+
+
+async def _dispatch_file_read(args: dict[str, Any]) -> Any:
+    path = str(args.get("path") or "").strip()
+    if not path:
+        raise ValueError("olympian_file_read requires 'path'")
+    return await _http_get_json("/vault/file", params={"path": path})
+
+
+async def _dispatch_file_search(args: dict[str, Any]) -> Any:
+    pattern = str(args.get("pattern") or "").strip()
+    if not pattern:
+        raise ValueError("olympian_file_search requires 'pattern'")
+    payload: dict[str, Any] = {
+        "pattern": pattern,
+        "max_results": max(1, min(500, int(args.get("max_results") or 50))),
+        "case_sensitive": bool(args.get("case_sensitive") or False),
+        "fixed_strings": bool(args.get("fixed_strings") or False),
+    }
+    if args.get("root"):
+        payload["root"] = str(args["root"])
+    return await _http_post_json("/vault/search", payload)
+
+
+async def _dispatch_calendar_today(args: dict[str, Any]) -> Any:
+    return await _http_get_json("/calendar/today")
+
+
+async def _dispatch_newsletter_latest(args: dict[str, Any]) -> Any:
+    data = await _http_get_json("/api/newsletter/digests", params={"limit": 1})
+    digests = (data or {}).get("digests") or []
+    return {"digest": digests[0] if digests else None, "exists": bool(digests)}
+
+
+_OLYMPIAN_READONLY_DISPATCH: dict[str, Any] = {
+    "olympian_status_read": _dispatch_status_read,
+    "olympian_server_health": _dispatch_server_health,
+    "olympian_file_read": _dispatch_file_read,
+    "olympian_file_search": _dispatch_file_search,
+    "zeus_calendar_today": _dispatch_calendar_today,
+    "zeus_newsletter_latest": _dispatch_newsletter_latest,
+}
 
 
 # ------------------------------------------------------------------
@@ -264,7 +338,12 @@ class KairosAgent:
         return results
 
     async def _dispatch(self, tool: str, args: dict[str, Any]) -> Any:
-        """Tool dispatch. Read-only only; extend as olympian_* pack lands."""
+        """Tool dispatch. Read-only only; extend as olympian_* pack lands.
+
+        Olympian read-side tools route through the Core HTTP loopback so the
+        endpoint's internal allowlist enforcement and Aegis policies apply
+        identically whether the call comes from MCP, the chat path, or here.
+        """
         if tool == "zeus_memory_search":
             query = str(args.get("query", "")).strip()
             if not query:
@@ -277,6 +356,11 @@ class KairosAgent:
                 top_k=max(1, min(20, limit)),
             )
             return {"count": len(hits)}
+
+        if tool in _OLYMPIAN_READONLY_DISPATCH:
+            handler = _OLYMPIAN_READONLY_DISPATCH[tool]
+            return await handler(args)
+
         raise RuntimeError(f"tool dispatch not implemented: {tool}")
 
     async def update_memory(
