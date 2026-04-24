@@ -476,7 +476,25 @@ function CacheControls({ stats, onClear }: { stats: CacheStats | null; onClear: 
         {clearing ? 'Clearing...' : 'Clear cache'}
       </button>
       <p className="mt-3 text-[11px] text-on-surface-variant/50 font-body">
-        Only chat-path tools with <span className="font-mono">cacheable=true</span> use the cache (currently <span className="font-mono">web_search</span>).
+        Only chat-path tools with <span className="font-mono">cacheable=true</span> use the cache
+        {(() => {
+          const cacheable = (stats?.registered_tools ?? [])
+            .filter((t) => t.cacheable)
+            .map((t) => t.name)
+          if (cacheable.length === 0) return null
+          return (
+            <>
+              {' '}(currently{' '}
+              {cacheable.map((name, i) => (
+                <span key={name}>
+                  <span className="font-mono">{name}</span>
+                  {i < cacheable.length - 1 ? ', ' : ''}
+                </span>
+              ))}
+              )
+            </>
+          )
+        })()}.
         Clearing drops every entry but does not disable caching. Set <span className="font-mono">ZEUS_TOOL_CACHE_TTL_SECONDS=0</span> to turn caching off entirely.
       </p>
     </div>

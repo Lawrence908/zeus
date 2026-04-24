@@ -56,6 +56,7 @@ export interface CacheStats {
   misses: number
   ttl_seconds: number
   max_entries: number
+  registered_tools?: Array<{ name: string; cacheable: boolean }>
 }
 
 // ---------------------------------------------------------------------------

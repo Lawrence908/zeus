@@ -27,7 +27,11 @@ logger = logging.getLogger("zeus.vault")
 router = APIRouter(tags=["vault"])
 
 _DEFAULT_ROOTS = "~/.zeus,~/notes"
-_MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB read cap; status / inbox / notes only
+# 64 KB ≈ 16k tokens — fits comfortably in an 8k-ctx Ollama call and still
+# covers any reasonable note. Larger files are truncated server-side with a
+# `truncated: true` flag in the response so the LLM knows it didn't see the
+# whole thing. Override only for testing.
+_MAX_FILE_BYTES = 64 * 1024
 _RG_BIN = "rg"
 _RG_TIMEOUT_SEC = 10.0
 _DEFAULT_MAX_RESULTS = 50
@@ -92,22 +96,25 @@ async def vault_file_read(path: str = Query(..., min_length=1)) -> dict[str, Any
         raise HTTPException(status_code=400, detail="path is not a regular file")
     try:
         size = resolved.stat().st_size
+        mtime = resolved.stat().st_mtime
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"stat failed: {exc}") from exc
-    if size > _MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"file is {size} bytes; cap is {_MAX_FILE_BYTES}",
-        )
+    truncated = size > _MAX_FILE_BYTES
     try:
-        content = resolved.read_text(encoding="utf-8", errors="replace")
-        mtime = resolved.stat().st_mtime
+        # Read at most _MAX_FILE_BYTES bytes; flag if the file was longer.
+        # This protects the chat model context window without 413-erroring on
+        # large notes (e.g. multi-MB Obsidian dailies).
+        with open(resolved, "rb") as fh:
+            raw = fh.read(_MAX_FILE_BYTES)
+        content = raw.decode("utf-8", errors="replace")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"read failed: {exc}") from exc
     return {
         "path": str(resolved),
         "content": content,
         "size_bytes": size,
+        "bytes_returned": len(raw),
+        "truncated": truncated,
         "mtime": mtime,
     }
 

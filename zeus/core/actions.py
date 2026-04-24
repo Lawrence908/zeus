@@ -201,6 +201,13 @@ async def actions_run(req: ActionRunRequest) -> dict[str, Any]:
             proc.kill()
         except ProcessLookupError:
             pass
+        # Reap so the child does not linger as a zombie. Bound the wait so a
+        # SIGKILL-resistant process (e.g. uninterruptible sleep) cannot wedge
+        # the request indefinitely; we accept the leak in that pathological case.
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            logger.warning("action %s did not exit within 2s of SIGKILL", req.name)
         raise HTTPException(status_code=504, detail=f"action '{req.name}' timed out")
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"action launch failed: {exc}") from exc

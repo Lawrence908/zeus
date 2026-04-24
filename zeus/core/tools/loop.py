@@ -184,6 +184,7 @@ async def _execute_one_impl(
     # olympian_status_read) cannot carry an injection payload, and small
     # open models occasionally emit phantom args during tool-call parsing
     # that trip pattern rules even though the dispatched call is empty.
+    pre_flags: list[str] = []
     if aegis_enabled() and call.arguments:
         logger.debug(
             "tool args pre-aegis: tool=%s policy=%s args=%r",
@@ -193,6 +194,10 @@ async def _execute_one_impl(
         )
         engine = AegisPolicyEngine(policy=spec.aegis_policy)
         outcome = engine.evaluate_payload(call.arguments)
+        # Capture flag_for_review hits even on the non-rejected path so the
+        # invocation feed surfaces them — operators want to see borderline
+        # arg patterns even when the call proceeded.
+        pre_flags = list(outcome.flags)
         if outcome.status == "rejected":
             logger.warning(
                 "aegis rejected args for tool=%s policy=%s args=%r: %s",
@@ -212,7 +217,7 @@ async def _execute_one_impl(
                     is_error=True,
                 ),
                 False,
-                list(outcome.flags),
+                pre_flags,
                 True,
             )
 
@@ -306,7 +311,10 @@ async def _execute_one_impl(
     if spec.cacheable:
         cache.set(call.name, call.arguments, result)
 
-    return result, False, post_flags, post_rejected
+    # Merge pre-exec flags so the invocation feed shows everything Aegis
+    # noticed across both phases (deduped, order-preserving).
+    merged_flags = pre_flags + [f for f in post_flags if f not in pre_flags]
+    return result, False, merged_flags, post_rejected
 
 
 def _assistant_turn(
