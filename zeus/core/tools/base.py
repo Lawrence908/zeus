@@ -23,12 +23,22 @@ class ToolSpec(BaseModel):
     args returning identical results is actually true — i.e. the tool is
     idempotent AND has no time-sensitive component. `web_search` is
     cacheable; `current_time` is not.
+
+    `aegis_policy` is the pre-execution policy applied to model-emitted
+    arguments (default: strict `tool_arguments`). `result_aegis_policy` is
+    the post-execution policy applied to the tool's *output* before it is
+    fed back to the model — defaults to the permissive `default` policy
+    because tool results are commonly markdown / docs / file contents that
+    legitimately contain shell-keyword tokens (e.g. ``\`*.sh\``` in a notes
+    file). Tools that hand back potentially adversarial content (web fetches,
+    untrusted file sources) should set this to something stricter.
     """
 
     name: str
     description: str = Field(..., min_length=8)
     parameters: dict[str, Any]  # JSON Schema, object form
     aegis_policy: str = "tool_arguments"
+    result_aegis_policy: str = "default"
     timeout_seconds: float = 30.0
     cacheable: bool = False
 

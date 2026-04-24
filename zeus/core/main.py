@@ -20,6 +20,10 @@ from zeus.core.chat import router as chat_router
 from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.newsletter import router as newsletter_router
 from zeus.core.query import QueryEngine, _run_llm, _active_model_name, _chat_use_claude, _ollama_model, set_ollama_model
+from zeus.core.actions import router as actions_router
+from zeus.core.calendar import router as calendar_router
+from zeus.core.inbox import router as inbox_router
+from zeus.core.vault import router as vault_router
 from zeus.core.runtime_settings import RuntimeSettings
 from zeus.core.session_storage import SQLiteSessionStorage
 from zeus.core.sessions import InMemoryStorage, SessionManager
@@ -106,10 +110,26 @@ async def lifespan(app: FastAPI):
     # registry; QueryEngine.query() consults it when ZEUS_TOOLS_ENABLED=1.
     from zeus.core.tools import registry as tool_registry
     from zeus.core.tools.current_time import register as _register_current_time
+    from zeus.core.tools.file_read import register as _register_file_read
+    from zeus.core.tools.file_search import register as _register_file_search
+    from zeus.core.tools.action_run import register as _register_action_pack
+    from zeus.core.tools.calendar_today import register as _register_calendar_today
+    from zeus.core.tools.inbox_append import register as _register_inbox_append
+    from zeus.core.tools.newsletter_latest import register as _register_newsletter_latest
+    from zeus.core.tools.server_health import register as _register_server_health
+    from zeus.core.tools.status_read import register as _register_status_read
     from zeus.core.tools.web_search import register_if_configured as _register_web_search
 
     _register_current_time()
     _register_web_search()
+    _register_status_read()
+    _register_server_health()
+    _register_file_read()
+    _register_file_search()
+    _register_inbox_append()
+    _register_action_pack()
+    _register_calendar_today()
+    _register_newsletter_latest()
     app.state.tools_registered = [spec.name for spec in tool_registry.list_specs()]
 
     # Observability — query log ring buffer
@@ -203,6 +223,10 @@ app.include_router(chat_router)
 app.include_router(voice_state_router)
 app.include_router(orchestration_router)
 app.include_router(newsletter_router)
+app.include_router(vault_router)
+app.include_router(inbox_router)
+app.include_router(actions_router)
+app.include_router(calendar_router)
 
 app.mount(
     "/static",

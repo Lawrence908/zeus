@@ -22,6 +22,7 @@ from zeus.core.tools.adapters import (
 )
 from zeus.core.tools.base import ToolCall, ToolResult, ToolSpec
 from zeus.core.tools.cache import get_cache
+from zeus.core.tools.recorder import record_invocation
 from zeus.safety.policy_engine import AegisPolicyEngine, aegis_enabled, evaluate_text
 
 logger = logging.getLogger("zeus.tools.loop")
@@ -137,36 +138,87 @@ async def run_tool_loop(
 
 
 async def _execute_one(call: ToolCall) -> ToolResult:
-    """Run a single tool call with Aegis gates on args and results."""
+    """Run a single tool call with Aegis gates on args and results.
+
+    Every path records a ToolInvocation entry (success, error, cache hit,
+    Aegis reject) into the in-process ring buffer so /admin/tools/invocations
+    and the React Tools page have a single authoritative feed.
+    """
+    result, cache_hit, aegis_flags, aegis_rejected = await _execute_one_impl(call)
+    record_invocation(
+        tool=call.name,
+        args=call.arguments,
+        content=result.content,
+        is_error=result.is_error,
+        cache_hit=cache_hit,
+        duration_ms=result.duration_ms,
+        aegis_flags=aegis_flags,
+        aegis_rejected=aegis_rejected,
+        source="chat",
+    )
+    return result
+
+
+async def _execute_one_impl(
+    call: ToolCall,
+) -> tuple[ToolResult, bool, list[str], bool]:
+    """Do the real work for _execute_one. Returns
+    (result, cache_hit, aegis_flags, aegis_rejected)."""
     entry = registry.get(call.name)
     if entry is None:
-        return ToolResult(
-            call_id=call.call_id,
-            name=call.name,
-            content=f"Unknown tool {call.name!r}.",
-            is_error=True,
+        return (
+            ToolResult(
+                call_id=call.call_id,
+                name=call.name,
+                content=f"Unknown tool {call.name!r}.",
+                is_error=True,
+            ),
+            False,
+            [],
+            False,
         )
     spec, handler = entry
 
     # Aegis pre: validate tool arguments before execution.
-    if aegis_enabled():
+    # Skip when there is nothing to validate — a no-arg tool (e.g.
+    # olympian_status_read) cannot carry an injection payload, and small
+    # open models occasionally emit phantom args during tool-call parsing
+    # that trip pattern rules even though the dispatched call is empty.
+    pre_flags: list[str] = []
+    if aegis_enabled() and call.arguments:
+        logger.debug(
+            "tool args pre-aegis: tool=%s policy=%s args=%r",
+            call.name,
+            spec.aegis_policy,
+            call.arguments,
+        )
         engine = AegisPolicyEngine(policy=spec.aegis_policy)
         outcome = engine.evaluate_payload(call.arguments)
+        # Capture flag_for_review hits even on the non-rejected path so the
+        # invocation feed surfaces them — operators want to see borderline
+        # arg patterns even when the call proceeded.
+        pre_flags = list(outcome.flags)
         if outcome.status == "rejected":
             logger.warning(
-                "aegis rejected args for tool=%s policy=%s: %s",
+                "aegis rejected args for tool=%s policy=%s args=%r: %s",
                 call.name,
                 spec.aegis_policy,
+                call.arguments,
                 outcome.message,
             )
-            return ToolResult(
-                call_id=call.call_id,
-                name=call.name,
-                content=(
-                    outcome.message
-                    or f"Tool arguments blocked by Aegis policy {spec.aegis_policy!r}."
+            return (
+                ToolResult(
+                    call_id=call.call_id,
+                    name=call.name,
+                    content=(
+                        outcome.message
+                        or f"Tool arguments blocked by Aegis policy {spec.aegis_policy!r}."
+                    ),
+                    is_error=True,
                 ),
-                is_error=True,
+                False,
+                pre_flags,
+                True,
             )
 
     # Cache hit? Only cacheable tools participate. The cache module is a no-op
@@ -176,8 +228,11 @@ async def _execute_one(call: ToolCall) -> ToolResult:
         cached = cache.get(call.name, call.arguments)
         if cached is not None:
             logger.info("tool cache hit: %s", call.name)
-            return cached.model_copy(
-                update={"call_id": call.call_id, "name": call.name}
+            return (
+                cached.model_copy(update={"call_id": call.call_id, "name": call.name}),
+                True,
+                [],
+                False,
             )
 
     t0 = time.monotonic()
@@ -187,22 +242,32 @@ async def _execute_one(call: ToolCall) -> ToolResult:
         )
     except asyncio.TimeoutError:
         dur = int((time.monotonic() - t0) * 1000)
-        return ToolResult(
-            call_id=call.call_id,
-            name=call.name,
-            content=f"Tool {call.name} timed out after {spec.timeout_seconds:.0f}s.",
-            is_error=True,
-            duration_ms=dur,
+        return (
+            ToolResult(
+                call_id=call.call_id,
+                name=call.name,
+                content=f"Tool {call.name} timed out after {spec.timeout_seconds:.0f}s.",
+                is_error=True,
+                duration_ms=dur,
+            ),
+            False,
+            [],
+            False,
         )
     except Exception as exc:
         dur = int((time.monotonic() - t0) * 1000)
         logger.exception("tool %s raised", call.name)
-        return ToolResult(
-            call_id=call.call_id,
-            name=call.name,
-            content=f"Tool {call.name} failed: {exc!s}",
-            is_error=True,
-            duration_ms=dur,
+        return (
+            ToolResult(
+                call_id=call.call_id,
+                name=call.name,
+                content=f"Tool {call.name} failed: {exc!s}",
+                is_error=True,
+                duration_ms=dur,
+            ),
+            False,
+            [],
+            False,
         )
 
     # Ensure handler-provided fields (call_id/name) match the call.
@@ -216,20 +281,28 @@ async def _execute_one(call: ToolCall) -> ToolResult:
         )
 
     # Aegis post: scan the result text before it is fed back to the model.
+    # Uses spec.result_aegis_policy (default `default`/permissive) NOT the
+    # arg-validation policy, because tool results are typically markdown /
+    # file contents / structured data where shell-keyword tokens like
+    # `*.sh` or `curl <url>` are legitimate documentation, not injection.
+    post_flags: list[str] = []
+    post_rejected = False
     if aegis_enabled():
-        outcome = evaluate_text(result.content, policy_name=spec.aegis_policy)
+        outcome = evaluate_text(result.content, policy_name=spec.result_aegis_policy)
+        post_flags = list(outcome.flags)
         if outcome.status == "rejected":
             logger.warning(
                 "aegis rejected result for tool=%s policy=%s: %s",
                 call.name,
-                spec.aegis_policy,
+                spec.result_aegis_policy,
                 outcome.message,
             )
+            post_rejected = True
             result = result.model_copy(
                 update={
                     "content": (
                         outcome.message
-                        or f"Tool result blocked by Aegis policy {spec.aegis_policy!r}."
+                        or f"Tool result blocked by Aegis policy {spec.result_aegis_policy!r}."
                     ),
                     "is_error": True,
                 }
@@ -238,7 +311,10 @@ async def _execute_one(call: ToolCall) -> ToolResult:
     if spec.cacheable:
         cache.set(call.name, call.arguments, result)
 
-    return result
+    # Merge pre-exec flags so the invocation feed shows everything Aegis
+    # noticed across both phases (deduped, order-preserving).
+    merged_flags = pre_flags + [f for f in post_flags if f not in pre_flags]
+    return result, False, merged_flags, post_rejected
 
 
 def _assistant_turn(

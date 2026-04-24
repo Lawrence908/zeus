@@ -6,17 +6,20 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_tool_state():
-    """Ensure each test starts with an empty chat-tool registry and cache.
+    """Ensure each test starts with empty tool registry / cache / invocations.
 
-    Both `_REGISTRY` (registry.py) and `_CACHE` (cache.py) are module-level
-    process state. Without a reset, a test that registers a tool or caches
-    a result could poison later tests.
+    All three are module-level process state; without a reset, a test that
+    registers a tool, caches a result, or records an invocation could
+    poison later tests.
     """
     from zeus.core.tools import registry
     from zeus.core.tools.cache import get_cache
+    from zeus.core.tools.recorder import clear_invocations
 
     registry.clear()
     get_cache().clear()
+    clear_invocations()
     yield
     registry.clear()
     get_cache().clear()
+    clear_invocations()

@@ -45,6 +45,11 @@ Agent lifecycle, multi-step tasks, bus routing, and the Kairos background daemon
 | `KAIROS_INTERVAL_MINUTES` | `60` | Cycle cadence |
 | `KAIROS_MAX_ACTIONS_PER_CYCLE` | `5` | Hard cap on tool calls per cycle |
 | `ZEUS_KAIROS_TOOL_ALLOWLIST` | `zeus_memory_search` | Comma-separated tool names Kairos can call |
+| `ZEUS_ACTIONS_ENABLED` | `0` | Master switch for the `/actions/*` runner. Even with `ZEUS_MCP_ALLOW_WRITE=1` and `olympian_action_run` in the Kairos allowlist, executions are 403-rejected unless this is also `1`. |
+| `ZEUS_ACTIONS_DIR` | `~/.zeus/actions` | Directory whose `.sh` files form the action allowlist. |
+| `ZEUS_FILE_READ_ROOTS` | `~/.zeus,~/notes` | Allowlist roots for `/vault/file` and `/vault/search`. |
+| `ZEUS_INBOX_PATH` | `~/.zeus/inbox.md` | Append target for `/inbox/append`. |
+| `ZEUS_STATUS_PATH` | `~/.zeus/status.md` | File backing `/admin/status_file` and `olympian_status_read`. |
 
 ## Common patterns
 
@@ -99,6 +104,25 @@ async def cycle(self):
 ```
 
 Only `zeus_memory_search` is allowed by default. Any write-capable tool widens the blast radius and needs a safety review.
+
+### Recommended additions to the Kairos allowlist (Olympian read-side)
+
+The Olympian tool pack adds several read-only tools that are safe to widen the Kairos allowlist with. All have in-process `_dispatch` arms in `daemon.py` that route through the Core HTTP loopback, so server-side allowlists and Aegis policies apply identically to MCP, chat-path, and Kairos invocations.
+
+Safe to add (read-only, no side effects):
+
+```
+ZEUS_KAIROS_TOOL_ALLOWLIST=zeus_memory_search,olympian_status_read,olympian_server_health,olympian_file_read,olympian_file_search,zeus_calendar_today,zeus_newsletter_latest
+```
+
+Conditionally safe (one write, low blast radius):
+
+- `olympian_inbox_append` — append a one-line note to `~/.zeus/inbox.md`. Add only when there is a clear "Kairos leaves itself a note" use case, and only with `ZEUS_MCP_ALLOW_WRITE=1`.
+
+Never add to the default allowlist:
+
+- `olympian_action_run` — arbitrary script execution. The risk is unbounded by allowlist alone; gate behind a dedicated `ZEUS_KAIROS_ALLOW_ACTIONS=1` check before adding.
+- `zeus_remember`, `zeus_ingest_trigger` — both write to memory or trigger ingest, which is observable but expensive on misuse.
 
 ## What not to do
 
