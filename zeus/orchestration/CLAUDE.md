@@ -2,6 +2,8 @@
 
 Agent lifecycle, multi-step tasks, bus routing, and the Kairos background daemon. Root brief: [`../../CLAUDE.md`](../../CLAUDE.md). Full spec: [`../docs/agent-runtime-spec.md`](../docs/agent-runtime-spec.md).
 
+Kronos (the cron-driven scheduler) is the deterministic sibling to Kairos; runs as a parallel lifespan task. See [`../kronos/CLAUDE.md`](../kronos/CLAUDE.md).
+
 ## Layout
 
 | File | Role |

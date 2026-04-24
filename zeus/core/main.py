@@ -30,6 +30,7 @@ from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
 from zeus.integrations.telegram import build_telegram_bot
 from zeus.memory.store import get_memory_store
+from zeus.kronos.api import router as kronos_router
 from zeus.orchestration.bus import router as orchestration_router
 from zeus.orchestration.hooks import build_default_registry, bus_metrics
 from zeus.orchestration.runtime import AgentRuntime
@@ -168,6 +169,61 @@ async def lifespan(app: FastAPI):
             import logging
             logging.getLogger("zeus").warning("kairos daemon failed to start: %s", exc)
 
+    # Kronos scheduler (cron-driven job runner). Default OFF; flip
+    # ZEUS_KRONOS_ENABLED=1 per-environment once seed jobs are reviewed.
+    app.state.kronos_registry = None
+    app.state.kronos_executor = None
+    app.state.kronos_scheduler = None
+    app.state.kronos_task = None
+    app.state.kronos_recent_runs = None
+    if os.getenv("ZEUS_KRONOS_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from collections import deque as _deque
+            from pathlib import Path as _Path
+
+            from zeus.kronos.executor import KronosExecutor
+            from zeus.kronos.registry import KronosRegistry
+            from zeus.kronos.scheduler import KronosScheduler
+            from zeus.kronos.storage import SQLiteJobStorage
+
+            k_db_path = os.getenv("ZEUS_KRONOS_DB_PATH", "zeus/data/kronos.db")
+            os.makedirs(os.path.dirname(k_db_path) or ".", exist_ok=True)
+            k_storage = SQLiteJobStorage(k_db_path)
+            k_registry = KronosRegistry(k_storage)
+
+            seed_path = _Path("zeus/data/kronos.yaml")
+            inserted = await k_registry.seed_from_yaml(seed_path)
+            if inserted:
+                import logging as _logging
+                _logging.getLogger("zeus.kronos").info(
+                    "seeded %d new job(s): %s", len(inserted), ", ".join(inserted)
+                )
+
+            k_tick = float(os.getenv("ZEUS_KRONOS_TICK_SECONDS", "30"))
+            k_max = int(os.getenv("ZEUS_KRONOS_MAX_CONCURRENT", "3"))
+            k_recent: _deque = _deque(maxlen=100)
+
+            k_executor = KronosExecutor(
+                k_storage,
+                http_client=app.state.http_client,
+                bus_url=ZEUS_BUS_URL,
+            )
+            k_scheduler = KronosScheduler(
+                k_registry,
+                k_executor,
+                tick_seconds=k_tick,
+                max_concurrent=k_max,
+                recent_runs_buffer=k_recent,
+            )
+            app.state.kronos_registry = k_registry
+            app.state.kronos_executor = k_executor
+            app.state.kronos_scheduler = k_scheduler
+            app.state.kronos_recent_runs = k_recent
+            app.state.kronos_task = asyncio.create_task(k_scheduler.run_forever())
+        except Exception as exc:
+            import logging
+            logging.getLogger("zeus").warning("kronos scheduler failed to start: %s", exc)
+
     # Scheduled ingest (APScheduler). Consolidator removed with mem0 — idempotent
     # re-ingest is now handled by MemoryStore.delete_by_source() / KnowledgeStore.
     app.state.ingest_scheduler = None
@@ -193,6 +249,17 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(kairos_task, timeout=5.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             kairos_task.cancel()
+        except Exception:
+            pass
+
+    kronos_task = getattr(app.state, "kronos_task", None)
+    kronos_scheduler = getattr(app.state, "kronos_scheduler", None)
+    if kronos_task is not None and kronos_scheduler is not None:
+        try:
+            kronos_scheduler.stop_event.set()
+            await asyncio.wait_for(kronos_task, timeout=10.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            kronos_task.cancel()
         except Exception:
             pass
 
@@ -222,6 +289,7 @@ app.include_router(admin_router)
 app.include_router(chat_router)
 app.include_router(voice_state_router)
 app.include_router(orchestration_router)
+app.include_router(kronos_router)
 app.include_router(newsletter_router)
 app.include_router(vault_router)
 app.include_router(inbox_router)
