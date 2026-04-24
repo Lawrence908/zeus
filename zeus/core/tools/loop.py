@@ -180,14 +180,25 @@ async def _execute_one_impl(
     spec, handler = entry
 
     # Aegis pre: validate tool arguments before execution.
-    if aegis_enabled():
+    # Skip when there is nothing to validate — a no-arg tool (e.g.
+    # olympian_status_read) cannot carry an injection payload, and small
+    # open models occasionally emit phantom args during tool-call parsing
+    # that trip pattern rules even though the dispatched call is empty.
+    if aegis_enabled() and call.arguments:
+        logger.debug(
+            "tool args pre-aegis: tool=%s policy=%s args=%r",
+            call.name,
+            spec.aegis_policy,
+            call.arguments,
+        )
         engine = AegisPolicyEngine(policy=spec.aegis_policy)
         outcome = engine.evaluate_payload(call.arguments)
         if outcome.status == "rejected":
             logger.warning(
-                "aegis rejected args for tool=%s policy=%s: %s",
+                "aegis rejected args for tool=%s policy=%s args=%r: %s",
                 call.name,
                 spec.aegis_policy,
+                call.arguments,
                 outcome.message,
             )
             return (
@@ -265,16 +276,20 @@ async def _execute_one_impl(
         )
 
     # Aegis post: scan the result text before it is fed back to the model.
+    # Uses spec.result_aegis_policy (default `default`/permissive) NOT the
+    # arg-validation policy, because tool results are typically markdown /
+    # file contents / structured data where shell-keyword tokens like
+    # `*.sh` or `curl <url>` are legitimate documentation, not injection.
     post_flags: list[str] = []
     post_rejected = False
     if aegis_enabled():
-        outcome = evaluate_text(result.content, policy_name=spec.aegis_policy)
+        outcome = evaluate_text(result.content, policy_name=spec.result_aegis_policy)
         post_flags = list(outcome.flags)
         if outcome.status == "rejected":
             logger.warning(
                 "aegis rejected result for tool=%s policy=%s: %s",
                 call.name,
-                spec.aegis_policy,
+                spec.result_aegis_policy,
                 outcome.message,
             )
             post_rejected = True
@@ -282,7 +297,7 @@ async def _execute_one_impl(
                 update={
                     "content": (
                         outcome.message
-                        or f"Tool result blocked by Aegis policy {spec.aegis_policy!r}."
+                        or f"Tool result blocked by Aegis policy {spec.result_aegis_policy!r}."
                     ),
                     "is_error": True,
                 }
