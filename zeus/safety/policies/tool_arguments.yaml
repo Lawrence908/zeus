@@ -6,7 +6,12 @@ rules:
     action: reject
     message: "Tool argument contained prompt-injection pattern."
   - name: shell_metacharacters
-    pattern: '(?:\$\(|`[^`]{1,40}`|\|\s*(curl|wget|sh|bash|nc)\b|;\s*(rm|curl|wget)\b)'
+    # Backtick-only matches now require shell-keyword content inside the
+    # ticks. Plain markdown code spans like `~/.zeus/` or `olympian_status_read`
+    # used to false-positive when this policy ran on tool *results* (e.g.
+    # status.md content quoted back through olympian_status_read); the genuine
+    # command-substitution vector is `cmd ...`-shaped, not arbitrary identifiers.
+    pattern: '(?:\$\(|`[^`]*\b(rm|curl|wget|sh|bash|nc|eval|exec)\b[^`]*`|\|\s*(curl|wget|sh|bash|nc)\b|;\s*(rm|curl|wget)\b)'
     action: reject
     message: "Tool argument contained shell metacharacter pattern."
   - name: secret_extraction_attempt

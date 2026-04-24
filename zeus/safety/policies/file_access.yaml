@@ -10,7 +10,11 @@ rules:
     action: reject
     message: "Path traversal pattern in payload."
   - name: shell_metacharacters
-    pattern: '(?:\$\(|`[^`]{1,40}`|\|\s*(curl|wget|sh|bash|nc)\b|;\s*(rm|curl|wget|nc)\b|&&\s*(rm|curl|wget))'
+    # See note in tool_arguments.yaml: backtick-only spans now require shell
+    # keywords inside, so markdown code spans like `~/.zeus/` no longer trip
+    # this when the policy is applied to user-content payloads (inbox text,
+    # vault search snippets, action stdout).
+    pattern: '(?:\$\(|`[^`]*\b(rm|curl|wget|sh|bash|nc|eval|exec)\b[^`]*`|\|\s*(curl|wget|sh|bash|nc)\b|;\s*(rm|curl|wget|nc)\b|&&\s*(rm|curl|wget))'
     action: reject
     message: "Shell metacharacter pattern in payload."
   - name: action_arg_pipe
