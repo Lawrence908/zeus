@@ -277,7 +277,7 @@ function InvocationsFeed({ invocations }: { invocations: ToolInvocation[] }) {
     return (
       <div className="text-center py-16 border border-dashed border-outline-variant/30 rounded">
         <p className="font-body text-sm text-on-surface-variant">
-          No invocations yet. Send a chat message that would call a tool (e.g. "what time is it?").
+          No invocations match the current filter. Try a different chip, or clear the filter to see everything.
         </p>
       </div>
     )
@@ -287,6 +287,146 @@ function InvocationsFeed({ invocations }: { invocations: ToolInvocation[] }) {
       {invocations.map((inv, i) => (
         <InvocationCard key={`${inv.ts}-${inv.tool}-${i}`} inv={inv} />
       ))}
+    </div>
+  )
+}
+
+
+// ---------------------------------------------------------------------------
+// InvocationsTab — filter chip row + feed
+// ---------------------------------------------------------------------------
+
+function InvocationsTab({ invocations }: { invocations: ToolInvocation[] }) {
+  const [toolFilter, setToolFilter] = useState<string | null>(null)
+  const [rejectedOnly, setRejectedOnly] = useState(false)
+
+  // Distinct tool names seen in this batch, with counts — recalculated on
+  // every fetch tick so the chip row reflects what's actually in the buffer.
+  const toolCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const inv of invocations) {
+      m.set(inv.tool, (m.get(inv.tool) ?? 0) + 1)
+    }
+    // Sort most-frequent first so high-volume tools anchor the left of the row.
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [invocations])
+
+  const rejectedCount = useMemo(
+    () => invocations.filter((i) => i.aegis_rejected).length,
+    [invocations],
+  )
+
+  // Drop the filter if the selected tool rolls off the buffer entirely.
+  useEffect(() => {
+    if (toolFilter && !toolCounts.some(([name]) => name === toolFilter)) {
+      setToolFilter(null)
+    }
+  }, [toolCounts, toolFilter])
+
+  const filtered = useMemo(() => {
+    return invocations.filter((inv) => {
+      if (toolFilter && inv.tool !== toolFilter) return false
+      if (rejectedOnly && !inv.aegis_rejected) return false
+      return true
+    })
+  }, [invocations, toolFilter, rejectedOnly])
+
+  if (invocations.length === 0) {
+    return (
+      <div className="text-center py-16 border border-dashed border-outline-variant/30 rounded">
+        <p className="font-body text-sm text-on-surface-variant">
+          No invocations yet. Send a chat message that would call a tool (e.g. "what time is it?").
+        </p>
+      </div>
+    )
+  }
+
+  const Chip = ({
+    active,
+    onClick,
+    children,
+    tone = 'neutral',
+    count,
+    title,
+  }: {
+    active: boolean
+    onClick: () => void
+    children: React.ReactNode
+    tone?: 'neutral' | 'warn'
+    count?: number
+    title?: string
+  }) => {
+    const activeCls =
+      tone === 'warn'
+        ? 'bg-error-container/30 text-error border-error/40'
+        : 'bg-primary-container/30 text-primary border-primary/40'
+    const inactiveCls =
+      tone === 'warn'
+        ? 'bg-surface-container/40 text-on-surface-variant hover:text-error border-outline-variant/20'
+        : 'bg-surface-container/40 text-on-surface-variant hover:text-on-surface border-outline-variant/20'
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className={[
+          'shrink-0 px-2.5 py-1 rounded border transition-colors text-[10px] font-label font-semibold uppercase tracking-widest flex items-center gap-1.5',
+          active ? activeCls : inactiveCls,
+        ].join(' ')}
+      >
+        <span>{children}</span>
+        {count !== undefined && (
+          <span
+            className={[
+              'font-mono px-1 rounded text-[9px]',
+              active ? 'bg-black/10' : 'bg-surface-container-highest/70',
+            ].join(' ')}
+          >
+            {count}
+          </span>
+        )}
+      </button>
+    )
+  }
+
+  return (
+    <div>
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {/* All / per-tool chips (horizontally scrollable on small widths) */}
+        <div className="flex items-center gap-1.5 flex-1 overflow-x-auto custom-scrollbar py-1 min-w-0">
+          <Chip
+            active={toolFilter === null}
+            onClick={() => setToolFilter(null)}
+            count={invocations.length}
+          >
+            All
+          </Chip>
+          {toolCounts.map(([name, count]) => (
+            <Chip
+              key={name}
+              active={toolFilter === name}
+              onClick={() => setToolFilter(toolFilter === name ? null : name)}
+              count={count}
+              title={`Show only ${name}`}
+            >
+              {name}
+            </Chip>
+          ))}
+        </div>
+        {/* Rejected-only toggle */}
+        <Chip
+          active={rejectedOnly}
+          onClick={() => setRejectedOnly((v) => !v)}
+          tone="warn"
+          count={rejectedCount}
+          title="Show only invocations that Aegis rejected"
+        >
+          Rejected only
+        </Chip>
+      </div>
+
+      <InvocationsFeed invocations={filtered} />
     </div>
   )
 }
@@ -461,7 +601,7 @@ export function ToolsPage() {
             <ToolDirectory tools={tools} />
           )}
           {tab === 'invocations' && (
-            <InvocationsFeed invocations={invocations} />
+            <InvocationsTab invocations={invocations} />
           )}
           {tab === 'cache' && (
             <CacheControls stats={cacheStats} onClear={handleClearCache} />
