@@ -115,6 +115,10 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - WHISPER_URL=ws://whisper:9090
       - WHISPER_REST_URL=http://whisper:8000
+      # Olympian tools loop back to Core via HTTP; inside the container Core
+      # listens on 8000, NOT the host-published 8203. Without this override
+      # every olympian_* call dies with "connection refused".
+      - ZEUS_CORE_URL=http://127.0.0.1:8000
     volumes:
       - zeus_data:/app/zeus/data
     depends_on:

@@ -8,6 +8,7 @@ import os
 import re
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
@@ -111,6 +112,33 @@ def _ollama_http_timeout() -> httpx.Timeout:
     )
 
 
+def _ollama_num_ctx() -> int | None:
+    """Per-request `options.num_ctx` for the chat path.
+
+    Ollama's default ctx is 4096 — too tight when ZEUS_TOOLS_ENABLED=1 stuffs
+    10+ tool schemas into the system prompt (typical: 6k-7k tokens). 8192 fits
+    comfortably and is well within Qwen2.5-7B's native 32k. Set to 0 / empty
+    to fall back to the model's default.
+    """
+    raw = os.getenv("ZEUS_OLLAMA_NUM_CTX", "8192").strip()
+    if not raw or raw == "0":
+        return None
+    try:
+        return max(2048, int(raw))
+    except (TypeError, ValueError):
+        return 8192
+
+
+def _ollama_options(*, max_tokens: int, **extra: Any) -> dict[str, Any]:
+    """Build the Ollama `options` block. Caller adds anything model-specific."""
+    opts: dict[str, Any] = {"num_predict": max_tokens}
+    nc = _ollama_num_ctx()
+    if nc is not None:
+        opts["num_ctx"] = nc
+    opts.update(extra)
+    return opts
+
+
 def _ollama_model_missing_message(*, detail: str = "") -> str:
     base = (
         f"Ollama 404 for model {_ollama_model()!r} at {_ollama_url()}/api/chat — "
@@ -171,7 +199,7 @@ async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "options": {"num_predict": max_tokens},
+        "options": _ollama_options(max_tokens=max_tokens),
     }
     async with httpx.AsyncClient() as client:
         r = await client.post(f"{base}/api/chat", json=payload, timeout=_ollama_http_timeout())
@@ -223,7 +251,7 @@ async def _run_llm_with_tools(
         "stream": False,
         # Qwen2.5-7B Q4_K_M is unreliable above ~0.3 on tool routing (schema
         # drift, argument fabrication). See zeus/docs/tool-use-spec.md.
-        "options": {"num_predict": max_tokens, "temperature": 0.2},
+        "options": _ollama_options(max_tokens=max_tokens, temperature=0.2),
     }
     async with httpx.AsyncClient() as client:
         r = await client.post(
@@ -277,7 +305,7 @@ async def _run_llm_stream(
             {"role": "user", "content": user_prompt},
         ],
         "stream": True,
-        "options": {"num_predict": max_tokens},
+        "options": _ollama_options(max_tokens=max_tokens),
     }
     async with httpx.AsyncClient() as client:
         async with client.stream(
