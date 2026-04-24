@@ -2,8 +2,8 @@
 
 Lives under the chat path (`zeus/core/query.py` + `zeus/core/tools/`), distinct from:
 
-- The **MCP server** (`zeus/mcp/server.py`) which exposes `zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_memory_search`, `zeus_ingest_trigger` to *external* assistant clients (Claude Desktop, Cursor).
-- The **olympian tool pack** (future, LAB-328) which gives *agents / KAIROS* file-read / search / shell tools.
+- The **MCP server** (`zeus/mcp/server.py`) which exposes the same tools, plus the Olympian pack, to *external* assistant clients (Claude Desktop, Cursor).
+- The **Olympian tool pack** (LAB-328) which adds file-read / search / status / health / inbox / action / calendar / newsletter tools. The pack is dual-exposed — every Olympian tool is registered both as a chat-path `ToolSpec` (this doc) AND as an MCP wrapper (`zeus/mcp/`), and both surfaces wrap the same Core HTTP endpoints, so behaviour is identical regardless of which surface fires.
 
 Chat-path tool-use is what lets the chat LLM itself call tools during a `POST /chat/message` round-trip and fold the results back into its reply.
 
@@ -136,6 +136,36 @@ The chat-path tool loop lets web_search queries run for 10–30 seconds. Synchro
 | `ZEUS_TOOLS_ENABLED` | `0` | Opt-in feature flag for the chat-path tool loop. |
 | `ZEUS_TOOLS_MAX_CALLS_PER_QUERY` | `5` | Cap on total tool calls emitted per single `/chat/message` request. |
 | `BRAVE_API_KEY` | unset | Required to register the `web_search` tool. Without it, the registry is empty even when the flag is on. |
+
+## Olympian tool pack (LAB-328)
+
+Eight new tools land in `zeus/core/tools/` and are dual-exposed through MCP (`zeus/mcp/`):
+
+| Tool | File | Side | Backing endpoint | Aegis policy |
+|------|------|-----|------------------|--------------|
+| `olympian_status_read` | `status_read.py` | read | `GET /admin/status_file` | `tool_arguments` |
+| `olympian_server_health` | `server_health.py` | read | `GET /admin/system` | `tool_arguments` |
+| `olympian_file_read` | `file_read.py` | read | `GET /vault/file` | `file_access` |
+| `olympian_file_search` | `file_search.py` | read | `POST /vault/search` | `file_access` |
+| `olympian_inbox_append` | `inbox_append.py` | write | `POST /inbox/append` | `file_access` |
+| `olympian_action_list` | `action_run.py` | read | `GET /actions/list` | `tool_arguments` |
+| `olympian_action_run` | `action_run.py` | write | `POST /actions/run` | `file_access` |
+| `zeus_calendar_today` | `calendar_today.py` | read | `GET /calendar/today` | `tool_arguments` |
+| `zeus_newsletter_latest` | `newsletter_latest.py` | read | `GET /api/newsletter/digests?limit=1` | `tool_arguments` |
+
+Cacheability:
+
+- `cacheable=True` on `status_read`, `server_health`, `calendar_today`, `newsletter_latest` (the underlying data changes on the order of minutes; the default short TTL keeps responses fresh).
+- `cacheable=False` on `file_read`, `file_search`, `inbox_append`, `action_list`, `action_run` (file contents and side effects must always reflect current state).
+
+Server-side gates compose:
+
+- All write endpoints require `ZEUS_MCP_ALLOW_WRITE=1`.
+- `/actions/list` and `/actions/run` additionally require `ZEUS_ACTIONS_ENABLED=1`.
+- `/vault/file` and `/vault/search` resolve every path against `ZEUS_FILE_READ_ROOTS` after symlink dereferencing — escapes are 400-rejected.
+- `/actions/run` validates `name` against `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` and runs scripts via `asyncio.create_subprocess_exec` with no shell, capping output at 64 KB per stream.
+
+Aegis policy `file_access.yaml` is new and rejects path traversal, shell metacharacters, and I/O redirection to sensitive paths in tool payloads. It flags (does not reject) credential-shaped strings in inbox captures so personal notes are not blocked by false positives.
 
 ## Deferred (not in scope)
 
