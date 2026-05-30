@@ -1,0 +1,54 @@
+# zeus/core/zeus_os/apps_router.py — Registry of launchable apps for the WM launcher.
+#
+# Phase 1 is a static list. Phase 2 layers an optional ~/.zeus/zeus-os/apps.json
+# override so the user can pin custom iframe targets.
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter
+
+router = APIRouter()
+
+
+# Phase 1 default registry. The "kind" field tells the frontend which Svelte
+# component to mount; "Placeholder" renders a "Not implemented yet" window so
+# the launcher feels populated from day one.
+_DEFAULT_APPS: list[dict[str, Any]] = [
+    {"id": "terminal", "title": "Terminal", "icon": "terminal", "kind": "Terminal"},
+    {"id": "chat", "title": "Zeus Chat", "icon": "message-square", "kind": "Chat", "default_workspace": 1},
+    {"id": "files", "title": "File Manager", "icon": "folder", "kind": "FileManager"},
+    {"id": "sysmon", "title": "System Monitor", "icon": "activity", "kind": "SystemMonitor"},
+    # Phase 2/3 placeholders so the launcher shows the full vision today.
+    {"id": "obsidian", "title": "Obsidian Vault", "icon": "book", "kind": "Placeholder"},
+    {"id": "editor", "title": "Code Editor", "icon": "code", "kind": "Placeholder"},
+    {"id": "ha", "title": "Home Assistant", "icon": "home", "kind": "Placeholder"},
+    {"id": "linear", "title": "Linear", "icon": "kanban", "kind": "Placeholder"},
+    {"id": "images", "title": "Image Viewer", "icon": "image", "kind": "Placeholder"},
+    {"id": "procs", "title": "Process Manager", "icon": "cpu", "kind": "Placeholder"},
+    {"id": "network", "title": "Network", "icon": "wifi", "kind": "Placeholder"},
+    {"id": "notepad", "title": "Notepad", "icon": "edit-3", "kind": "Placeholder"},
+    {"id": "calendar", "title": "Calendar", "icon": "calendar", "kind": "Placeholder"},
+]
+
+
+def _override_path() -> Path:
+    base = os.getenv("ZEUS_OS_CONFIG_DIR", os.path.expanduser("~/.zeus/zeus-os"))
+    return Path(base) / "apps.json"
+
+
+@router.get("/apps")
+def list_apps() -> dict[str, Any]:
+    apps = list(_DEFAULT_APPS)
+    override = _override_path()
+    if override.is_file():
+        try:
+            extra = json.loads(override.read_text(encoding="utf-8"))
+            if isinstance(extra, list):
+                apps.extend(a for a in extra if isinstance(a, dict) and "id" in a)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {"apps": apps}
