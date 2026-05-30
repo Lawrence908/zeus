@@ -10,6 +10,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from zeus.mcp.tools import (
+    kronos_create_job,
     olympian_action_list,
     olympian_action_run,
     olympian_file_read,
@@ -109,6 +110,41 @@ async def zeus_calendar_today_tool():
 @mcp.tool(name="zeus_newsletter_latest")
 async def zeus_newsletter_latest_tool():
     return await zeus_newsletter_latest()
+
+
+@mcp.tool(name="kronos_create_job")
+async def kronos_create_job_tool(
+    name: str,
+    description: str = "",
+    category: str = "custom",
+    cron: str | None = None,
+    run_at: str | None = None,
+    executor: str | None = None,
+    agent: str | None = None,
+    endpoint: str = "/run",
+    params: dict | None = None,
+    timezone: str = "UTC",
+    safety_policy: str = "standard",
+    timeout_seconds: int = 300,
+    max_retries: int = 1,
+    job_id: str | None = None,
+):
+    return await kronos_create_job(
+        name=name,
+        description=description,
+        category=category,
+        cron=cron,
+        run_at=run_at,
+        executor=executor,
+        agent=agent,
+        endpoint=endpoint,
+        params=params,
+        timezone=timezone,
+        safety_policy=safety_policy,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        job_id=job_id,
+    )
 
 
 def main() -> None:

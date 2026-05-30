@@ -2,7 +2,7 @@
 
 Deterministic, cron-driven scheduler and job executor. Owns anything time-based in Zeus: newsletter digests, nightly ingest, weekly memory reviews, daily briefings, and any user-created recurring job. The "measured time" sibling to Kairos's autonomous "opportune moment" daemon — they run as parallel lifespan tasks.
 
-Root brief: [`../../CLAUDE.md`](../../CLAUDE.md). Full design: [`../../docs/kronos-backend-plan.md`](../../docs/kronos-backend-plan.md).
+Root brief: [`../../CLAUDE.md`](../../CLAUDE.md). Full design: [`../../docs/kronos-backend-plan.md`](../../docs/kronos-backend-plan.md). User-facing job-author guide: [`../docs/kronos-job-guide.md`](../docs/kronos-job-guide.md).
 
 ## Layout
 
@@ -47,7 +47,7 @@ Data: `zeus/data/kronos.db` (jobs + job_runs), `zeus/data/kronos.yaml` (seed).
 |------|-----------|-----------|
 | Built-in | `executor: zeus.kronos.jobs.<module>.<fn>` | `importlib` + await. Aegis pre/post run in-executor. |
 | Agent | `agent: <name>` | HTTP POST to `/orchestration/call` on the local bus; target agent + endpoint in `params`. Bus runs Aegis pre/post. |
-| Shell | `executor: shell:<cmd>` | **Phase 3.** Double-gated by env + regex allowlist. Currently raises `NotImplementedError`. |
+| Shell | `executor: shell:<cmd>` | Double-gated by `ZEUS_KRONOS_SHELL_ENABLED=1` + non-empty `ZEUS_KRONOS_SHELL_ALLOWLIST` (comma-separated regex). Hard-killed on timeout. Aegis post-filter on stdout. |
 
 ## What not to do
 

@@ -6,13 +6,17 @@
 #   - Agent:     agent=<name>, endpoint=<path> — HTTP POST to /orchestration/call.
 #                The bus already runs Aegis pre/post, so the executor does not
 #                re-scan (would double-filter and mask bus responses).
-#   - Shell:     executor="shell:..." — Phase 3; currently raises.
+#   - Shell:     executor="shell:..." — Double-gated by ZEUS_KRONOS_SHELL_ENABLED
+#                AND a non-empty regex allowlist (ZEUS_KRONOS_SHELL_ALLOWLIST).
+#                Hard kill on timeout. Aegis post-filter on stdout.
 from __future__ import annotations
 
 import asyncio
 import importlib
 import json
 import logging
+import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -80,7 +84,7 @@ class KronosExecutor:
             if job.agent:
                 output = await self._run_agent(job, run)
             elif _is_shell(job):
-                raise NotImplementedError("Shell dispatch mode ships in Phase 3")
+                output = await self._run_shell(job, run)
             else:
                 output = await self._run_builtin(job, run)
             run.mark_finished(JobStatus.SUCCESS, output=output, error=None)
@@ -186,9 +190,84 @@ class KronosExecutor:
             raise RuntimeError(data.get("error") or "agent call failed")
         return _summarise(data)
 
+    async def _run_shell(self, job: JobDefinition, run: JobRun) -> str:
+        """Run a shell command. Double-gated; hard-killed on timeout."""
+        if not _shell_enabled():
+            raise RuntimeError("ZEUS_KRONOS_SHELL_ENABLED is not set")
+
+        assert job.executor and job.executor.startswith("shell:")
+        cmd = job.executor[len("shell:"):].strip()
+        if not cmd:
+            raise ValueError("shell executor requires a command after 'shell:'")
+
+        allow = _shell_allowlist()
+        if not allow:
+            raise RuntimeError("ZEUS_KRONOS_SHELL_ALLOWLIST is empty; refusing to run")
+        if not any(rx.search(cmd) for rx in allow):
+            raise RuntimeError(f"shell command not in allowlist: {cmd!r}")
+
+        logger.info(
+            "[kronos correlation_id=%s] shell exec: %s",
+            run.correlation_id, cmd,
+        )
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=job.timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise
+
+        stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
+        stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"shell exit {proc.returncode}: "
+                f"{stderr.strip()[:500] or stdout.strip()[:500]}"
+            )
+
+        output = stdout.strip()
+
+        # Aegis post-filter on stdout. Reject → AegisRejection.
+        if aegis_enabled() and output:
+            outcome = evaluate_text(output, policy_name=job.safety_policy)
+            if outcome.status == "rejected":
+                raise AegisRejection(outcome.message or "shell output blocked")
+
+        return _summarise(output)
+
 
 def _is_shell(job: JobDefinition) -> bool:
     return bool(job.executor) and job.executor.startswith("shell:")
+
+
+def _shell_enabled() -> bool:
+    return os.getenv("ZEUS_KRONOS_SHELL_ENABLED", "0").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
+
+
+def _shell_allowlist() -> list[re.Pattern[str]]:
+    """Comma-separated regex patterns; a command must match at least one."""
+    raw = os.getenv("ZEUS_KRONOS_SHELL_ALLOWLIST", "").strip()
+    if not raw:
+        return []
+    out: list[re.Pattern[str]] = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            out.append(re.compile(piece))
+        except re.error as exc:
+            logger.warning("kronos: bad shell allowlist regex %r: %s", piece, exc)
+    return out
 
 
 def _import_callable(dotted: str):
