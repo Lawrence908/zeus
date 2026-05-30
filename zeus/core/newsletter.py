@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from zeus.core.query import _run_llm, _run_llm_stream
+from zeus.core.small_llm import AllProvidersFailed, small_llm_call
 
 # In-process lock for manifest read-modify-write cycles
 _manifest_lock = threading.Lock()
@@ -121,6 +122,21 @@ class DigestsListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Structured-output schemas for small_llm_call
+# ---------------------------------------------------------------------------
+
+class _NewsletterSummary(BaseModel):
+    summary: str = Field(..., description="2-3 sentence overview")
+    bullets: list[str] = Field(default_factory=list, description="5-8 one-line bullets")
+    advice: str = Field(default="", description="1-2 actionable suggestions")
+
+
+class _AdviceUpdate(BaseModel):
+    advice: str = Field(..., description="Full updated advice document")
+    updated_at: str = Field(default="", description="Reason for changes in this update")
+
+
+# ---------------------------------------------------------------------------
 # Manifest helpers
 # ---------------------------------------------------------------------------
 
@@ -196,7 +212,11 @@ def _load_all_advice() -> list[dict]:
 
 
 async def _synthesize_advice(category: str, new_advice: str) -> dict:
-    """Merge new digest advice into the running advice document for a category."""
+    """Merge new digest advice into the running advice document for a category.
+
+    Routes through small_llm_call (privacy tier 1) so the chat LLM stays free
+    for the user during scheduled digest runs.
+    """
     existing = _load_advice(category)
     current_advice = existing.get("advice", "")
 
@@ -209,29 +229,29 @@ async def _synthesize_advice(category: str, new_advice: str) -> dict:
         f"New advice from latest digest:\n{new_advice}"
     )
 
-    chunks: list[str] = []
-    async for chunk in _run_llm_stream(
-        system=_ADVICE_SYNTHESIS_PROMPT,
-        user_prompt=user_prompt,
-        max_tokens=1024,
-    ):
-        chunks.append(chunk)
-    raw = "".join(chunks)
-
     try:
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group())
-        else:
-            parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Advice synthesis response was not valid JSON, appending raw")
-        parsed = {"advice": f"{current_advice}\n\n{new_advice}".strip(), "updated_at": "append fallback"}
+        result = await small_llm_call(
+            system=_ADVICE_SYNTHESIS_PROMPT,
+            user=user_prompt,
+            max_tokens=1024,
+            response_format=_AdviceUpdate,
+            min_privacy_tier=1,
+            caller="newsletter.synthesize_advice",
+        )
+        parsed = result.parsed
+        if parsed is None:
+            raise ValueError("small_llm_call returned no parsed result")
+        advice_text = parsed.advice
+        change_note = parsed.updated_at or ""
+    except (AllProvidersFailed, ValueError) as exc:
+        logger.warning("advice synthesis fell back to append: %s", exc)
+        advice_text = f"{current_advice}\n\n{new_advice}".strip()
+        change_note = "append fallback"
 
     now_iso = datetime.now(timezone.utc).isoformat()
     doc = {
         "category": category,
-        "advice": str(parsed.get("advice", "")),
+        "advice": advice_text,
         "updated_at": now_iso,
         "update_count": existing.get("update_count", 0) + 1,
     }
@@ -239,7 +259,7 @@ async def _synthesize_advice(category: str, new_advice: str) -> dict:
     with _manifest_lock:
         _save_advice(doc)
 
-    logger.info("updated advice for %s (update #%d): %s", category, doc["update_count"], parsed.get("updated_at", ""))
+    logger.info("updated advice for %s (update #%d): %s", category, doc["update_count"], change_note)
     return doc
 
 
@@ -248,43 +268,45 @@ async def _synthesize_advice(category: str, new_advice: str) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _summarize_newsletters(texts: list[str]) -> dict:
-    """Call Zeus LLM to summarize newsletter text(s) into structured JSON."""
+    """Summarize newsletter text(s) via small_llm_call so the chat LLM stays
+    free for the interactive user during scheduled digest runs."""
     combined = "\n\n---\n\n".join(texts)
     # Truncate if extremely long (keep ~4k words for context)
     words = combined.split()
     if len(words) > 4000:
         combined = " ".join(words[:4000]) + "\n\n[truncated]"
 
-    chunks: list[str] = []
-    async for chunk in _run_llm_stream(
-        system=_SUMMARIZE_SYSTEM_PROMPT,
-        user_prompt=f"Summarize the following newsletter(s):\n\n{combined}",
-        max_tokens=1024,
-    ):
-        chunks.append(chunk)
-    raw = "".join(chunks)
-
-    # Parse JSON from LLM response
     try:
-        # Try to extract JSON from response (LLM may wrap in markdown code block)
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group())
-        else:
-            parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("LLM response was not valid JSON, using raw text")
-        parsed = {
-            "summary": raw[:500],
-            "bullets": [line.strip("- ").strip() for line in raw.split("\n") if line.strip().startswith("-")][:8],
+        result = await small_llm_call(
+            system=_SUMMARIZE_SYSTEM_PROMPT,
+            user=f"Summarize the following newsletter(s):\n\n{combined}",
+            max_tokens=1024,
+            response_format=_NewsletterSummary,
+            min_privacy_tier=1,
+            caller="newsletter.summarize",
+        )
+        parsed = result.parsed
+        if parsed is None:
+            raise ValueError("small_llm_call returned no parsed result")
+        return {
+            "summary": parsed.summary,
+            "bullets": list(parsed.bullets),
+            "advice": parsed.advice,
+        }
+    except (AllProvidersFailed, ValueError) as exc:
+        logger.warning("newsletter summarize via small_llm_call failed: %s", exc)
+        # Best-effort fallback: scan the raw input for hyphen bullets so the
+        # digest never returns empty when the LLM chain is fully unavailable.
+        bullets = [
+            line.strip("- ").strip()
+            for line in combined.split("\n")
+            if line.strip().startswith("-")
+        ][:8]
+        return {
+            "summary": combined[:500],
+            "bullets": bullets,
             "advice": "",
         }
-
-    return {
-        "summary": str(parsed.get("summary", "")),
-        "bullets": [str(b) for b in parsed.get("bullets", [])],
-        "advice": str(parsed.get("advice", "")),
-    }
 
 
 # ---------------------------------------------------------------------------

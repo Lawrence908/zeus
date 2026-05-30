@@ -248,3 +248,6 @@ compose.override.yaml
 
 # Olympian workspace symlink (~/.zeus); shared across repos, never committed.
 .zeus
+
+# Claude Code per-repo settings (local to each developer)
+.claude/

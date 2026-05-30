@@ -28,6 +28,7 @@ from zeus.core.runtime_settings import RuntimeSettings
 from zeus.core.session_storage import SQLiteSessionStorage
 from zeus.core.sessions import InMemoryStorage, SessionManager
 from zeus.core.voice_ws import router as voice_state_router
+from zeus.core.zeus_os import router as zeus_os_router
 from zeus.integrations.telegram import build_telegram_bot
 from zeus.memory.store import get_memory_store
 from zeus.kronos.api import router as kronos_router
@@ -120,6 +121,7 @@ async def lifespan(app: FastAPI):
     from zeus.core.tools.server_health import register as _register_server_health
     from zeus.core.tools.status_read import register as _register_status_read
     from zeus.core.tools.web_search import register_if_configured as _register_web_search
+    from zeus.core.tools.deep_research import register as _register_deep_research
 
     _register_current_time()
     _register_web_search()
@@ -131,6 +133,7 @@ async def lifespan(app: FastAPI):
     _register_action_pack()
     _register_calendar_today()
     _register_newsletter_latest()
+    _register_deep_research()
     app.state.tools_registered = [spec.name for spec in tool_registry.list_specs()]
 
     # Observability — query log ring buffer
@@ -280,6 +283,8 @@ async def lifespan(app: FastAPI):
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _SPA_DIR = _STATIC_DIR / "app"
 _SPA_INDEX = _SPA_DIR / "index.html"
+_OS_DIR = _STATIC_DIR / "zeus-os"
+_OS_INDEX = _OS_DIR / "index.html"
 
 app = FastAPI(title="Zeus Core", version=ZEUS_VERSION, lifespan=lifespan)
 app.add_middleware(QueryLoggingMiddleware)
@@ -295,6 +300,7 @@ app.include_router(vault_router)
 app.include_router(inbox_router)
 app.include_router(actions_router)
 app.include_router(calendar_router)
+app.include_router(zeus_os_router)
 
 app.mount(
     "/static",
@@ -308,6 +314,15 @@ if (_SPA_DIR / "assets").is_dir():
         "/assets",
         StaticFiles(directory=str(_SPA_DIR / "assets")),
         name="spa-assets",
+    )
+
+# Serve Zeus OS bundle (built by zeus-os/ via `npm run build`) at /os/.
+# adapter-static emits everything under one directory with index.html at root.
+if _OS_DIR.is_dir():
+    app.mount(
+        "/os",
+        StaticFiles(directory=str(_OS_DIR), html=True),
+        name="zeus-os",
     )
 
 
