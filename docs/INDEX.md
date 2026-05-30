@@ -22,6 +22,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [`../zeus/ingest/CLAUDE.md`](../zeus/ingest/CLAUDE.md) | product | Iris pipeline: source/target routing, config.yaml, how to add a source. |
 | [`../zeus/voice/CLAUDE.md`](../zeus/voice/CLAUDE.md) | product | Orpheus host-native loop: wake, STT, TTS, Phaos emitter, VRAM budget. |
 | [`../zeus/orchestration/CLAUDE.md`](../zeus/orchestration/CLAUDE.md) | product | AgentRuntime, bus, hooks, Kairos: FastAPI surface, invariants, allowlists. |
+| [`../zeus/kronos/CLAUDE.md`](../zeus/kronos/CLAUDE.md) | product | Kronos scheduler: job registry, asyncio loop, built-in/agent dispatch, Aegis-gated execution. |
 
 ## docs/ (repo root)
 

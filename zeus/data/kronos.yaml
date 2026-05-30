@@ -1,0 +1,56 @@
+# zeus/data/kronos.yaml — Declarative seed jobs for Kronos.
+# Loaded on every boot via KronosRegistry.seed_from_yaml(); insert-or-skip by id
+# so edits to live jobs via the API are never clobbered. New ids added here
+# appear on next boot; removing an id from this file does NOT delete it from
+# the DB (use the API or set enabled=false in the running job).
+#
+# Only the newsletter job is enabled by default in Phase 1. Ingest and memory
+# review seed as disabled placeholders while their built-in implementations
+# land in Phase 2.
+
+jobs:
+  - id: newsletter-morning-digest
+    name: Newsletter Morning Digest
+    description: Morning newsletter summary + TTS audio; successor to the LAB-343 KAIROS observer idea.
+    category: briefing
+    schedule:
+      cron: "0 7 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.newsletter.run_morning_digest
+    params:
+      newsletter_type: all
+      num_recent: 3
+    safety_policy: standard
+    timeout_seconds: 600
+    max_retries: 1
+    tags: [newsletter, morning]
+    enabled: true
+
+  - id: nightly-knowledge-ingest
+    name: Nightly Knowledge Ingest
+    description: Re-run bulk knowledge ingest overnight. Built-in stub in Phase 1; real logic lands in Phase 2.
+    category: ingest
+    schedule:
+      cron: "0 2 * * *"
+    executor: zeus.kronos.jobs.ingest.run_nightly_ingest
+    params:
+      targets: [knowledge]
+    safety_policy: ingest
+    timeout_seconds: 1800
+    max_retries: 0
+    tags: [ingest, nightly]
+    enabled: false
+
+  - id: weekly-memory-review
+    name: Weekly Memory Review
+    description: Surface patterns from the week's memory additions. Stub in Phase 1.
+    category: memory_review
+    schedule:
+      cron: "0 18 * * 0"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.memory_review.run_weekly_review
+    safety_policy: memory
+    timeout_seconds: 600
+    max_retries: 0
+    tags: [memory, weekly]
+    enabled: false

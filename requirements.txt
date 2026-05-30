@@ -21,6 +21,10 @@ python-multipart>=0.0.14
 pyyaml>=6.0
 # Sprint 9 — Observability + Scheduled Ingest
 apscheduler>=3.10.0
+# Kronos — cron-driven scheduler. Used for "compute next fire time from
+# last_fired_at" semantics; APScheduler stays for legacy ingest until the
+# Kronos nightly-knowledge-ingest job takes over.
+croniter>=2.0.0
 # Sprint 10 — Additional Ingest Sources
 google-api-python-client>=2.0.0
 google-auth-oauthlib>=1.2.0
