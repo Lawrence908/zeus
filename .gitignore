@@ -17,6 +17,10 @@ eggs/
 lib/
 lib64/
 parts/
+# Python's `lib/` rule above is a global match. Negate it for the SvelteKit
+# frontend's source tree so zeus-os/src/lib/ stays tracked.
+!zeus-os/src/lib/
+!zeus-os/src/lib/**
 sdist/
 var/
 wheels/
