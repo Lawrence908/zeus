@@ -75,6 +75,59 @@ async def metrics(request: Request) -> dict[str, Any]:
         "avg_latency_ms": avg_latency,
         "recent_queries": recent[-20:],  # last 20 for dashboard table
         "scheduler": scheduler_info,
+        "kronos": await _kronos_metrics(request),
+    }
+
+
+async def _kronos_metrics(request: Request) -> dict[str, Any]:
+    """Summarise Kronos state for the admin dashboard. Empty dict when disabled."""
+    from datetime import datetime, timedelta, timezone
+
+    registry = getattr(request.app.state, "kronos_registry", None)
+    scheduler = getattr(request.app.state, "kronos_scheduler", None)
+    if registry is None:
+        return {"enabled": False}
+
+    jobs = await registry.list()
+    enabled_jobs = [j for j in jobs if j.enabled]
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent_runs = await registry.list_runs(since=since, limit=500)
+
+    by_status: dict[str, int] = {}
+    by_category_dur: dict[str, list[float]] = {}
+    for run in recent_runs:
+        by_status[run.status.value] = by_status.get(run.status.value, 0) + 1
+        job = next((j for j in jobs if j.id == run.job_id), None)
+        if job is None or run.duration_ms is None:
+            continue
+        by_category_dur.setdefault(job.category.value, []).append(run.duration_ms)
+    avg_duration_by_category = {
+        cat: round(sum(vals) / len(vals), 1) for cat, vals in by_category_dur.items()
+    }
+
+    # "Overdue" = enabled cron job whose next expected fire is in the past
+    # relative to its last_fired_at.
+    from zeus.kronos.api import _compute_next_fire  # local import to avoid cycle at module load
+
+    now = datetime.now(timezone.utc)
+    overdue = 0
+    for job in enabled_jobs:
+        last = await registry.last_fired_at(job.id)
+        next_fire = _compute_next_fire(job, now, last)
+        if next_fire is not None and next_fire < now:
+            overdue += 1
+
+    return {
+        "enabled": True,
+        "total_jobs": len(jobs),
+        "enabled_jobs": len(enabled_jobs),
+        "runs_24h": {
+            "total": len(recent_runs),
+            "by_status": by_status,
+        },
+        "avg_duration_ms_by_category": avg_duration_by_category,
+        "overdue": overdue,
+        "scheduler_health": scheduler.health if scheduler is not None else {},
     }
 
 
