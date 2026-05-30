@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/knowledge', label: 'Knowledge' },
   { to: '/ingest', label: 'Ingest' },
   { to: '/agents', label: 'Agents' },
+  { to: '/tools', label: 'Tools' },
   { to: '/settings', label: 'Settings' },
 ]
 

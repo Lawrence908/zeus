@@ -102,3 +102,127 @@ async def zeus_memory_search(*, query: str, limit: int = 5) -> dict[str, Any]:
         summary = "\n".join(lines) if lines else "No relevant memories found."
         return {"summary": summary, "count": len(results), "results": results}
 
+
+# ------------------------------------------------------------------
+# Olympian tool pack (LAB-328) — read-side
+# ------------------------------------------------------------------
+
+
+async def olympian_status_read() -> dict[str, Any]:
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{_core_url()}/admin/status_file", timeout=5.0)
+        r.raise_for_status()
+        data = r.json() or {}
+        return {
+            "path": str(data.get("path") or ""),
+            "content": str(data.get("content") or ""),
+            "mtime": float(data.get("mtime") or 0.0),
+            "exists": bool(data.get("exists", True)),
+        }
+
+
+async def olympian_server_health() -> dict[str, Any]:
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{_core_url()}/admin/system", timeout=10.0)
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def olympian_file_read(*, path: str) -> dict[str, Any]:
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{_core_url()}/vault/file",
+            params={"path": path},
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def olympian_file_search(
+    *,
+    pattern: str,
+    root: str | None = None,
+    max_results: int = 50,
+    case_sensitive: bool = False,
+    fixed_strings: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "pattern": pattern,
+        "max_results": max(1, min(500, int(max_results))),
+        "case_sensitive": bool(case_sensitive),
+        "fixed_strings": bool(fixed_strings),
+    }
+    if root:
+        payload["root"] = root
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{_core_url()}/vault/search",
+            json=payload,
+            timeout=15.0,
+        )
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def olympian_inbox_append(*, text: str, tags: list[str] | None = None) -> dict[str, Any]:
+    if not _allow_write():
+        raise PermissionError("ZEUS_MCP_ALLOW_WRITE is false; olympian_inbox_append disabled")
+    payload: dict[str, Any] = {"text": text}
+    if tags:
+        payload["tags"] = list(tags)
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{_core_url()}/inbox/append",
+            json=payload,
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def olympian_action_list() -> dict[str, Any]:
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{_core_url()}/actions/list", timeout=5.0)
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def olympian_action_run(*, name: str, args: list[str] | None = None) -> dict[str, Any]:
+    if not _allow_write():
+        raise PermissionError("ZEUS_MCP_ALLOW_WRITE is false; olympian_action_run disabled")
+    payload: dict[str, Any] = {"name": name, "args": list(args or [])}
+    # Action runner timeout is enforced server-side; client allows generous
+    # slack for the round-trip.
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{_core_url()}/actions/run",
+            json=payload,
+            timeout=120.0,
+        )
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def zeus_calendar_today() -> dict[str, Any]:
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{_core_url()}/calendar/today", timeout=15.0)
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def zeus_newsletter_latest() -> dict[str, Any]:
+    """Return the most recent newsletter digest entry (compact form)."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{_core_url()}/api/newsletter/digests",
+            params={"limit": 1},
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        digests = data.get("digests") or []
+        if not digests:
+            return {"digest": None, "exists": False}
+        return {"digest": digests[0], "exists": True}
+

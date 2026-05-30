@@ -35,11 +35,14 @@ _SCHEMA: dict[str, Any] = {
         },
         "format": {
             "type": "string",
-            "enum": ["iso", "human", "unix"],
+            "enum": ["human", "iso", "unix"],
             "description": (
-                "Output format. 'iso' = ISO 8601 with offset (default), "
-                "'human' = 'Thursday, April 23, 2026 at 2:37 PM PDT', "
-                "'unix' = seconds since epoch."
+                "Output format. 'human' (default) = 24-hour clock with "
+                "timezone abbreviation and weekday, e.g. "
+                "'17:58:34 PDT on Thursday, April 23, 2026'. "
+                "'iso' = ISO 8601 with UTC offset (e.g. '2026-04-23T17:58:34-07:00'). "
+                "'unix' = seconds since the epoch. Prefer 'human' unless the "
+                "caller specifically needs a machine-parseable format."
             ),
         },
     },
@@ -49,11 +52,18 @@ _SCHEMA: dict[str, Any] = {
 _SPEC = ToolSpec(
     name="current_time",
     description=(
-        "Get the current wall-clock date and time. Use whenever the user asks "
-        "about now, today, this morning, 'what time is it', or needs a "
-        "timestamp for a follow-up. Returns the time in the requested IANA "
-        "timezone, or the server's default if none is given. Do not guess the "
-        "time without calling this tool."
+        "Returns the current wall-clock date and time. You MUST call this "
+        "tool whenever the user asks about the current time, date, day of "
+        "the week, 'now', 'today', 'tonight', 'this morning', 'what time is "
+        "it', or anything similar. Do NOT answer from memory, retrieval, or "
+        "training data — the clock changes every second and only this tool "
+        "has the real value. Timestamps you see in the context blocks are "
+        "historical, not current. Call this first, then answer. The default "
+        "output is human-friendly 24-hour format with timezone abbreviation "
+        "(e.g. '17:58:34 PDT on Thursday, April 23, 2026') — quote it "
+        "verbatim in your reply. Pass `timezone` as an IANA name when the "
+        "user asks about a specific place (e.g. 'Asia/Tokyo', "
+        "'Europe/London'); otherwise the server's default timezone is used."
     ),
     parameters=_SCHEMA,
     aegis_policy="tool_arguments",
@@ -64,7 +74,7 @@ _SPEC = ToolSpec(
 
 async def _handler(args: dict[str, Any]) -> ToolResult:
     tz_name = str(args.get("timezone") or _default_timezone()).strip() or "UTC"
-    fmt = str(args.get("format") or "iso").strip().lower()
+    fmt = str(args.get("format") or "human").strip().lower()
 
     try:
         tz = ZoneInfo(tz_name)
@@ -83,13 +93,16 @@ async def _handler(args: dict[str, Any]) -> ToolResult:
 
     if fmt == "unix":
         body = f"{int(now.timestamp())}"
-    elif fmt == "human":
-        # %-I / %-d are POSIX-only no-pad variants; if we ever run on Windows
-        # this would need %#I / %#d. Docker Linux is the only target, so fine.
-        body = now.strftime("%A, %B %-d, %Y at %-I:%M %p %Z")
-    else:
-        # ISO 8601 default. isoformat() on a tz-aware datetime includes offset.
+    elif fmt == "iso":
+        # ISO 8601 with offset — machine-parseable fallback.
         body = now.isoformat(timespec="seconds")
+    else:
+        # Default: 24-hour clock + timezone abbreviation + weekday + full date.
+        # %-d is POSIX-only no-pad; Docker Linux is the only target.
+        # %Z on a ZoneInfo-aware datetime yields PDT / PST / UTC / JST / etc.
+        # Falls back to the IANA name if the tz has no abbreviation.
+        tz_abbr = now.strftime("%Z") or tz_name
+        body = now.strftime(f"%H:%M:%S {tz_abbr} on %A, %B %-d, %Y")
 
     return ToolResult(call_id="", name=_SPEC.name, content=body)
 

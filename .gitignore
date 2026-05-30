@@ -245,3 +245,6 @@ compose.override.yaml
 *.gguf
 *.bin
 *.safetensors
+
+# Olympian workspace symlink (~/.zeus); shared across repos, never committed.
+.zeus

@@ -1,0 +1,27 @@
+name: file_access
+description: |
+  Defence-in-depth policy for tool payloads that touch the filesystem
+  (vault read/search, inbox append, action runner). Server-side allowlist
+  resolution is the primary defence; this policy catches obvious adversarial
+  shapes earlier in the pipeline.
+rules:
+  - name: path_traversal
+    pattern: '(\.\./){2,}|/etc/(passwd|shadow|sudoers)\b|\bproc/self\b'
+    action: reject
+    message: "Path traversal pattern in payload."
+  - name: shell_metacharacters
+    # See note in tool_arguments.yaml: backtick-only spans now require shell
+    # keywords inside, so markdown code spans like `~/.zeus/` no longer trip
+    # this when the policy is applied to user-content payloads (inbox text,
+    # vault search snippets, action stdout).
+    pattern: '(?:\$\(|`[^`]*\b(rm|curl|wget|sh|bash|nc|eval|exec)\b[^`]*`|\|\s*(curl|wget|sh|bash|nc)\b|;\s*(rm|curl|wget|nc)\b|&&\s*(rm|curl|wget))'
+    action: reject
+    message: "Shell metacharacter pattern in payload."
+  - name: action_arg_pipe
+    pattern: '(?:>\s*/(?:dev|proc|sys|etc)\b|<\s*/(?:dev|proc|sys|etc)\b)'
+    action: reject
+    message: "I/O redirection to a sensitive path."
+  - name: secret_in_capture
+    pattern: '(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*\S{12,}'
+    action: flag_for_review
+    message: ""
