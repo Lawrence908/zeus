@@ -5,6 +5,8 @@
   import MobileShell from '$lib/components/MobileShell.svelte';
   import Launcher from '$lib/components/Launcher.svelte';
   import Cheatsheet from '$lib/components/Cheatsheet.svelte';
+  import Notifications from '$lib/components/Notifications.svelte';
+  import { notify } from '$lib/notify/store';
 
   import {
     bootstrap,
@@ -13,14 +15,17 @@
     moveDir,
     moveFocusedToWorkspace,
     openApp,
-    switchWorkspace
+    switchWorkspace,
+    toggleFloating
   } from '$lib/wm/store';
   import {
     DEFAULT_KEYMAP,
+    MODIFIER_LABEL,
     compile,
     matchEvent,
     type Action,
-    type KeybindContext
+    type KeybindContext,
+    type ModifierMode
   } from '$lib/wm/keybinds';
   import { applyTheme, nextTheme, THEMES, type ThemeId } from '$lib/themes';
   import { listApps, type AppEntry } from '$lib/api/apps';
@@ -30,9 +35,18 @@
   let cheatsheetOpen = false;
   let isMobile = false;
   let theme: ThemeId = 'catppuccin-mocha';
-  let ctx: KeybindContext = { modifier: 'Meta' };
+  let modifier: ModifierMode = detectDefaultModifier();
+  $: ctx = { modifier } satisfies KeybindContext;
   let config: ZeusOsConfig | null = null;
   let apps: AppEntry[] = [];
+
+  // Default to CtrlAlt on Windows so Win+letter doesn't fight the OS.
+  function detectDefaultModifier(): ModifierMode {
+    if (typeof navigator === 'undefined') return 'Meta';
+    const ua = navigator.userAgent || '';
+    if (/Windows/i.test(ua)) return 'CtrlAlt';
+    return 'Meta';
+  }
 
   const compiled = compile(DEFAULT_KEYMAP);
 
@@ -106,12 +120,24 @@
         theme = nextTheme(theme);
         applyTheme(theme);
         persistTheme();
+        notify({ title: 'Theme', body: theme, kind: 'info', ttlMs: 1800 });
         break;
       }
       case 'setTheme':
         theme = action.theme;
         applyTheme(theme);
         persistTheme();
+        notify({ title: 'Theme', body: theme, kind: 'info', ttlMs: 1800 });
+        break;
+      case 'setModifier':
+        modifier = action.mode;
+        persistConfig();
+        notify({
+          title: 'Modifier',
+          body: `${MODIFIER_LABEL[modifier]} now stands in for Super`,
+          kind: 'ok',
+          ttlMs: 2400
+        });
         break;
       case 'cheatsheet':
         launcherOpen = false;
@@ -121,7 +147,7 @@
         window.location.reload();
         break;
       case 'toggleFloating':
-        // Phase 1 stub.
+        toggleFloating();
         break;
     }
   }
@@ -129,6 +155,16 @@
   async function persistTheme() {
     if (!config) return;
     config = { ...config, theme };
+    try {
+      await saveConfig(config);
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  async function persistConfig() {
+    if (!config) return;
+    config = { ...config, theme, modifier };
     try {
       await saveConfig(config);
     } catch {
@@ -152,8 +188,8 @@
         theme = config.theme as ThemeId;
         applyTheme(theme);
       }
-      if (config?.modifier === 'Alt') {
-        ctx = { modifier: 'Alt' };
+      if (config?.modifier === 'Alt' || config?.modifier === 'CtrlAlt' || config?.modifier === 'Meta') {
+        modifier = config.modifier;
       }
     } catch {
       /* fall back to defaults */
@@ -178,10 +214,11 @@
 
 <div class="h-screen w-screen overflow-hidden">
   {#if isMobile}
-    <MobileShell />
+    <MobileShell {modifier} />
   {:else}
-    <Desktop />
+    <Desktop {modifier} />
   {/if}
-  <Launcher bind:open={launcherOpen} />
-  <Cheatsheet bind:open={cheatsheetOpen} />
+  <Launcher bind:open={launcherOpen} {modifier} on:setModifier={(e) => runAction({ kind: 'setModifier', mode: e.detail })} />
+  <Cheatsheet bind:open={cheatsheetOpen} {modifier} />
+  <Notifications />
 </div>

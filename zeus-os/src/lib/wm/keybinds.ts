@@ -2,16 +2,32 @@
 //
 // Binding format: "Super+H", "Super+Shift+1", "Super+Return", "Ctrl+Space".
 // Tokens are case-insensitive. Modifiers: Super (Meta), Ctrl, Alt, Shift.
-// The user can swap "Super" to "Alt" via config (browsers commonly capture
-// Meta on Linux when Hyprland or similar is the host WM).
+// The user picks what physically stands in for "Super" via config:
+//   - Meta:    the Win/Cmd key. Default, native on Linux.
+//   - Alt:     the Alt key. Fallback when Linux host WM captures Meta.
+//   - CtrlAlt: Ctrl+Alt chord. Required on Windows clients because Win+letter
+//              is reserved by the OS before the browser sees it.
 
 import type { ThemeId } from '$lib/themes';
 
 export type ModifierName = 'Meta' | 'Alt' | 'Ctrl' | 'Shift';
+export type ModifierMode = 'Meta' | 'Alt' | 'CtrlAlt';
 
 export interface KeybindContext {
-  modifier: 'Meta' | 'Alt'; // which physical mod stands in for "Super"
+  modifier: ModifierMode;
 }
+
+export const MODIFIER_LABEL: Record<ModifierMode, string> = {
+  Meta: 'Super',
+  Alt: 'Alt',
+  CtrlAlt: 'Ctrl+Alt'
+};
+
+export const MODIFIER_DESCRIPTION: Record<ModifierMode, string> = {
+  Meta: 'Use the Win / ⌘ / Super key as the WM modifier. Native Linux feel.',
+  Alt: 'Use Alt as the WM modifier. Use when your host WM steals Super.',
+  CtrlAlt: 'Use Ctrl+Alt as the WM modifier. Required on Windows clients where Win+letter is captured by the OS.'
+};
 
 export type Action =
   | { kind: 'open'; appId: string; dir?: 'h' | 'v' }
@@ -25,6 +41,7 @@ export type Action =
   | { kind: 'toggleFloating' }
   | { kind: 'cycleTheme' }
   | { kind: 'setTheme'; theme: ThemeId }
+  | { kind: 'setModifier'; mode: ModifierMode }
   | { kind: 'cheatsheet' }
   | { kind: 'reload' };
 
@@ -80,13 +97,36 @@ function normalizeKey(k: string): string {
 }
 
 export function matchEvent(ev: KeyboardEvent, bind: ParsedBind, ctx: KeybindContext): boolean {
-  const superDown = ctx.modifier === 'Meta' ? ev.metaKey : ev.altKey;
-  // When Alt stands in for Super, the bare Alt+letter chord should still fire;
-  // we therefore relax the "alt must be false" rule in that mode.
-  const altDown = ctx.modifier === 'Meta' ? ev.altKey : false;
+  // The "Super" bit consumes whatever physical modifier(s) the user picked.
+  // For modes that include Ctrl or Alt in the Super chord, we ignore those
+  // flags when checking the bind's own ctrl/alt fields so that bindings like
+  // "Super+Shift+Q" still match without false-mismatching on the consumed mods.
+  let superDown: boolean;
+  let ctrlConsumed: boolean;
+  let altConsumed: boolean;
+  switch (ctx.modifier) {
+    case 'Meta':
+      superDown = ev.metaKey;
+      ctrlConsumed = false;
+      altConsumed = false;
+      break;
+    case 'Alt':
+      superDown = ev.altKey;
+      ctrlConsumed = false;
+      altConsumed = true;
+      break;
+    case 'CtrlAlt':
+    default:
+      superDown = ev.ctrlKey && ev.altKey;
+      // Only treat Ctrl/Alt as consumed when the chord actually used them as
+      // Super; this lets non-super bindings like raw `Ctrl+Space` still match.
+      ctrlConsumed = superDown;
+      altConsumed = superDown;
+      break;
+  }
   if (bind.super !== superDown) return false;
-  if (bind.ctrl !== ev.ctrlKey) return false;
-  if (bind.alt !== altDown) return false;
+  if (!ctrlConsumed && bind.ctrl !== ev.ctrlKey) return false;
+  if (!altConsumed && bind.alt !== ev.altKey) return false;
   if (bind.shift !== ev.shiftKey) return false;
   return normalizeKey(ev.key) === bind.key;
 }

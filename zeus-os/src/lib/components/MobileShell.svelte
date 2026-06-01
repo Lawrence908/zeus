@@ -1,5 +1,8 @@
 <script lang="ts">
   import Panel from './Panel.svelte';
+  import type { ModifierMode } from '$lib/wm/keybinds';
+
+  export let modifier: ModifierMode = 'Meta';
   import Terminal from '$lib/apps/Terminal.svelte';
   import Chat from '$lib/apps/Chat.svelte';
   import SystemMonitor from '$lib/apps/SystemMonitor.svelte';
@@ -28,7 +31,7 @@
 </script>
 
 <div class="relative h-full w-full flex flex-col">
-  <Panel />
+  <Panel {modifier} />
   <div class="flex-1 overflow-hidden mt-[30px]">
     {#if visible && Comp}
       <div class="absolute inset-0" style="top: 30px; bottom: 56px;">

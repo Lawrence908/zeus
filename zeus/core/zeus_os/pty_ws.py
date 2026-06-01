@@ -40,7 +40,20 @@ def _spawn_shell(cwd: str | None) -> tuple[int, int]:
     if os.getenv("ZEUS_OS_PTY_HOST_SSH", "0").strip().lower() in ("1", "true", "yes", "on"):
         host = os.getenv("ZEUS_OS_PTY_SSH_HOST", "chris@host.docker.internal")
         cmd_str = os.getenv("ZEUS_OS_PTY_SSH_COMMAND", "bash -il")
-        argv = ["ssh", "-tt", "-o", "StrictHostKeyChecking=accept-new", host, cmd_str]
+        identity = os.getenv("ZEUS_OS_PTY_SSH_IDENTITY", "/root/.ssh/id_ed25519_zeus_os")
+        known_hosts = os.getenv("ZEUS_OS_PTY_SSH_KNOWN_HOSTS", "/root/.zeus/zeus-os/known_hosts")
+        argv = [
+            "ssh",
+            "-tt",
+            "-i", identity,
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"UserKnownHostsFile={known_hosts}",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ServerAliveCountMax=3",
+            host,
+            cmd_str,
+        ]
     else:
         shell = os.getenv("ZEUS_OS_PTY_SHELL") or os.getenv("SHELL") or "/bin/bash"
         argv = shlex.split(shell) + ["-i"]

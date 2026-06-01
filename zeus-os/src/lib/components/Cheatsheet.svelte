@@ -1,22 +1,25 @@
 <script lang="ts">
   import { fade, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
+  import { MODIFIER_LABEL, type ModifierMode } from '$lib/wm/keybinds';
 
   export let open = false;
+  export let modifier: ModifierMode = 'Meta';
 
-  const rows: [string, string][] = [
-    ['Super + Return', 'Open Terminal'],
-    ['Super + D / Ctrl + Space', 'Launcher'],
-    ['Super + Shift + Q', 'Close window'],
-    ['Super + F', 'Toggle floating'],
-    ['Super + H / J / K / L', 'Focus left / down / up / right'],
-    ['Super + Shift + H / J / K / L', 'Move window'],
-    ['Super + V / S', 'Split vertical / horizontal'],
-    ['Super + 1..0', 'Switch workspace'],
-    ['Super + Shift + 1..0', 'Move window to workspace'],
-    ['Super + R', 'Cycle theme'],
-    ['Super + /', 'This cheatsheet']
-  ];
+  $: mod = MODIFIER_LABEL[modifier];
+  $: rows = [
+    [`${mod} + Return`, 'Open Terminal'],
+    [`${mod} + D  /  Ctrl + Space`, 'Launcher'],
+    [`${mod} + Shift + Q`, 'Close window'],
+    [`${mod} + F`, 'Toggle floating'],
+    [`${mod} + H / J / K / L`, 'Focus left / down / up / right'],
+    [`${mod} + Shift + H / J / K / L`, 'Move window'],
+    [`${mod} + V / S`, 'Split vertical / horizontal'],
+    [`${mod} + 1..0`, 'Switch workspace'],
+    [`${mod} + Shift + 1..0`, 'Move window to workspace'],
+    [`${mod} + R`, 'Cycle theme'],
+    [`${mod} + /`, 'This cheatsheet']
+  ] satisfies [string, string][];
 </script>
 
 {#if open}
@@ -31,7 +34,10 @@
       class="surface-blur rounded-2xl shadow-2xl w-[min(560px,92vw)] border border-border/40 p-6"
       transition:scale={{ duration: 220, start: 0.96, easing: cubicOut }}
     >
-      <h2 class="text-lg font-mono mb-4 text-accent">Zeus OS — keybinds</h2>
+      <h2 class="text-lg font-mono mb-1 text-accent">Zeus OS — keybinds</h2>
+      <p class="text-xs text-muted mb-3 font-mono">
+        Modifier: <span class="text-fg">{mod}</span> · change it from the launcher (search "modifier")
+      </p>
       <table class="w-full text-sm font-mono">
         <tbody>
           {#each rows as [k, v]}

@@ -5,7 +5,11 @@
 
   import Window from './Window.svelte';
   import Panel from './Panel.svelte';
-  import { activeWorkspace, leaves, rects, viewport, gap } from '$lib/wm/store';
+  import FloatingWindow from './FloatingWindow.svelte';
+  import { activeWorkspace, floating, leaves, rects, viewport, gap } from '$lib/wm/store';
+  import type { ModifierMode } from '$lib/wm/keybinds';
+
+  export let modifier: ModifierMode = 'Meta';
 
   // Lay out windows inside the area below the top panel, with the configured
   // gap on all sides. Recompute on resize.
@@ -33,7 +37,7 @@
 </script>
 
 <div bind:this={outer} class="relative h-full w-full overflow-hidden">
-  <Panel />
+  <Panel {modifier} />
   {#key $activeWorkspace.id}
     <div
       class="absolute inset-0"
@@ -48,7 +52,10 @@
           />
         {/if}
       {/each}
-      {#if $leaves.length === 0}
+      {#each $floating as win (win.id)}
+        <FloatingWindow {win} focused={win.id === $activeWorkspace.focusId} />
+      {/each}
+      {#if $leaves.length === 0 && $floating.length === 0}
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div class="text-center select-none">
             <p class="text-fg/30 text-2xl font-mono">Workspace {$activeWorkspace.id}</p>

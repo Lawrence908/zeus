@@ -5,6 +5,9 @@
   import { isEmpty } from '$lib/wm/workspace';
   import { openSysStream, type SysSample } from '$lib/api/sys';
   import { findLeaf } from '$lib/wm/tree';
+  import { MODIFIER_LABEL, type ModifierMode } from '$lib/wm/keybinds';
+
+  export let modifier: ModifierMode = 'Meta';
 
   let now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   let clock: ReturnType<typeof setInterval> | null = null;
@@ -38,6 +41,10 @@
       ? Math.round(((sample.mem.total - sample.mem.available) / sample.mem.total) * 100)
       : null;
   $: gpu = sample?.gpu?.util ?? null;
+  $: vramPct =
+    sample?.gpu && sample.gpu.mem_total > 0
+      ? Math.round((sample.gpu.mem_used / sample.gpu.mem_total) * 100)
+      : null;
 </script>
 
 <header
@@ -77,8 +84,17 @@
       <span title="Memory"><span class="text-accent">MEM</span> {memPct}%</span>
     {/if}
     {#if gpu !== null}
-      <span title="GPU"><span class="text-accent">GPU</span> {gpu.toFixed(0)}%</span>
+      <span title="GPU utilization"><span class="text-accent">GPU</span> {gpu.toFixed(0)}%</span>
     {/if}
+    {#if vramPct !== null}
+      <span title="VRAM used / total"><span class="text-accent">VRAM</span> {vramPct}%</span>
+    {/if}
+    <span
+      class="px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide text-bg bg-accent2/80"
+      title="WM modifier — open the launcher (Ctrl+Space) and search 'modifier' to change"
+    >
+      {MODIFIER_LABEL[modifier]}
+    </span>
     <span class="text-fg">{now}</span>
   </div>
 </header>

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from zeus.core._fs import (
@@ -32,6 +33,7 @@ _WRITE_ROOTS_ENV = "ZEUS_OS_FS_WRITE_ROOTS"
 _DEFAULT_ROOTS = "/app/zeus,/app/zeus/data,/root/.zeus"
 _DEFAULT_WRITE_ROOTS = "/root/.zeus"
 _MAX_READ_BYTES = 1 * 1024 * 1024  # 1 MB
+_MAX_RAW_BYTES = 20 * 1024 * 1024  # 20 MB for image / binary previews
 _MAX_WRITE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
@@ -127,6 +129,25 @@ def fs_read(path: str = Query(..., min_length=1)) -> dict[str, Any]:
         "truncated": truncated,
         "mtime": mtime,
     }
+
+
+@router.get("/fs/raw")
+def fs_raw(path: str = Query(..., min_length=1)) -> FileResponse:
+    """Serve a file's raw bytes (no UTF-8 round-trip). Backs the WM File Manager
+    image preview. Capped at _MAX_RAW_BYTES to keep the browser from chewing
+    on something unexpectedly enormous; for normal images and assets this is
+    far above what we'd ever serve.
+    """
+    resolved = resolve_in_allowlist(path, _read_roots())
+    if not resolved.is_file():
+        raise HTTPException(status_code=400, detail="path is not a regular file")
+    try:
+        size = resolved.stat().st_size
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"stat failed: {exc}") from exc
+    if size > _MAX_RAW_BYTES:
+        raise HTTPException(status_code=413, detail="file too large for raw preview")
+    return FileResponse(str(resolved))
 
 
 class FsWriteRequest(BaseModel):

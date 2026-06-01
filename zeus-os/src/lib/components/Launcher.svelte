@@ -1,13 +1,17 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { createEventDispatcher, tick } from 'svelte';
   import { fade, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
 
   import { listApps, type AppEntry } from '$lib/api/apps';
   import { openApp } from '$lib/wm/store';
   import { THEMES, applyTheme, type ThemeId } from '$lib/themes';
+  import { MODIFIER_LABEL, type ModifierMode } from '$lib/wm/keybinds';
 
   export let open = false;
+  export let modifier: ModifierMode = 'Meta';
+
+  const dispatch = createEventDispatcher<{ setModifier: ModifierMode }>();
 
   let query = '';
   let inputEl: HTMLInputElement;
@@ -37,6 +41,14 @@
     onPick: () => applyTheme(t.id as ThemeId)
   } satisfies Entry));
 
+  const MOD_MODES: ModifierMode[] = ['Meta', 'Alt', 'CtrlAlt'];
+  $: modifierEntries = MOD_MODES.filter((m) => m !== modifier).map((m) => ({
+    id: 'modifier:' + m,
+    label: `Modifier: ${MODIFIER_LABEL[m]}${m === 'CtrlAlt' ? ' (Windows-friendly)' : m === 'Meta' ? ' (Linux default)' : ''}`,
+    hint: 'modifier',
+    onPick: () => dispatch('setModifier', m)
+  } satisfies Entry));
+
   $: actionEntries = [
     {
       id: 'action:reload',
@@ -46,7 +58,7 @@
     } satisfies Entry
   ];
 
-  $: entries = [...appEntries, ...themeEntries, ...actionEntries];
+  $: entries = [...appEntries, ...themeEntries, ...modifierEntries, ...actionEntries];
 
   $: filtered = filterEntries(entries, query);
 
@@ -153,7 +165,7 @@
         {/each}
       </ul>
       <footer class="px-4 py-2 text-[10px] text-muted border-t border-border/40 flex justify-between">
-        <span><kbd>↑</kbd>/<kbd>↓</kbd> select &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> close</span>
+        <span><kbd>↑</kbd>/<kbd>↓</kbd> select &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> close &nbsp;·&nbsp; modifier: <span class="text-fg">{MODIFIER_LABEL[modifier]}</span></span>
         <span>{filtered.length} / {entries.length}</span>
       </footer>
     </div>

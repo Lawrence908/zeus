@@ -72,23 +72,11 @@ def _read_loadavg() -> list[float] | None:
         return None
 
 
-async def _read_gpu() -> dict[str, Any] | None:
-    """Phase 1.5: nvidia-smi over host SSH. Phase 1 returns None unless
-    nvidia-smi is present *and* ZEUS_OS_GPU_LOCAL=1 (rare; only if the
-    container has GPU access)."""
-    if os.getenv("ZEUS_OS_GPU_LOCAL", "0").strip().lower() not in ("1", "true", "yes", "on"):
-        return None
-    if shutil.which("nvidia-smi") is None:
-        return None
+_NVIDIA_QUERY = "utilization.gpu,memory.used,memory.total,temperature.gpu"
+
+
+def _parse_nvidia_csv(stdout: bytes) -> dict[str, Any] | None:
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "nvidia-smi",
-            "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
-            "--format=csv,noheader,nounits",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2.0)
         line = stdout.decode("utf-8", errors="replace").splitlines()[0]
         util, mem_used_mib, mem_total_mib, temp = [s.strip() for s in line.split(",")]
         return {
@@ -97,8 +85,74 @@ async def _read_gpu() -> dict[str, Any] | None:
             "mem_total": int(mem_total_mib) * 1024 * 1024,
             "temp_c": float(temp),
         }
-    except (asyncio.TimeoutError, OSError, ValueError, IndexError):
+    except (ValueError, IndexError, UnicodeDecodeError):
         return None
+
+
+async def _read_gpu_local() -> dict[str, Any] | None:
+    if shutil.which("nvidia-smi") is None:
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "nvidia-smi",
+            f"--query-gpu={_NVIDIA_QUERY}",
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+    except (asyncio.TimeoutError, OSError):
+        return None
+    return _parse_nvidia_csv(stdout)
+
+
+async def _read_gpu_ssh() -> dict[str, Any] | None:
+    host = os.getenv("ZEUS_OS_PTY_SSH_HOST", "chris@host.docker.internal")
+    identity = os.getenv("ZEUS_OS_PTY_SSH_IDENTITY", "/root/.ssh/id_ed25519_zeus_os")
+    known_hosts = os.getenv("ZEUS_OS_PTY_SSH_KNOWN_HOSTS", "/root/.zeus/zeus-os/known_hosts")
+    # ControlMaster: reuse one multiplexed SSH connection across the 1Hz polls
+    # so each sample is ~30ms instead of a full handshake.
+    ctl_path = "/tmp/zeus_os_gpu_ssh-%C"
+    args = [
+        "ssh",
+        "-i", identity,
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", f"UserKnownHostsFile={known_hosts}",
+        "-o", "ControlMaster=auto",
+        "-o", f"ControlPath={ctl_path}",
+        "-o", "ControlPersist=60",
+        "-o", "ConnectTimeout=3",
+        host,
+        f"nvidia-smi --query-gpu={_NVIDIA_QUERY} --format=csv,noheader,nounits",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+    except (asyncio.TimeoutError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return _parse_nvidia_csv(stdout)
+
+
+async def _read_gpu() -> dict[str, Any] | None:
+    """Sample GPU. Order of preference:
+      1) ZEUS_OS_GPU_LOCAL=1  → in-container nvidia-smi (rare; needs GPU reservation).
+      2) ZEUS_OS_GPU_SSH=1    → ssh out to the host (Phase 1.5 default once compose is updated).
+    Returns None when neither path yields a parseable sample.
+    """
+    if os.getenv("ZEUS_OS_GPU_LOCAL", "0").strip().lower() in ("1", "true", "yes", "on"):
+        sample = await _read_gpu_local()
+        if sample is not None:
+            return sample
+    if os.getenv("ZEUS_OS_GPU_SSH", "0").strip().lower() in ("1", "true", "yes", "on"):
+        return await _read_gpu_ssh()
+    return None
 
 
 @router.websocket("/sys/stream")
