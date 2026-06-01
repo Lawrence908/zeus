@@ -82,6 +82,85 @@ async def zeus_ingest_trigger(*, source: str = "all") -> dict[str, Any]:
         }
 
 
+async def kronos_create_job(
+    *,
+    name: str,
+    description: str = "",
+    category: str = "custom",
+    cron: str | None = None,
+    run_at: str | None = None,
+    executor: str | None = None,
+    agent: str | None = None,
+    endpoint: str = "/run",
+    params: dict[str, Any] | None = None,
+    timezone: str = "UTC",
+    safety_policy: str = "standard",
+    timeout_seconds: int = 300,
+    max_retries: int = 1,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a Kronos scheduled job. Proxies to POST /kronos/jobs.
+
+    Provide exactly one of cron/run_at, and exactly one of executor/agent.
+    Returns the created job_id and the next scheduled fire time.
+    """
+    if not _allow_write():
+        raise PermissionError("ZEUS_MCP_ALLOW_WRITE is false; kronos_create_job disabled")
+
+    if (cron is None) == (run_at is None):
+        raise ValueError("kronos_create_job: pass exactly one of cron or run_at")
+    if (executor is None) == (agent is None):
+        raise ValueError("kronos_create_job: pass exactly one of executor or agent")
+
+    # Derive a stable id from the name when caller doesn't pick one.
+    if not job_id:
+        slug = "".join(c if c.isalnum() else "-" for c in name.lower()).strip("-")
+        job_id = slug[:60] or "job"
+
+    payload: dict[str, Any] = {
+        "id": job_id,
+        "name": name,
+        "description": description,
+        "category": category,
+        "schedule": {"cron": cron, "run_at": run_at, "timezone": timezone},
+        "executor": executor,
+        "agent": agent,
+        "endpoint": endpoint,
+        "params": params or {},
+        "safety_policy": safety_policy,
+        "timeout_seconds": timeout_seconds,
+        "max_retries": max_retries,
+        "enabled": True,
+    }
+
+    async with httpx.AsyncClient() as client:
+        create = await client.post(
+            f"{_core_url()}/kronos/jobs", json=payload, timeout=15.0
+        )
+        if create.status_code == 409:
+            raise ValueError(f"job id {job_id!r} already exists; pass job_id to override")
+        create.raise_for_status()
+        created = create.json() or {}
+
+        upcoming = await client.get(
+            f"{_core_url()}/kronos/schedule/upcoming", params={"limit": 100}, timeout=10.0
+        )
+        next_fire = ""
+        if upcoming.status_code == 200:
+            for entry in upcoming.json():
+                if entry.get("job_id") == job_id:
+                    next_fire = str(entry.get("next_fire") or "")
+                    break
+
+    return {
+        "job_id": str(created.get("id") or job_id),
+        "name": str(created.get("name") or name),
+        "category": str(created.get("category") or category),
+        "next_fire": next_fire,
+        "enabled": bool(created.get("enabled", True)),
+    }
+
+
 async def zeus_memory_search(*, query: str, limit: int = 5) -> dict[str, Any]:
     lim = max(1, min(20, limit))
     async with httpx.AsyncClient() as client:

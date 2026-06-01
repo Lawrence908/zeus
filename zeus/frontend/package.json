@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cron-parser": "^5.5.0",
     "highlight.js": "^11.10.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

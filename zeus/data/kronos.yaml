@@ -1,0 +1,97 @@
+# zeus/data/kronos.yaml — Declarative seed jobs for Kronos.
+# Loaded on every boot via KronosRegistry.seed_from_yaml(); insert-or-skip by id
+# so edits to live jobs via the API are never clobbered. New ids added here
+# appear on next boot; removing an id from this file does NOT delete it from
+# the DB (use the API or set enabled=false in the running job).
+#
+# Only the newsletter job is enabled by default in Phase 1. Ingest and memory
+# review seed as disabled placeholders while their built-in implementations
+# land in Phase 2.
+
+jobs:
+  - id: newsletter-morning-digest
+    name: Newsletter Morning Digest
+    description: Morning newsletter summary + TTS audio; successor to the LAB-343 KAIROS observer idea.
+    category: briefing
+    schedule:
+      cron: "0 7 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.newsletter.run_morning_digest
+    params:
+      newsletter_type: all
+      num_recent: 3
+    safety_policy: standard
+    timeout_seconds: 600
+    max_retries: 1
+    tags: [newsletter, morning]
+    enabled: true
+
+  - id: nightly-knowledge-ingest
+    name: Nightly Knowledge Ingest
+    description: Re-run bulk knowledge ingest overnight. Built-in stub in Phase 1; real logic lands in Phase 2.
+    category: ingest
+    schedule:
+      cron: "0 2 * * *"
+    executor: zeus.kronos.jobs.ingest.run_nightly_ingest
+    params:
+      targets: [knowledge]
+    safety_policy: ingest
+    timeout_seconds: 1800
+    max_retries: 0
+    tags: [ingest, nightly]
+    enabled: false
+
+  - id: weekly-memory-review
+    name: Weekly Memory Review
+    description: Group MemoryStore additions from the last 7 days by category and source. Phase 2 returns a structured summary; no LLM call yet.
+    category: memory_review
+    schedule:
+      cron: "0 18 * * 0"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.memory_review.run_weekly_review
+    params:
+      days: 7
+      max_samples_per_category: 3
+    safety_policy: memory
+    timeout_seconds: 600
+    max_retries: 0
+    tags: [memory, weekly]
+    enabled: false
+
+  - id: hourly-service-health
+    name: Hourly Service Health Probe
+    description: Probe qdrant and ollama readiness, log degraded state. Disabled by default; enable when you want a heartbeat in the runs feed.
+    category: health
+    schedule:
+      cron: "0 * * * *"
+    executor: zeus.kronos.jobs.health_check.run_service_health
+    safety_policy: standard
+    timeout_seconds: 30
+    max_retries: 0
+    tags: [health, hourly]
+    enabled: false
+
+  - id: weekly-research-example
+    name: "Weekly Research (example, disabled)"
+    description: |
+      Example deep-research run. Disabled by default. Clone via the API or
+      duplicate this entry, edit `params.topic` (and depth/format if desired),
+      and set enabled=true. Each fire writes a cited report into
+      zeus/docs/research/<date>-<slug>.md. Most chat-triggered runs use a
+      one-off run_at job created via the deep_research chat tool — this seed
+      is here as a recurring-survey template (e.g. a weekly digest of an
+      ongoing topic).
+    category: research
+    schedule:
+      cron: "0 6 * * 1"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.deep_research.run_deep_research
+    params:
+      topic: "Replace with the topic you want surveyed weekly"
+      depth: standard
+      format: markdown
+    safety_policy: standard
+    timeout_seconds: 1800
+    max_retries: 0
+    tags: [research, weekly, example]
+    enabled: false

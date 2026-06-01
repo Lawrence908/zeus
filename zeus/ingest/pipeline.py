@@ -43,53 +43,7 @@ def _ingest_transient_max_retries() -> int:
     return max(0, n)
 
 
-def _is_transient_ingest_error(exc: BaseException) -> bool:
-    """
-    True when the failure is likely a dead/restarting Ollama or network blip,
-    so we should retry the same chunk instead of skipping it.
-    """
-    msg = str(exc).lower()
-    needles = (
-        "failed to connect to ollama",
-        "server disconnected",
-        "connection reset",
-        "connection refused",
-        "connection aborted",
-        "broken pipe",
-        "errno 104",
-        "errno 111",
-        "errno 110",
-        "read timeout",
-        "connecterror",
-        "remoteprotocolerror",
-        "connect timeout",
-        "pool timeout",
-    )
-    if any(n in msg for n in needles):
-        return True
-    if isinstance(exc, OSError) and exc.errno is not None:
-        if exc.errno in (104, 111, 110, 32):  # reset, refused, timeout, broken pipe
-            return True
-    if isinstance(exc, ConnectionError):
-        return True
-    try:
-        import httpx
-
-        if isinstance(
-            exc,
-            (
-                httpx.ConnectError,
-                httpx.ConnectTimeout,
-                httpx.ReadTimeout,
-                httpx.WriteTimeout,
-                httpx.RemoteProtocolError,
-                httpx.PoolTimeout,
-            ),
-        ):
-            return True
-    except ImportError:
-        pass
-    return False
+from zeus.core.retry import is_transient_http_error as _is_transient_ingest_error  # noqa: E402
 
 
 async def _prompt_retry_or_skip(chunk_index: int, source_label: str) -> bool:

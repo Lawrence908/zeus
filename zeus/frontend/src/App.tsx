@@ -8,6 +8,7 @@ import { IngestPage } from './pages/IngestPage'
 import { MemoriesPage } from './pages/MemoriesPage'
 import { KnowledgePage } from './pages/KnowledgePage'
 import { ToolsPage } from './pages/ToolsPage'
+import { JobsPage } from './pages/JobsPage'
 
 const router = createBrowserRouter([
   {
@@ -41,6 +42,10 @@ const router = createBrowserRouter([
   {
     path: '/tools',
     element: <ToolsPage />,
+  },
+  {
+    path: '/jobs',
+    element: <JobsPage />,
   },
   {
     path: '*',

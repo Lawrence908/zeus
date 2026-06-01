@@ -45,6 +45,7 @@ All subsystems use Greek mythology names. Agents and humans working in this repo
 - **olympus** production server (the always-on host, typical: RTX 3080-class)
 - **oracle** Zeus Context API (serves structured context to agents)
 - **kairos** background agent daemon (observe, decide, act, update cycles)
+- **zeus-os** Hyprland-style tiling-WM web shell (SvelteKit SPA + `/zeus-os/*` FastAPI bridge), served from `/os/` on port 8203 alongside the React dashboard
 
 ## Repo Structure
 
@@ -60,6 +61,8 @@ zeus/             # Python application package
   memory/         # CLAUDE.md + store.py (MemoryStore), library.py (KnowledgeStore), reference.py, reranker.py, search.py, eval.py, _embed.py, config.py
   ingest/         # CLAUDE.md + pipeline.py, run.py, config.py, config.yaml, sources/*, scheduler.py
   voice/          # CLAUDE.md + state.py, stt.py, tts.py, wake.py, pipeline.py
+  core/zeus_os/   # FastAPI bridge for Zeus OS (/zeus-os/{pty,sys,fs,config,apps})
+zeus-os/          # SvelteKit tiling-WM frontend; builds into zeus/core/static/zeus-os/
   safety/         # policy_engine.py, integration.py, policies/*.yaml, workspace-templates/
   api/            # Oracle: context + profile + memory search
   mcp/            # server.py (FastMCP), tools.py
