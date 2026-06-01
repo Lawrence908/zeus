@@ -13,6 +13,10 @@ export interface AppInstance {
   kind: string; // Svelte component key
   title: string;
   props?: Record<string, unknown>;
+  // Stable identity that survives float ↔ tile toggle. Apps key their per-
+  // instance state (chat messages, terminal session) by this id so they can
+  // rehydrate on remount instead of starting fresh.
+  instanceId: string;
 }
 
 export type LeafNode = {
@@ -42,6 +46,15 @@ let _idCounter = 0;
 export function newId(prefix = 'w'): string {
   _idCounter += 1;
   return `${prefix}-${_idCounter}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * Ensure an AppInstance has a stable instanceId. Callers that build app
+ * instances inline (launcher, default bootstrap) can omit the field and we'll
+ * mint one; callers that already carry an id (toggleFloating) pass it through.
+ */
+export function withInstanceId(app: Omit<AppInstance, 'instanceId'> & { instanceId?: string }): AppInstance {
+  return { ...app, instanceId: app.instanceId ?? newId('i') };
 }
 
 export function makeLeaf(app: AppInstance): LeafNode {

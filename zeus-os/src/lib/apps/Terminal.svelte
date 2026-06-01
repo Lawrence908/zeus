@@ -1,46 +1,53 @@
 <script lang="ts">
   import type { AppInstance } from '$lib/wm/tree';
   import TerminalPane from './TerminalPane.svelte';
+  import {
+    closeTab as registryCloseTab,
+    getWindowState,
+    newTab as registryNewTab,
+    setActiveTab,
+    type TerminalTab
+  } from './terminal-sessions';
 
   export let app: AppInstance;
-  void app;
 
-  interface Tab {
-    id: number;
-    label: string;
+  // Rehydrate tab list + active tab from the module-scoped registry so a
+  // float ↔ tile toggle keeps the shells (and their buffers) intact.
+  let state = getWindowState(app.instanceId);
+  let tabs: TerminalTab[] = state.tabs;
+  let activeId: string = state.activeTabId ?? tabs[0]?.id ?? '';
+
+  function refresh() {
+    state = getWindowState(app.instanceId);
+    tabs = state.tabs;
+    activeId = state.activeTabId ?? tabs[0]?.id ?? '';
   }
-
-  let tabs: Tab[] = [{ id: 1, label: 'shell' }];
-  let activeId = 1;
-  let nextId = 2;
 
   function addTab() {
-    const t: Tab = { id: nextId, label: 'shell' };
-    nextId += 1;
-    tabs = [...tabs, t];
-    activeId = t.id;
+    registryNewTab(app.instanceId);
+    refresh();
   }
 
-  function closeTab(id: number) {
-    const idx = tabs.findIndex((t) => t.id === id);
-    if (idx < 0) return;
-    tabs = tabs.filter((t) => t.id !== id);
-    if (activeId === id) {
-      activeId = tabs[Math.min(idx, tabs.length - 1)]?.id ?? 0;
+  function closeTab(id: string) {
+    const remaining = registryCloseTab(app.instanceId, id);
+    if (remaining.length === 0) {
+      // Keep the window populated rather than going blank — the WM's window
+      // close button is the explicit teardown path.
+      registryNewTab(app.instanceId);
     }
-    if (tabs.length === 0) {
-      // Don't auto-close the window; let the user explicitly close it via the
-      // window chrome's close button. Add a fresh tab so the pane isn't blank.
-      addTab();
-    }
+    refresh();
   }
 
-  function onPaneExit(id: number) {
+  function pickTab(id: string) {
+    setActiveTab(app.instanceId, id);
+    activeId = id;
+  }
+
+  function onPaneExit(id: string) {
     return () => closeTab(id);
   }
 
   function onKey(ev: KeyboardEvent) {
-    // Cmd/Ctrl + Shift + T: new tab. Cmd/Ctrl + Shift + W: close current.
     const mod = ev.metaKey || ev.ctrlKey;
     if (!mod || !ev.shiftKey) return;
     if (ev.key.toLowerCase() === 't') {
@@ -58,15 +65,15 @@
 <div class="h-full w-full flex flex-col">
   {#if tabs.length > 1}
     <div class="flex items-center px-1 py-0.5 text-xs font-mono select-none border-b border-border/30" style="background: rgb(var(--surface-2) / 0.5);">
-      {#each tabs as t (t.id)}
+      {#each tabs as t, idx (t.id)}
         <button
           class="px-2 py-1 rounded-t-md mr-1 flex items-center gap-1 transition-colors"
           class:bg-surface={t.id === activeId}
           class:text-fg={t.id === activeId}
           class:text-muted={t.id !== activeId}
-          on:click={() => (activeId = t.id)}
+          on:click={() => pickTab(t.id)}
         >
-          <span>{t.label} {t.id}</span>
+          <span>{t.label} {idx + 1}</span>
           <span
             class="opacity-50 hover:opacity-100 hover:text-err"
             role="button"
@@ -90,7 +97,12 @@
   <div class="flex-1 min-h-0 relative">
     {#each tabs as t (t.id)}
       <div class="absolute inset-0">
-        <TerminalPane visible={t.id === activeId} onExit={onPaneExit(t.id)} />
+        <TerminalPane
+          instanceId={app.instanceId}
+          tabId={t.id}
+          visible={t.id === activeId}
+          onExit={onPaneExit(t.id)}
+        />
       </div>
     {/each}
   </div>

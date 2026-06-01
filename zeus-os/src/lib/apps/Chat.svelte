@@ -4,29 +4,20 @@
   import { chatStream } from '$lib/api/chat';
   import { notify } from '$lib/notify/store';
   import { readCodeClip, renderMarkdown } from '$lib/markdown';
+  import { getChatSession, setChatSession, type ChatMsg as Msg, type ToolCall } from './chat-sessions';
 
   export let app: AppInstance;
-  void app;
 
-  interface ToolCall {
-    name?: string;
-    arguments?: unknown;
-    result?: unknown;
-    error?: string;
-  }
+  // Rehydrate from the module-scoped registry so a float ↔ tile toggle (which
+  // unmounts the component) keeps the conversation intact.
+  const session = getChatSession(app.instanceId);
+  let messages: Msg[] = session.messages;
+  let sessionId: string | null = session.sessionId;
 
-  interface Msg {
-    role: 'user' | 'assistant';
-    content: string;
-    phase?: string;
-    toolCalls?: ToolCall[];
-    model?: string;
-    latency_ms?: number;
-  }
+  // Mirror writes back to the registry on every change.
+  $: setChatSession(app.instanceId, { messages, sessionId });
 
-  let messages: Msg[] = [];
   let input = '';
-  let sessionId: string | null = null;
   let sending = false;
   let viewport: HTMLDivElement;
   let copied: number | null = null;

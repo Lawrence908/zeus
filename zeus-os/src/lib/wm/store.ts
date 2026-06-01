@@ -17,7 +17,8 @@ import {
   moveInDirection,
   newId,
   splitLeaf,
-  swapLeaves
+  swapLeaves,
+  withInstanceId
 } from './tree';
 import { type FloatingWindow, type Workspace, makeWorkspaces } from './workspace';
 
@@ -37,6 +38,28 @@ export const viewport = writable<Rect>({ x: 0, y: 0, w: 1280, h: 720 });
 export const gap = writable<number>(8);
 
 export const activeWorkspace = derived(wm, ($wm) => $wm.workspaces[$wm.activeWs - 1]);
+
+// ─── instance-lifecycle event bus ───────────────────────────────────────────
+// Module-level listeners that fire when an app instance is permanently
+// closed (not just remounted). Per-app state registries (chat-sessions,
+// terminal-sessions) subscribe to drop their entries.
+const _destroyListeners = new Set<(instanceId: string) => void>();
+
+export function onAppDestroyed(cb: (instanceId: string) => void): () => void {
+  _destroyListeners.add(cb);
+  return () => _destroyListeners.delete(cb);
+}
+
+function _fireDestroyed(instanceId: string | undefined) {
+  if (!instanceId) return;
+  for (const cb of _destroyListeners) {
+    try {
+      cb(instanceId);
+    } catch {
+      /* swallow listener errors so one bad registry can't break the rest */
+    }
+  }
+}
 
 export const focusedLeafId = derived(activeWorkspace, ($w) => $w?.focusId ?? null);
 
@@ -86,18 +109,24 @@ export function moveFocusedToWorkspace(id: number) {
 }
 
 // ─── window ops ─────────────────────────────────────────────────────────────
-export function openApp(app: AppInstance, dir: SplitDir = 'h') {
+export function openApp(app: AppInstance | Omit<AppInstance, 'instanceId'>, dir: SplitDir = 'h') {
+  const ready = withInstanceId(app as AppInstance);
   updateActive((ws) => {
-    const { root, focusId } = splitLeaf(ws.root, ws.focusId, dir, app);
+    const { root, focusId } = splitLeaf(ws.root, ws.focusId, dir, ready);
     return { ...ws, root, focusId };
   });
 }
 
 export function closeFocused() {
+  // Capture the destroyed instanceId outside the updater so we can fire the
+  // lifecycle event AFTER the state transition (avoids listener races with
+  // any subscriber that might trigger another store update).
+  let destroyedInstance: string | undefined;
   updateActive((ws) => {
     if (!ws.focusId) return ws;
-    // Floating window?
-    if (ws.floating.some((f) => f.id === ws.focusId)) {
+    const float = ws.floating.find((f) => f.id === ws.focusId);
+    if (float) {
+      destroyedInstance = float.app.instanceId;
       const remaining = ws.floating.filter((f) => f.id !== ws.focusId);
       return {
         ...ws,
@@ -105,9 +134,12 @@ export function closeFocused() {
         focusId: remaining[remaining.length - 1]?.id ?? firstLeaf(ws.root)?.id ?? null
       };
     }
+    const leaf = findLeaf(ws.root, ws.focusId);
+    destroyedInstance = leaf?.app.instanceId;
     const { root, focusId } = closeLeaf(ws.root, ws.focusId);
     return { ...ws, root, focusId: focusId ?? firstLeaf(root)?.id ?? null };
   });
+  _fireDestroyed(destroyedInstance);
 }
 
 export function focusLeaf(id: string) {
@@ -174,11 +206,12 @@ export function toggleFloating() {
   const ws = $wm.workspaces[$wm.activeWs - 1];
   if (!ws.focusId) return;
 
-  // If the current focus is a floating window, return it to a tile.
+  // If the current focus is a floating window, return it to a tile. We carry
+  // the *same* AppInstance (with its instanceId) so apps keying state by
+  // instanceId rehydrate seamlessly instead of starting fresh.
   const floatHit = ws.floating.find((f) => f.id === ws.focusId);
   if (floatHit) {
-    const newApp: AppInstance = { ...floatHit.app };
-    const { root, focusId } = splitLeaf(ws.root, firstLeaf(ws.root)?.id ?? null, 'h', newApp);
+    const { root, focusId } = splitLeaf(ws.root, firstLeaf(ws.root)?.id ?? null, 'h', floatHit.app);
     updateActive((cur) => ({
       ...cur,
       root,
@@ -188,7 +221,9 @@ export function toggleFloating() {
     return;
   }
 
-  // Otherwise pull the focused tile out into a floating window.
+  // Otherwise pull the focused tile out into a floating window. Same idea:
+  // reuse the existing AppInstance so the underlying Chat / Terminal can
+  // rehydrate from its registry on remount.
   const leaf = findLeaf(ws.root, ws.focusId);
   if (!leaf) return;
   const rects = computeRects(ws.root, $v, $g);
@@ -198,7 +233,7 @@ export function toggleFloating() {
   const rect = defaultFloatRect($v, fromTile);
   const floating: FloatingWindow = {
     id: newId('f'),
-    app: { ...leaf.app },
+    app: leaf.app,
     x: rect.x,
     y: rect.y,
     w: rect.w,
@@ -231,15 +266,21 @@ export function raiseFloating(id: string) {
 }
 
 export function closeFloating(id: string) {
-  updateActive((ws) => ({
-    ...ws,
-    focusId: ws.focusId === id ? (firstLeaf(ws.root)?.id ?? null) : ws.focusId,
-    floating: ws.floating.filter((f) => f.id !== id)
-  }));
+  let destroyedInstance: string | undefined;
+  updateActive((ws) => {
+    const hit = ws.floating.find((f) => f.id === id);
+    destroyedInstance = hit?.app.instanceId;
+    return {
+      ...ws,
+      focusId: ws.focusId === id ? (firstLeaf(ws.root)?.id ?? null) : ws.focusId,
+      floating: ws.floating.filter((f) => f.id !== id)
+    };
+  });
+  _fireDestroyed(destroyedInstance);
 }
 
 export interface InitialApp {
-  app: AppInstance;
+  app: AppInstance | Omit<AppInstance, 'instanceId'>;
   dir?: SplitDir;
   workspace?: number;
 }
@@ -250,7 +291,8 @@ export function bootstrap(apps: InitialApp[] = []) {
     for (const a of apps) {
       const wsId = a.workspace ?? $wm.activeWs;
       const target = wsList[wsId - 1];
-      const { root, focusId } = splitLeaf(target.root, target.focusId, a.dir ?? 'h', a.app);
+      const ready = withInstanceId(a.app as AppInstance);
+      const { root, focusId } = splitLeaf(target.root, target.focusId, a.dir ?? 'h', ready);
       wsList[wsId - 1] = { ...target, root, focusId };
     }
     return { ...$wm, workspaces: wsList };

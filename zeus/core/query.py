@@ -659,7 +659,16 @@ class QueryEngine:
         use_context: bool = True,
         max_tokens: int = 512,
         source: str = "chat",
+        tool_calls_out: list[dict] | None = None,
     ) -> AsyncIterator[str]:
+        """Stream a reply chunk-by-chunk.
+
+        When ZEUS_TOOLS_ENABLED is on and any tool is registered, the tool loop
+        runs end-to-end before any text is yielded (the loop is inherently
+        multi-round). The final assistant reply is then emitted as a single
+        chunk. Tool-call descriptions are appended to ``tool_calls_out`` so
+        the caller can surface them on the done SSE event.
+        """
         _ = source
         t0 = time.monotonic()
         t = t0
@@ -704,6 +713,53 @@ class QueryEngine:
         t_llm = time.monotonic()
         current_prompt = user_prompt
         aegis_on = aegis_enabled()
+
+        # Tool-aware path: if tools are enabled and any are registered, run the
+        # tool loop to completion (it requires multiple round trips that can't
+        # be naturally streamed) and yield the assembled reply as one chunk.
+        # The model's final turn is what the user sees; tool calls flow back
+        # to the caller through tool_calls_out so the SSE done event can carry
+        # them and the Chat UI can render the collapsible tool-call card.
+        from zeus.core.tools import registry as tool_registry
+        from zeus.core.tools import tools_enabled, tools_max_calls
+
+        if tools_enabled() and tool_registry.available():
+            from zeus.core.tools.loop import run_tool_loop
+
+            loop_result = await run_tool_loop(
+                system=system,
+                user_prompt=current_prompt,
+                tools=tool_registry.list_specs(),
+                max_tokens=max_tokens,
+                max_calls=tools_max_calls(),
+                use_claude=_chat_use_claude(),
+            )
+            reply = loop_result.reply
+            if loop_result.tool_calls and tool_calls_out is not None:
+                tool_calls_out.extend(
+                    {"name": c.name, "arguments": c.arguments}
+                    for c in loop_result.tool_calls
+                )
+                sources.extend(f"tool:{c.name}" for c in loop_result.tool_calls)
+            if aegis_on:
+                outcome = evaluate_text(reply, policy_name=None)
+                if outcome.status == "rejected":
+                    reply = outcome.message or "This response was blocked by safety policy."
+                else:
+                    reply = outcome.text
+            yield reply
+            _log_timing("llm.stream_total", (time.monotonic() - t_llm) * 1000)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            turn = Turn(
+                user=message,
+                assistant=reply,
+                timestamp=time.time(),
+                context_sources=sources,
+                latency_ms=latency_ms,
+            )
+            await self.sessions.append_turn(sid, turn)
+            return
+
         # Stream incrementally when Aegis is disabled; buffer when enabled so
         # we can evaluate the full reply before emitting.
         parts: list[str] = []
