@@ -145,10 +145,14 @@ async def ingest_stats(request: Request) -> dict[str, Any]:
         stats: dict[str, Any] = {"collections": {}}
         for name in collection_names:
             info = qdrant.get_collection(name)
+            # Qdrant ≥1.15 removed several legacy aggregate fields; reach for
+            # whichever names the running server still publishes so we degrade
+            # to None rather than 500 when the schema drifts again.
             stats["collections"][name] = {
-                "vectors_count": info.vectors_count,
-                "points_count": info.points_count,
-                "status": str(info.status),
+                "vectors_count": getattr(info, "vectors_count", None),
+                "points_count": getattr(info, "points_count", None),
+                "indexed_vectors_count": getattr(info, "indexed_vectors_count", None),
+                "status": str(getattr(info, "status", "")),
             }
 
         return stats

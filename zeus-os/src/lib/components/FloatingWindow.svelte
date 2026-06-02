@@ -13,6 +13,10 @@
   import Jobs from '$lib/apps/Jobs.svelte';
   import TokenUsage from '$lib/apps/TokenUsage.svelte';
   import Settings from '$lib/apps/Settings.svelte';
+  import Memories from '$lib/apps/Memories.svelte';
+  import Knowledge from '$lib/apps/Knowledge.svelte';
+  import Agents from '$lib/apps/Agents.svelte';
+  import Ingest from '$lib/apps/Ingest.svelte';
   import Placeholder from '$lib/apps/Placeholder.svelte';
 
   export let win: FloatingWindow;
@@ -27,6 +31,10 @@
     Jobs,
     TokenUsage,
     Settings,
+    Memories,
+    Knowledge,
+    Agents,
+    Ingest,
     Placeholder
   };
   $: Comp = components[win.app.kind] ?? Placeholder;
