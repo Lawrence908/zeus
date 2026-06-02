@@ -108,6 +108,25 @@ body {
     var(--shadow-window);
 }
 
+/* Obsidian vault body — inline images, lists, etc. */
+.obsidian-body img {
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgb(var(--border-color) / 0.5);
+  margin: 0.5rem 0;
+  display: block;
+}
+
+.obsidian-body a[href^='obsidian://'] {
+  color: rgb(var(--accent-2));
+  text-decoration: none;
+  border-bottom: 1px dotted rgb(var(--accent-2) / 0.6);
+  cursor: pointer;
+}
+.obsidian-body a[href^='obsidian://']:hover {
+  border-bottom-style: solid;
+}
+
 /* Scrollbar tuned to the theme. */
 *::-webkit-scrollbar {
   width: 10px;

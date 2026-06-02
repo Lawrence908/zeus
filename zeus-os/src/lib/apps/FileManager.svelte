@@ -139,6 +139,11 @@
     return map[ext] ?? '';
   }
 
+  // Fetch roots once on mount. Without this the sidebar is empty and the
+  // right pane reports "Empty directory." — a regression introduced when
+  // onMount got dropped during the markdown-preview refactor.
+  onMount(loadRoots);
+
   function onPreviewClick(ev: MouseEvent) {
     const t = ev.target as HTMLElement | null;
     if (!t) return;

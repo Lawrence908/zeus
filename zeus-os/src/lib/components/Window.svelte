@@ -19,6 +19,7 @@
   import Knowledge from '$lib/apps/Knowledge.svelte';
   import Agents from '$lib/apps/Agents.svelte';
   import Ingest from '$lib/apps/Ingest.svelte';
+  import Obsidian from '$lib/apps/Obsidian.svelte';
   import Placeholder from '$lib/apps/Placeholder.svelte';
 
   export let leaf: LeafNode;
@@ -48,6 +49,7 @@
     Knowledge,
     Agents,
     Ingest,
+    Obsidian,
     Placeholder
   };
   $: Comp = components[leaf.app.kind] ?? Placeholder;

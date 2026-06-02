@@ -29,7 +29,7 @@ _DEFAULT_APPS: list[dict[str, Any]] = [
     {"id": "usage", "title": "Token Usage", "icon": "bar-chart", "kind": "TokenUsage"},
     {"id": "settings", "title": "Settings", "icon": "settings", "kind": "Settings"},
     # Phase 2b / 3 — still placeholders.
-    {"id": "obsidian", "title": "Obsidian Vault", "icon": "book", "kind": "Placeholder"},
+    {"id": "obsidian", "title": "Obsidian Vault", "icon": "book", "kind": "Obsidian"},
     {"id": "editor", "title": "Code Editor", "icon": "code", "kind": "Placeholder"},
     {"id": "ha", "title": "Home Assistant", "icon": "home", "kind": "Placeholder"},
     {"id": "linear", "title": "Linear", "icon": "kanban", "kind": "Placeholder"},
