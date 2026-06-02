@@ -11,6 +11,10 @@
   import Chat from '$lib/apps/Chat.svelte';
   import SystemMonitor from '$lib/apps/SystemMonitor.svelte';
   import FileManager from '$lib/apps/FileManager.svelte';
+  import Tools from '$lib/apps/Tools.svelte';
+  import Jobs from '$lib/apps/Jobs.svelte';
+  import TokenUsage from '$lib/apps/TokenUsage.svelte';
+  import Settings from '$lib/apps/Settings.svelte';
   import Placeholder from '$lib/apps/Placeholder.svelte';
 
   export let leaf: LeafNode;
@@ -32,6 +36,10 @@
     Chat,
     SystemMonitor,
     FileManager,
+    Tools,
+    Jobs,
+    TokenUsage,
+    Settings,
     Placeholder
   };
   $: Comp = components[leaf.app.kind] ?? Placeholder;

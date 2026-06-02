@@ -308,6 +308,205 @@ async def tools_invocations(
     }
 
 
+@router.get("/llm_usage")
+async def admin_llm_usage(
+    request: Request,
+    bucket: str = "day",
+    since_days: int = 30,
+    provider: str | None = None,
+    caller: str | None = None,
+) -> dict[str, Any]:
+    """Time-series + breakdowns over the small_llm usage ledger.
+
+    The ledger is shared with chat-path Claude/Ollama calls — anything that
+    wraps a model call now writes to the same table, so totals here are the
+    one source of truth for spend + token volume in this deployment.
+
+    Query params:
+      bucket: "day" or "hour"
+      since_days: window (defaults to 30)
+      provider / caller: optional filters
+    """
+    import sqlite3
+    from pathlib import Path
+
+    db_path = Path(os.getenv("ZEUS_SMALL_LLM_USAGE_DB", "zeus/data/small_llm_usage.db"))
+    if not db_path.is_file():
+        return {
+            "series": [],
+            "by_provider": [],
+            "by_model": [],
+            "by_caller": [],
+            "totals": {"tokens": 0, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0, "calls": 0},
+            "window": {"since_days": since_days, "bucket": bucket},
+            "note": "usage ledger has not been created yet",
+        }
+
+    bucket = bucket if bucket in ("day", "hour") else "day"
+    strftime_fmt = "%Y-%m-%d" if bucket == "day" else "%Y-%m-%dT%H:00"
+    since_days = max(1, min(int(since_days), 3650))
+
+    where_parts = ["ts >= datetime('now', ?)"]
+    params: list[Any] = [f"-{since_days} days"]
+    if provider:
+        where_parts.append("provider = ?")
+        params.append(provider)
+    if caller:
+        where_parts.append("caller = ?")
+        params.append(caller)
+    where = " AND ".join(where_parts)
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            # Time series, stacked by provider so the chart can paint per-provider areas.
+            series_rows = conn.execute(
+                f"""
+                SELECT strftime('{strftime_fmt}', ts) AS bucket,
+                       provider,
+                       SUM(tokens_in) AS tokens_in,
+                       SUM(tokens_out) AS tokens_out,
+                       SUM(cost_usd) AS cost_usd,
+                       COUNT(*) AS calls
+                FROM usage
+                WHERE {where}
+                GROUP BY bucket, provider
+                ORDER BY bucket ASC
+                """,
+                params,
+            ).fetchall()
+            by_provider = conn.execute(
+                f"""
+                SELECT provider,
+                       SUM(tokens_in + tokens_out) AS tokens,
+                       SUM(cost_usd) AS cost_usd,
+                       COUNT(*) AS calls
+                FROM usage
+                WHERE {where}
+                GROUP BY provider
+                ORDER BY tokens DESC
+                """,
+                params,
+            ).fetchall()
+            by_model = conn.execute(
+                f"""
+                SELECT model,
+                       provider,
+                       SUM(tokens_in + tokens_out) AS tokens,
+                       SUM(cost_usd) AS cost_usd,
+                       COUNT(*) AS calls
+                FROM usage
+                WHERE {where}
+                GROUP BY model, provider
+                ORDER BY tokens DESC
+                LIMIT 25
+                """,
+                params,
+            ).fetchall()
+            by_caller = conn.execute(
+                f"""
+                SELECT COALESCE(caller, '(unknown)') AS caller,
+                       SUM(tokens_in + tokens_out) AS tokens,
+                       SUM(cost_usd) AS cost_usd,
+                       COUNT(*) AS calls
+                FROM usage
+                WHERE {where}
+                GROUP BY caller
+                ORDER BY tokens DESC
+                LIMIT 25
+                """,
+                params,
+            ).fetchall()
+            totals_row = conn.execute(
+                f"""
+                SELECT COALESCE(SUM(tokens_in), 0),
+                       COALESCE(SUM(tokens_out), 0),
+                       COALESCE(SUM(cost_usd), 0),
+                       COUNT(*)
+                FROM usage WHERE {where}
+                """,
+                params,
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"usage db read failed: {exc}") from exc
+
+    return {
+        "series": [
+            {
+                "bucket": b,
+                "provider": p,
+                "tokens_in": int(ti or 0),
+                "tokens_out": int(to or 0),
+                "cost_usd": float(c or 0.0),
+                "calls": int(n or 0),
+            }
+            for (b, p, ti, to, c, n) in series_rows
+        ],
+        "by_provider": [
+            {
+                "provider": p,
+                "tokens": int(t or 0),
+                "cost_usd": float(c or 0.0),
+                "calls": int(n or 0),
+            }
+            for (p, t, c, n) in by_provider
+        ],
+        "by_model": [
+            {
+                "model": m,
+                "provider": p,
+                "tokens": int(t or 0),
+                "cost_usd": float(c or 0.0),
+                "calls": int(n or 0),
+            }
+            for (m, p, t, c, n) in by_model
+        ],
+        "by_caller": [
+            {
+                "caller": c,
+                "tokens": int(t or 0),
+                "cost_usd": float(co or 0.0),
+                "calls": int(n or 0),
+            }
+            for (c, t, co, n) in by_caller
+        ],
+        "totals": {
+            "tokens_in": int(totals_row[0]),
+            "tokens_out": int(totals_row[1]),
+            "tokens": int(totals_row[0] + totals_row[1]),
+            "cost_usd": float(totals_row[2]),
+            "calls": int(totals_row[3]),
+        },
+        "window": {"since_days": since_days, "bucket": bucket},
+    }
+
+
+@router.post("/llm_usage/import")
+async def admin_llm_usage_import(request: Request) -> dict[str, Any]:
+    """Placeholder for historical Claude / Cursor CSV import.
+
+    Phase 2a scaffolds this so the frontend can show a 'Import historical
+    usage' button that's wired to an endpoint that *will* parse CSVs from
+    ~/.zeus/usage-imports/. Real implementation deferred — see
+    zeus/core/usage_import.py and zeus/docs/token-usage.md for the format
+    notes and TODO list.
+    """
+    from zeus.core import usage_import
+
+    return {
+        "status": "not_implemented",
+        "note": (
+            "Drop Anthropic Usage CSV exports + Cursor exports in "
+            f"{usage_import.IMPORT_DIR}. The importer is stubbed; see "
+            "zeus/docs/token-usage.md for the expected shapes."
+        ),
+        "import_dir": str(usage_import.IMPORT_DIR),
+        "found_files": usage_import.list_pending(),
+    }
+
+
 @router.post("/query-log/clear")
 async def admin_query_log_clear(request: Request) -> dict[str, str]:
     """Clear the in-process admin query log ring buffer (observability only)."""

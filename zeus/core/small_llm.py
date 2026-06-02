@@ -204,6 +204,36 @@ def _ensure_usage_db() -> sqlite3.Connection:
     return conn
 
 
+def log_usage(
+    *,
+    caller: str | None,
+    provider: str,
+    model: str,
+    tier: int,
+    tokens_in: int,
+    tokens_out: int,
+    cost_usd: float,
+    latency_ms: int,
+    ok: bool,
+    error: str | None,
+) -> None:
+    """Public ledger writer. Chat-path (zeus.core.query) calls this too so the
+    /admin/llm_usage view reflects all model traffic, not just the small-LLM
+    router's structured-output calls."""
+    return _log_usage(
+        caller=caller,
+        provider=provider,
+        model=model,
+        tier=tier,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost_usd=cost_usd,
+        latency_ms=latency_ms,
+        ok=ok,
+        error=error,
+    )
+
+
 def _log_usage(
     *,
     caller: str | None,

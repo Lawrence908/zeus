@@ -18,15 +18,25 @@ router = APIRouter()
 # component to mount; "Placeholder" renders a "Not implemented yet" window so
 # the launcher feels populated from day one.
 _DEFAULT_APPS: list[dict[str, Any]] = [
+    # Phase 1 + 1.5 — shell + core surfaces.
     {"id": "terminal", "title": "Terminal", "icon": "terminal", "kind": "Terminal"},
     {"id": "chat", "title": "Zeus Chat", "icon": "message-square", "kind": "Chat", "default_workspace": 1},
     {"id": "files", "title": "File Manager", "icon": "folder", "kind": "FileManager"},
     {"id": "sysmon", "title": "System Monitor", "icon": "activity", "kind": "SystemMonitor"},
-    # Phase 2/3 placeholders so the launcher shows the full vision today.
+    # Phase 2a — ported from the React frontend's data-dense surfaces.
+    {"id": "tools", "title": "Tools", "icon": "tool", "kind": "Tools"},
+    {"id": "jobs", "title": "Jobs", "icon": "clock", "kind": "Jobs"},
+    {"id": "usage", "title": "Token Usage", "icon": "bar-chart", "kind": "TokenUsage"},
+    {"id": "settings", "title": "Settings", "icon": "settings", "kind": "Settings"},
+    # Phase 2b / 3 — still placeholders.
     {"id": "obsidian", "title": "Obsidian Vault", "icon": "book", "kind": "Placeholder"},
     {"id": "editor", "title": "Code Editor", "icon": "code", "kind": "Placeholder"},
     {"id": "ha", "title": "Home Assistant", "icon": "home", "kind": "Placeholder"},
     {"id": "linear", "title": "Linear", "icon": "kanban", "kind": "Placeholder"},
+    {"id": "memories", "title": "Memories", "icon": "database", "kind": "Placeholder"},
+    {"id": "knowledge", "title": "Knowledge", "icon": "library", "kind": "Placeholder"},
+    {"id": "agents", "title": "Agents", "icon": "users", "kind": "Placeholder"},
+    {"id": "ingest", "title": "Ingest", "icon": "download", "kind": "Placeholder"},
     {"id": "images", "title": "Image Viewer", "icon": "image", "kind": "Placeholder"},
     {"id": "procs", "title": "Process Manager", "icon": "cpu", "kind": "Placeholder"},
     {"id": "network", "title": "Network", "icon": "wifi", "kind": "Placeholder"},
