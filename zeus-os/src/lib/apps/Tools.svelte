@@ -12,21 +12,58 @@
   let filter = '';
   let toolFilter = '';
   let error = '';
+  let loading = true;
+  let lastFetched = '';
   let timer: ReturnType<typeof setInterval> | null = null;
   let selected: ToolDirEntry | null = null;
 
   async function refresh() {
     try {
+      loading = true;
       const [t, inv] = await Promise.all([
         listTools(),
         listInvocations({ limit: 100, tool: toolFilter || undefined })
       ]);
-      tools = t.tools ?? [];
+      const anyT = t as { tools?: unknown };
+      const raw: ToolDirEntry[] = Array.isArray(anyT.tools)
+        ? (anyT.tools as ToolDirEntry[])
+        : Array.isArray(t)
+          ? (t as unknown as ToolDirEntry[])
+          : [];
+      // Backend returns one row per (name, source). Olympian tools are
+      // registered in both the chat-path AND the MCP server, so 9 of them
+      // appear twice. Dedupe by name; merge sources into a list so the row
+      // can show a "chat + mcp" badge.
+      const merged = new Map<string, ToolDirEntry>();
+      for (const r of raw) {
+        const k = r.name;
+        const existing = merged.get(k);
+        if (!existing) {
+          merged.set(k, { ...r, sources: r.source ? [r.source] : [] });
+        } else {
+          if (r.source && !(existing.sources ?? []).includes(r.source)) {
+            existing.sources = [...(existing.sources ?? []), r.source];
+          }
+        }
+      }
+      tools = [...merged.values()];
       toolsEnabled = (t as { tools_enabled?: boolean }).tools_enabled;
       invocations = inv.invocations ?? [];
       error = '';
+      lastFetched = new Date().toLocaleTimeString();
+      // Debug breadcrumb so we can see what the SPA actually received.
+      // Open devtools Console; this should print "[Zeus OS Tools] got 26 tools …"
+      // each refresh. If you see it but no list renders, the bug is in the
+      // template, not the fetch.
+      // eslint-disable-next-line no-console
+      console.log('[Zeus OS Tools] got', tools.length, 'tools, first 3:',
+        tools.slice(0, 3).map((x) => x?.name));
     } catch (e) {
       error = String(e);
+      // eslint-disable-next-line no-console
+      console.error('[Zeus OS Tools] refresh error', e);
+    } finally {
+      loading = false;
     }
   }
 
@@ -39,11 +76,17 @@
     if (timer) clearInterval(timer);
   });
 
-  $: filteredTools = tools.filter((t) => {
-    const q = filter.toLowerCase();
-    if (!q) return true;
-    return t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q);
-  });
+  function applyFilter(arr: ToolDirEntry[], q: string): ToolDirEntry[] {
+    const needle = q.toLowerCase().trim();
+    if (!needle) return arr;
+    return arr.filter(
+      (t) =>
+        (t.name ?? '').toLowerCase().includes(needle) ||
+        (t.description ?? '').toLowerCase().includes(needle)
+    );
+  }
+
+  $: filteredTools = applyFilter(tools, filter);
 
   function fmtTime(ts: string): string {
     try {
@@ -67,14 +110,22 @@
   }
 </script>
 
-<div class="h-full w-full flex font-mono text-xs">
+<div class="h-full w-full flex flex-col font-mono text-xs">
+  {#if error}
+    <div class="bg-err/20 border-b border-err/40 px-3 py-2 text-err">
+      <strong>Error fetching tools:</strong> {error}
+    </div>
+  {/if}
+
+  <div class="flex-1 flex min-h-0">
   <!-- Tools list -->
   <aside class="w-72 border-r border-border/40 flex flex-col">
     <header class="px-3 py-2 border-b border-border/40 flex items-center justify-between">
       <div>
         <h3 class="text-accent text-sm">Tools</h3>
         <p class="text-muted text-[10px]">
-          {tools.length} registered{toolsEnabled === false ? ' · loop disabled' : ''}
+          {loading && tools.length === 0 ? 'loading…' : `${tools.length} registered`}{toolsEnabled === false ? ' · loop disabled' : ''}
+          {#if lastFetched} · {lastFetched}{/if}
         </p>
       </div>
       <input
@@ -93,7 +144,10 @@
           >
             <div class="text-fg">{t.name}</div>
             <div class="text-muted text-[10px] truncate">{t.description.slice(0, 60)}…</div>
-            <div class="flex gap-1 mt-1 text-[10px] text-muted">
+            <div class="flex gap-1 mt-1 text-[10px] text-muted flex-wrap">
+              {#if t.sources && t.sources.length}
+                <span class="text-accent2" title="Registration surfaces">{t.sources.join('+')}</span>
+              {/if}
               {#if t.cacheable}<span class="text-ok">cache</span>{/if}
               {#if t.aegis_policy}<span title="Aegis policy">{t.aegis_policy}</span>{/if}
               {#if t.timeout_seconds}<span>{t.timeout_seconds}s</span>{/if}
@@ -167,4 +221,5 @@
       {/each}
     </ul>
   </section>
+  </div>
 </div>

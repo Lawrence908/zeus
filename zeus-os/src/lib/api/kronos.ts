@@ -1,30 +1,41 @@
 // src/lib/api/kronos.ts — Kronos job scheduler client.
 import { jsonFetch } from './base';
 
+export interface JobSchedule {
+  cron: string | null;
+  timezone: string;
+  run_at: string | null;
+}
+
 export interface JobDefinition {
   id: string;
-  name?: string;
-  description?: string;
-  cron?: string | null;
-  run_at?: string | null;
-  executor: string;
-  args?: Record<string, unknown>;
+  name: string;
+  description: string;
+  category: string;
+  schedule: JobSchedule;
+  executor: string | null;
+  agent: string | null;
+  endpoint: string;
+  params: Record<string, unknown>;
+  safety_policy: string;
+  timeout_seconds: number;
+  max_retries: number;
+  tags: string[];
   enabled: boolean;
-  category?: string;
   last_fired_at?: string | null;
-  created_at?: string;
-  updated_at?: string;
 }
 
 export interface JobRun {
-  run_id: string;
+  id: string;
   job_id: string;
-  status: 'queued' | 'running' | 'success' | 'failed' | string;
-  started_at?: string | null;
-  finished_at?: string | null;
+  correlation_id?: string;
+  status: 'pending' | 'running' | 'success' | 'failed' | 'timeout' | 'cancelled' | 'lost' | string;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  output_summary?: string | null;
   error?: string | null;
-  output?: string | null;
-  duration_ms?: number | null;
+  attempts?: number;
 }
 
 export interface JobWithRuns extends JobDefinition {
@@ -33,17 +44,19 @@ export interface JobWithRuns extends JobDefinition {
 
 export interface ExecutorInfo {
   dotted_path: string;
-  description?: string;
-  category?: string;
+  module?: string;
+  function?: string;
+  docstring?: string | null;
 }
 
 export interface UpcomingFire {
   job_id: string;
-  job_name?: string;
-  fires_at: string;
+  name?: string;
+  next_fire: string;
+  timezone?: string;
 }
 
-export function listJobs(): Promise<{ jobs: JobDefinition[] }> {
+export function listJobs(): Promise<JobDefinition[]> {
   return jsonFetch('/kronos/jobs');
 }
 
@@ -51,7 +64,7 @@ export function getJob(jobId: string): Promise<JobWithRuns> {
   return jsonFetch(`/kronos/jobs/${encodeURIComponent(jobId)}`);
 }
 
-export function listRuns(limit = 25): Promise<{ runs: JobRun[] }> {
+export function listRuns(limit = 25): Promise<JobRun[]> {
   return jsonFetch(`/kronos/runs?limit=${limit}`);
 }
 

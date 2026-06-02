@@ -42,8 +42,8 @@
   async function refreshList() {
     try {
       const [j, u] = await Promise.all([listJobs(), listUpcoming()]);
-      jobs = j.jobs ?? [];
-      upcoming = u ?? [];
+      jobs = Array.isArray(j) ? j : [];
+      upcoming = Array.isArray(u) ? u : [];
       error = '';
     } catch (e) {
       error = String(e);
@@ -75,11 +75,11 @@
 
   async function submitNew(ev: SubmitEvent) {
     ev.preventDefault();
-    let args: Record<string, unknown> = {};
+    let params: Record<string, unknown> = {};
     try {
-      args = JSON.parse(newJob.args_json || '{}');
+      params = JSON.parse(newJob.args_json || '{}');
     } catch {
-      notify({ title: 'Args JSON invalid', kind: 'err' });
+      notify({ title: 'Params JSON invalid', kind: 'err' });
       return;
     }
     if (!newJob.id || !newJob.executor) {
@@ -94,10 +94,13 @@
       const def = await createJob({
         id: newJob.id,
         name: newJob.name || newJob.id,
-        cron: newJob.cron || null,
-        run_at: newJob.run_at || null,
+        schedule: {
+          cron: newJob.cron || null,
+          timezone: 'UTC',
+          run_at: newJob.run_at || null
+        },
         executor: newJob.executor,
-        args,
+        params,
         enabled: true
       });
       notify({ title: 'Job created', body: def.id, kind: 'ok' });
@@ -218,7 +221,7 @@
               </span>
             </div>
             <div class="text-muted text-[10px] truncate">
-              {j.cron || j.run_at || '–'}
+              {j.schedule?.cron || j.schedule?.run_at || '–'}
             </div>
           </button>
         </li>
@@ -232,7 +235,7 @@
         <p class="text-[10px] text-muted uppercase mb-1">Upcoming</p>
         {#each upcoming.slice(0, 5) as u}
           <p class="text-[11px] text-fg/80">
-            <span class="text-muted">{fmtTs(u.fires_at)}</span> {u.job_name || u.job_id}
+            <span class="text-muted">{fmtTs(u.next_fire)}</span> {u.name || u.job_id}
           </p>
         {/each}
       </div>
@@ -256,34 +259,36 @@
             <button class="text-[10px] px-2 py-0.5 border border-err/60 text-err rounded" on:click={() => dropJob(selected!)}>Delete</button>
           </div>
         </div>
-        <p class="text-muted text-[10px] mt-1">{selected.id} · {selected.executor}</p>
+        <p class="text-muted text-[10px] mt-1">{selected.id} · {selected.executor || selected.agent || '(no executor)'}</p>
         {#if selected.description}<p class="text-fg/80 text-[11px] mt-1">{selected.description}</p>{/if}
         <p class="text-muted text-[10px] mt-1">
-          {selected.cron ? `cron: ${selected.cron}` : ''}
-          {selected.run_at ? ` run_at: ${selected.run_at}` : ''}
+          {selected.schedule?.cron ? `cron: ${selected.schedule.cron}` : ''}
+          {selected.schedule?.run_at ? ` run_at: ${selected.schedule.run_at}` : ''}
+          {selected.schedule?.timezone ? ` (${selected.schedule.timezone})` : ''}
           · last: {fmtTs(selected.last_fired_at)}
         </p>
-        {#if selected.args && Object.keys(selected.args).length}
+        {#if selected.params && Object.keys(selected.params).length}
           <details class="mt-1">
-            <summary class="text-muted text-[10px] cursor-pointer">args</summary>
-            <pre class="mt-1 text-[10px] text-fg whitespace-pre-wrap overflow-x-auto">{JSON.stringify(selected.args, null, 2)}</pre>
+            <summary class="text-muted text-[10px] cursor-pointer">params</summary>
+            <pre class="mt-1 text-[10px] text-fg whitespace-pre-wrap overflow-x-auto">{JSON.stringify(selected.params, null, 2)}</pre>
           </details>
         {/if}
       </header>
 
       <div class="px-3 py-2 border-b border-border/40 text-[11px] text-accent">Runs</div>
       <ul class="flex-1 overflow-y-auto">
-        {#each runs as r (r.run_id)}
+        {#each runs as r (r.id)}
           <li class="px-3 py-2 border-b border-border/20">
             <header class="flex items-center justify-between text-[10px] text-muted">
               <span>
                 <span class="text-fg">{r.status}</span>
-                {#if r.duration_ms} · {r.duration_ms}ms{/if}
+                {#if r.duration_ms} · {Math.round(r.duration_ms)}ms{/if}
+                {#if r.attempts && r.attempts > 1} · attempt {r.attempts}{/if}
               </span>
               <span>{fmtTs(r.finished_at || r.started_at)}</span>
             </header>
             {#if r.error}<p class="text-err text-[11px] mt-1">{r.error}</p>{/if}
-            {#if r.output}<pre class="text-[10px] text-fg/80 whitespace-pre-wrap mt-1">{r.output.slice(0, 300)}{r.output.length > 300 ? '…' : ''}</pre>{/if}
+            {#if r.output_summary}<pre class="text-[10px] text-fg/80 whitespace-pre-wrap mt-1">{r.output_summary.slice(0, 300)}{r.output_summary.length > 300 ? '…' : ''}</pre>{/if}
           </li>
         {:else}
           <li class="px-3 py-4 text-muted text-center">No runs yet.</li>

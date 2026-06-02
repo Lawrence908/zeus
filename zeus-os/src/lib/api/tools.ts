@@ -9,6 +9,9 @@ export interface ToolDirEntry {
   result_aegis_policy?: string;
   cacheable?: boolean;
   timeout_seconds?: number;
+  source?: string; // 'chat' | 'mcp' on the wire — many tools are registered in both
+  sources?: string[]; // populated client-side after dedupe (e.g. ['chat', 'mcp'])
+  write_gated?: boolean;
 }
 
 export interface ToolInvocation {

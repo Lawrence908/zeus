@@ -22,13 +22,17 @@
   async function loadRoots() {
     try {
       const r = await fsRoots();
-      roots = r.read_roots;
+      // eslint-disable-next-line no-console
+      console.log('[Zeus OS FileManager] roots response:', r);
+      roots = r.read_roots ?? [];
       if (roots.length && !path) {
         path = roots[0];
         await loadDir(path);
       }
     } catch (e) {
       error = String(e);
+      // eslint-disable-next-line no-console
+      console.error('[Zeus OS FileManager] loadRoots error', e);
     }
   }
 

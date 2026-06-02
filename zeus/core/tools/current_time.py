@@ -244,6 +244,18 @@ def _resolve_location(loc: str) -> tuple[str | None, str | None]:
     the user so they know how we interpreted their query. Returns
     (None, None) when nothing reasonable matches.
     """
+    # The model often passes an already-IANA string into `location`
+    # ("America/Vancouver", "Asia/Tokyo"). Try the raw input as a tz first —
+    # if it's valid, we're done. Trim whitespace; preserve case (IANA is
+    # case-sensitive).
+    bare = loc.strip()
+    if bare:
+        try:
+            ZoneInfo(bare)
+            return bare, bare
+        except ZoneInfoNotFoundError:
+            pass
+
     norm = _normalize_location(loc)
     if not norm:
         return None, None
