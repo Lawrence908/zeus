@@ -16,6 +16,9 @@
   import Agents from '$lib/apps/Agents.svelte';
   import Ingest from '$lib/apps/Ingest.svelte';
   import Obsidian from '$lib/apps/Obsidian.svelte';
+  import Editor from '$lib/apps/Editor.svelte';
+  import HomeAssistant from '$lib/apps/HomeAssistant.svelte';
+  import Linear from '$lib/apps/Linear.svelte';
   import Placeholder from '$lib/apps/Placeholder.svelte';
 
   import { activeWorkspace, leaves, wm, switchWorkspace, closeFocused, focusLeaf } from '$lib/wm/store';
@@ -34,6 +37,9 @@
     Agents,
     Ingest,
     Obsidian,
+    Editor,
+    HomeAssistant,
+    Linear,
     Placeholder
   };
 

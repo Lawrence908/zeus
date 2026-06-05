@@ -4,6 +4,7 @@
   import { fsList, fsRead, fsRoots, type FsEntry } from '$lib/api/fs';
   import { readCodeClip, renderMarkdown } from '$lib/markdown';
   import { notify } from '$lib/notify/store';
+  import { openApp } from '$lib/wm/store';
 
   export let app: AppInstance;
   void app;
@@ -12,7 +13,14 @@
   let path = '';
   let entries: FsEntry[] = [];
   let preview:
-    | { name: string; kind: 'image' | 'markdown' | 'text'; content: string; src?: string; truncated?: boolean }
+    | {
+        name: string;
+        absPath: string;
+        kind: 'image' | 'markdown' | 'text';
+        content: string;
+        src?: string;
+        truncated?: boolean;
+      }
     | null = null;
   let error = '';
 
@@ -72,7 +80,7 @@
         if (res.ok) {
           const blob = await res.blob();
           const src = URL.createObjectURL(blob);
-          preview = { name: e.name, kind: 'image', content: '', src };
+          preview = { name: e.name, absPath: next, kind: 'image', content: '', src };
           return;
         }
       } catch {
@@ -83,7 +91,7 @@
     try {
       const r = await fsRead(next);
       const kind: 'markdown' | 'text' = MARKDOWN_EXT.has(ext) ? 'markdown' : 'text';
-      preview = { name: e.name, kind, content: r.content, truncated: r.truncated };
+      preview = { name: e.name, absPath: next, kind, content: r.content, truncated: r.truncated };
     } catch (err) {
       error = String(err);
     }
@@ -226,9 +234,20 @@
         {#if preview}
           <header class="mb-2 text-accent flex items-center justify-between gap-2">
             <span class="truncate">{preview.name}</span>
-            {#if preview.truncated}
-              <span class="text-warn text-[10px]">truncated</span>
-            {/if}
+            <div class="flex gap-1 items-center">
+              {#if preview.truncated}
+                <span class="text-warn text-[10px]">truncated</span>
+              {/if}
+              {#if preview.kind !== 'image'}
+                <button
+                  class="text-[10px] px-2 py-0.5 border border-accent text-accent rounded hover:bg-accent hover:text-bg"
+                  on:click={() => openApp({ appId: 'editor', kind: 'Editor', title: preview!.name, props: { path: preview!.absPath } })}
+                  title="Open in Editor"
+                >
+                  Edit
+                </button>
+              {/if}
+            </div>
           </header>
           {#if preview.kind === 'image' && preview.src}
             <img src={preview.src} alt={preview.name} class="max-w-full max-h-full object-contain" />

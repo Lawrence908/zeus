@@ -12,6 +12,7 @@
     type VaultNode
   } from '$lib/api/obsidian';
   import ObsidianTreeNode from './ObsidianTreeNode.svelte';
+  import { openApp } from '$lib/wm/store';
 
   export let app: AppInstance;
   void app;
@@ -23,6 +24,7 @@
   let openFolders: Record<string, boolean> = { '': true };
   let currentPath: string | null = null;
   let currentTitle = '';
+  let currentAbsPath = '';
   let body = '';
   let rawMode = false;
   let rawBody = '';
@@ -53,6 +55,7 @@
       const r = await vaultFile(path);
       if (pushHistory && currentPath) backstack.push(currentPath);
       currentPath = path;
+      currentAbsPath = r.abs_path;
       currentTitle = path.split('/').pop()!.replace(/\.(md|markdown)$/i, '');
       rawBody = r.content;
       body = r.rewritten;
@@ -193,6 +196,13 @@
           {#if backstack.length > 0}
             <button class="text-[10px] px-2 py-0.5 border border-border/60 rounded" on:click={back}>← back</button>
           {/if}
+          <button
+            class="text-[10px] px-2 py-0.5 border border-accent text-accent rounded hover:bg-accent hover:text-bg"
+            on:click={() => openApp({ appId: 'editor', kind: 'Editor', title: currentTitle, props: { path: currentAbsPath } })}
+            title="Open in Editor"
+          >
+            Edit
+          </button>
           <button
             class="text-[10px] px-2 py-0.5 border border-border/60 rounded"
             class:bg-accent={rawMode}
