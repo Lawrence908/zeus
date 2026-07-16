@@ -21,6 +21,11 @@
   import Editor from '$lib/apps/Editor.svelte';
   import HomeAssistant from '$lib/apps/HomeAssistant.svelte';
   import Linear from '$lib/apps/Linear.svelte';
+  import Processes from '$lib/apps/Processes.svelte';
+  import Network from '$lib/apps/Network.svelte';
+  import Notepad from '$lib/apps/Notepad.svelte';
+  import Calendar from '$lib/apps/Calendar.svelte';
+  import Images from '$lib/apps/Images.svelte';
   import Placeholder from '$lib/apps/Placeholder.svelte';
 
   export let win: FloatingWindow;
@@ -43,6 +48,11 @@
     Editor,
     HomeAssistant,
     Linear,
+    Processes,
+    Network,
+    Notepad,
+    Calendar,
+    Images,
     Placeholder
   };
   $: Comp = components[win.app.kind] ?? Placeholder;

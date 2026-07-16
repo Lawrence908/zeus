@@ -37,11 +37,11 @@ _DEFAULT_APPS: list[dict[str, Any]] = [
     {"id": "knowledge", "title": "Knowledge", "icon": "library", "kind": "Knowledge"},
     {"id": "agents", "title": "Agents", "icon": "users", "kind": "Agents"},
     {"id": "ingest", "title": "Ingest", "icon": "download", "kind": "Ingest"},
-    {"id": "images", "title": "Image Viewer", "icon": "image", "kind": "Placeholder"},
-    {"id": "procs", "title": "Process Manager", "icon": "cpu", "kind": "Placeholder"},
-    {"id": "network", "title": "Network", "icon": "wifi", "kind": "Placeholder"},
-    {"id": "notepad", "title": "Notepad", "icon": "edit-3", "kind": "Placeholder"},
-    {"id": "calendar", "title": "Calendar", "icon": "calendar", "kind": "Placeholder"},
+    {"id": "images", "title": "Image Viewer", "icon": "image", "kind": "Images"},
+    {"id": "procs", "title": "Process Manager", "icon": "cpu", "kind": "Processes"},
+    {"id": "network", "title": "Network", "icon": "wifi", "kind": "Network"},
+    {"id": "notepad", "title": "Notepad", "icon": "edit-3", "kind": "Notepad"},
+    {"id": "calendar", "title": "Calendar", "icon": "calendar", "kind": "Calendar"},
 ]
 
 
