@@ -8,6 +8,7 @@
   import Notifications from '$lib/components/Notifications.svelte';
   import { notify } from '$lib/notify/store';
 
+  import { get } from 'svelte/store';
   import {
     bootstrap,
     closeFocused,
@@ -16,8 +17,10 @@
     moveFocusedToWorkspace,
     openApp,
     switchWorkspace,
-    toggleFloating
+    toggleFloating,
+    wm
   } from '$lib/wm/store';
+  import { allLeaves } from '$lib/wm/tree';
   import {
     DEFAULT_KEYMAP,
     MODIFIER_LABEL,
@@ -30,6 +33,7 @@
   import { applyTheme, nextTheme, THEMES, type ThemeId } from '$lib/themes';
   import { listApps, type AppEntry } from '$lib/api/apps';
   import { loadConfig, saveConfig, type ZeusOsConfig } from '$lib/api/config';
+  import { triggerVoicePtt } from '$lib/voice/store';
 
   let launcherOpen = false;
   let cheatsheetOpen = false;
@@ -149,6 +153,23 @@
       case 'toggleFloating':
         toggleFloating();
         break;
+      case 'voicePtt': {
+        // Make sure the Voice Orb is mounted (otherwise the PTT trigger has
+        // no listener), then fire the toggle event on the shared store.
+        const voice = findApp('voice');
+        if (voice) {
+          const already = new Set<string>();
+          for (const w of get(wm).workspaces) {
+            for (const l of allLeaves(w.root)) already.add(l.app.appId);
+            for (const f of w.floating) already.add(f.app.appId);
+          }
+          if (!already.has(voice.id)) {
+            openApp({ appId: voice.id, kind: voice.kind, title: voice.title }, 'h');
+          }
+        }
+        triggerVoicePtt();
+        break;
+      }
     }
   }
 

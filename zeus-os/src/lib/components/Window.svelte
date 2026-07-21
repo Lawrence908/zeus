@@ -28,6 +28,7 @@
   import Notepad from '$lib/apps/Notepad.svelte';
   import Calendar from '$lib/apps/Calendar.svelte';
   import Images from '$lib/apps/Images.svelte';
+  import VoiceOrb from '$lib/apps/VoiceOrb.svelte';
   import Placeholder from '$lib/apps/Placeholder.svelte';
 
   export let leaf: LeafNode;
@@ -66,6 +67,7 @@
     Notepad,
     Calendar,
     Images,
+    VoiceOrb,
     Placeholder
   };
   $: Comp = components[leaf.app.kind] ?? Placeholder;

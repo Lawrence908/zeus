@@ -23,6 +23,8 @@ _DEFAULT_APPS: list[dict[str, Any]] = [
     {"id": "chat", "title": "Zeus Chat", "icon": "message-square", "kind": "Chat", "default_workspace": 1},
     {"id": "files", "title": "File Manager", "icon": "folder", "kind": "FileManager"},
     {"id": "sysmon", "title": "System Monitor", "icon": "activity", "kind": "SystemMonitor"},
+    # Phase A — voice.
+    {"id": "voice", "title": "Voice", "icon": "mic", "kind": "VoiceOrb", "default_workspace": 1},
     # Phase 2a — ported from the React frontend's data-dense surfaces.
     {"id": "tools", "title": "Tools", "icon": "tool", "kind": "Tools"},
     {"id": "jobs", "title": "Jobs", "icon": "clock", "kind": "Jobs"},

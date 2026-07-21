@@ -43,7 +43,8 @@ export type Action =
   | { kind: 'setTheme'; theme: ThemeId }
   | { kind: 'setModifier'; mode: ModifierMode }
   | { kind: 'cheatsheet' }
-  | { kind: 'reload' };
+  | { kind: 'reload' }
+  | { kind: 'voicePtt' };
 
 export interface ParsedBind {
   super: boolean;
@@ -154,6 +155,7 @@ export const DEFAULT_KEYMAP: Record<string, Action> = {
   'Super+F': { kind: 'toggleFloating' },
   'Super+R': { kind: 'cycleTheme' },
   'Super+Slash': { kind: 'cheatsheet' },
+  'Super+M': { kind: 'voicePtt' },
   'Super+H': { kind: 'focus', dir: 'left' },
   'Super+J': { kind: 'focus', dir: 'down' },
   'Super+K': { kind: 'focus', dir: 'up' },

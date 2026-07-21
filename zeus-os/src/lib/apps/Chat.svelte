@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import type { AppInstance } from '$lib/wm/tree';
   import { chatStream } from '$lib/api/chat';
   import { notify } from '$lib/notify/store';
   import { readCodeClip, renderMarkdown } from '$lib/markdown';
   import { getChatSession, setChatSession, type ChatMsg as Msg, type ToolCall } from './chat-sessions';
+  import { voiceTurns, type VoiceTurn } from '$lib/voice/store';
 
   export let app: AppInstance;
 
@@ -128,8 +129,49 @@
     }
   }
 
+  // Absorb voice turns into this chat window. Every currently-known turn at
+  // mount time is treated as already-seen so a freshly opened Chat doesn't
+  // retroactively backfill voice history; only new turns get appended.
+  const seenTurns = new Set<string>();
+  let voiceBaseline = false;
+  const unsubVoice = voiceTurns.subscribe((xs) => {
+    if (!voiceBaseline) {
+      for (const t of xs) seenTurns.add(t.id);
+      voiceBaseline = true;
+      return;
+    }
+    // xs is newest-first; walk oldest→newest so appends land in order.
+    for (let i = xs.length - 1; i >= 0; i--) {
+      const t = xs[i];
+      if (seenTurns.has(t.id)) continue;
+      seenTurns.add(t.id);
+      appendVoiceTurn(t);
+    }
+  });
+
+  function appendVoiceTurn(t: VoiceTurn) {
+    const added: Msg[] = [];
+    if (t.transcript) added.push({ role: 'user', content: t.transcript });
+    if (t.reply) {
+      added.push({
+        role: 'assistant',
+        content: t.reply,
+        model: t.model,
+        latency_ms: undefined
+      });
+    }
+    if (!added.length) return;
+    messages = [...messages, ...added];
+    if (t.sessionId && !sessionId) sessionId = t.sessionId;
+    tick().then(scrollDown);
+  }
+
   onMount(() => {
     /* nothing to load up front */
+  });
+
+  onDestroy(() => {
+    unsubVoice();
   });
 </script>
 
