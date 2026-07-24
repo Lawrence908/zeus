@@ -3,7 +3,42 @@
 // Event types from the server: "phase" (status updates), "token" (content),
 // "done" (final), "error".
 
-import { API_BASE } from './base';
+import { API_BASE, jsonFetch } from './base';
+
+export interface ChatSessionSummary {
+  id: string;
+  created_at: number;
+  updated_at: number;
+  turn_count: number;
+  summary: string | null;
+  topic: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface ChatHistoryMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  source?: string;
+  context_sources?: string[];
+}
+
+export function listSessions(limit = 20): Promise<{ sessions: ChatSessionSummary[] }> {
+  return jsonFetch(`/chat/sessions?limit=${limit}`);
+}
+
+export function sessionMessages(id: string): Promise<{ messages: ChatHistoryMessage[] }> {
+  return jsonFetch(`/chat/sessions/${encodeURIComponent(id)}/messages`);
+}
+
+export function createSession(): Promise<ChatSessionSummary> {
+  return jsonFetch('/chat/sessions', { method: 'POST' });
+}
+
+export function deleteSession(id: string): Promise<{ ok: boolean }> {
+  return jsonFetch(`/chat/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
 
 export interface ChatStreamOpts {
   message: string;

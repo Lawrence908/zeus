@@ -23,6 +23,9 @@
       }
     | null = null;
   let error = '';
+  let showHidden = false;
+  let sortBy: 'name' | 'size' | 'mtime' = 'name';
+  let sortDesc = false;
 
   const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'ico']);
   const MARKDOWN_EXT = new Set(['md', 'markdown']);
@@ -173,6 +176,33 @@
     );
   }
 
+  // Clickable breadcrumb segments; each jumps to that path prefix.
+  $: crumbs = (() => {
+    const parts = path.replace(/\/+$/, '').split('/').filter(Boolean);
+    const out: { label: string; full: string }[] = [];
+    let acc = '';
+    for (const p of parts) {
+      acc += '/' + p;
+      out.push({ label: p, full: acc });
+    }
+    return out;
+  })();
+
+  // Dirs first, then the selected sort; dotfiles hidden unless toggled on.
+  $: view = entries
+    .filter((e) => showHidden || !e.name.startsWith('.'))
+    .slice()
+    .sort((a, b) => {
+      const aDir = a.kind === 'dir' ? 0 : 1;
+      const bDir = b.kind === 'dir' ? 0 : 1;
+      if (aDir !== bDir) return aDir - bDir;
+      let cmp = 0;
+      if (sortBy === 'size') cmp = a.size - b.size;
+      else if (sortBy === 'mtime') cmp = a.mtime - b.mtime;
+      else cmp = a.name.localeCompare(b.name);
+      return sortDesc ? -cmp : cmp;
+    });
+
   $: previewHtml = (() => {
     if (!preview) return '';
     if (preview.kind === 'markdown') return renderMarkdown(preview.content);
@@ -202,8 +232,39 @@
 
   <div class="flex-1 flex flex-col min-w-0">
     <header class="flex items-center gap-2 px-3 py-1.5 border-b border-border/40 text-xs">
-      <button class="text-muted hover:text-fg" on:click={up}>↑</button>
-      <span class="truncate">{path || '–'}</span>
+      <button class="text-muted hover:text-fg" on:click={up} title="Up one level">↑</button>
+      <nav class="flex items-center gap-0.5 truncate flex-1 min-w-0">
+        {#each crumbs as c, i (c.full)}
+          {#if i > 0}<span class="text-muted/50">/</span>{/if}
+          <button
+            class="hover:text-accent truncate"
+            class:text-fg={i === crumbs.length - 1}
+            class:text-muted={i !== crumbs.length - 1}
+            on:click={() => loadDir(c.full)}
+            title={c.full}
+          >{c.label}</button>
+        {:else}
+          <span class="text-muted">–</span>
+        {/each}
+      </nav>
+      <label class="flex items-center gap-1 text-muted shrink-0 cursor-pointer">
+        <input type="checkbox" bind:checked={showHidden} class="accent-current" />
+        <span>.dot</span>
+      </label>
+      <select
+        class="bg-surface text-muted rounded border border-border/50 px-1 py-0.5 outline-none shrink-0"
+        bind:value={sortBy}
+        title="Sort by"
+      >
+        <option value="name">name</option>
+        <option value="size">size</option>
+        <option value="mtime">modified</option>
+      </select>
+      <button
+        class="text-muted hover:text-fg shrink-0"
+        on:click={() => (sortDesc = !sortDesc)}
+        title="Toggle sort direction"
+      >{sortDesc ? '↓' : '↑'}</button>
     </header>
 
     {#if error}
@@ -212,7 +273,7 @@
 
     <div class="flex-1 flex min-h-0">
       <ul class="w-1/2 overflow-y-auto border-r border-border/40">
-        {#each entries as e (e.name)}
+        {#each view as e (e.name)}
           <li>
             <button
               class="w-full text-left flex items-center justify-between px-3 py-1 hover:bg-surface2/60"

@@ -1,7 +1,15 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
   import type { AppInstance } from '$lib/wm/tree';
-  import { chatStream } from '$lib/api/chat';
+  import {
+    chatStream,
+    createSession,
+    deleteSession,
+    listSessions,
+    sessionMessages,
+    type ChatSessionSummary
+  } from '$lib/api/chat';
+  import { getActiveModel, listModels, setActiveModel } from '$lib/api/models';
   import { notify } from '$lib/notify/store';
   import { readCodeClip, renderMarkdown } from '$lib/markdown';
   import { getChatSession, setChatSession, type ChatMsg as Msg, type ToolCall } from './chat-sessions';
@@ -22,6 +30,104 @@
   let sending = false;
   let viewport: HTMLDivElement;
   let copied: number | null = null;
+
+  // ── session drawer + model picker ──
+  let drawerOpen = false;
+  let sessionList: ChatSessionSummary[] = [];
+  let sessionsLoading = false;
+  let models: string[] = [];
+  let activeModel = '';
+  let modelProvider = '';
+
+  async function toggleDrawer() {
+    drawerOpen = !drawerOpen;
+    if (drawerOpen) await refreshSessions();
+  }
+
+  async function refreshSessions() {
+    sessionsLoading = true;
+    try {
+      sessionList = (await listSessions(25)).sessions;
+    } catch {
+      sessionList = [];
+    } finally {
+      sessionsLoading = false;
+    }
+  }
+
+  async function pickSession(id: string) {
+    try {
+      const res = await sessionMessages(id);
+      messages = res.messages
+        .filter((m) => m.content)
+        .map((m) => ({ role: m.role, content: m.content }));
+      sessionId = id;
+      drawerOpen = false;
+      await tick();
+      scrollDown();
+    } catch (e) {
+      notify({ title: 'Load failed', body: String(e).slice(0, 140), kind: 'err' });
+    }
+  }
+
+  async function newSession() {
+    try {
+      const s = await createSession();
+      sessionId = s.id;
+      messages = [];
+      drawerOpen = false;
+    } catch (e) {
+      notify({ title: 'New session failed', body: String(e).slice(0, 140), kind: 'err' });
+    }
+  }
+
+  async function removeSession(id: string, ev: Event) {
+    ev.stopPropagation();
+    try {
+      await deleteSession(id);
+      if (sessionId === id) {
+        sessionId = null;
+        messages = [];
+      }
+      await refreshSessions();
+    } catch (e) {
+      notify({ title: 'Delete failed', body: String(e).slice(0, 140), kind: 'err' });
+    }
+  }
+
+  async function loadModels() {
+    try {
+      const [active, list] = await Promise.all([getActiveModel(), listModels()]);
+      activeModel = active.model;
+      modelProvider = active.provider;
+      models = list.models.map((m) => m.name);
+      if (activeModel && !models.includes(activeModel)) models = [activeModel, ...models];
+    } catch {
+      /* model switching unavailable (e.g. Claude dev mode without list) */
+    }
+  }
+
+  async function onModelChange(ev: Event) {
+    const next = (ev.target as HTMLSelectElement).value;
+    if (!next || next === activeModel) return;
+    const prev = activeModel;
+    activeModel = next;
+    try {
+      await setActiveModel(next);
+      notify({ title: 'Model', body: next, kind: 'ok', ttlMs: 2000 });
+    } catch (e) {
+      activeModel = prev;
+      notify({ title: 'Model switch failed', body: String(e).slice(0, 140), kind: 'err' });
+    }
+  }
+
+  function relTime(epochSec: number): string {
+    const d = Date.now() / 1000 - epochSec;
+    if (d < 60) return 'now';
+    if (d < 3600) return `${Math.floor(d / 60)}m`;
+    if (d < 86400) return `${Math.floor(d / 3600)}h`;
+    return `${Math.floor(d / 86400)}d`;
+  }
 
   async function send() {
     const text = input.trim();
@@ -167,7 +273,7 @@
   }
 
   onMount(() => {
-    /* nothing to load up front */
+    void loadModels();
   });
 
   onDestroy(() => {
@@ -175,7 +281,73 @@
   });
 </script>
 
-<div class="h-full w-full flex flex-col" on:click={onChatClick} role="presentation">
+<div class="h-full w-full flex flex-col relative" on:click={onChatClick} role="presentation">
+  <div class="flex items-center gap-2 px-2 py-1 border-b border-border/30 text-xs font-mono">
+    <button
+      class="px-1.5 py-0.5 rounded text-muted hover:text-fg hover:bg-surface2/60"
+      class:text-accent={drawerOpen}
+      on:click={toggleDrawer}
+      title="Sessions"
+    >☰</button>
+    <button
+      class="px-1.5 py-0.5 rounded text-muted hover:text-fg hover:bg-surface2/60"
+      on:click={newSession}
+      title="New session"
+    >+</button>
+    <span class="text-muted/60 truncate flex-1">
+      {sessionId ? sessionId.slice(0, 8) : 'new chat'}
+    </span>
+    {#if models.length}
+      <select
+        class="bg-surface text-muted text-[10px] rounded border border-border/50 px-1 py-0.5 outline-none max-w-[180px]"
+        value={activeModel}
+        on:change={onModelChange}
+        title="Active model ({modelProvider})"
+      >
+        {#each models as m (m)}
+          <option value={m}>{m}</option>
+        {/each}
+      </select>
+    {:else if activeModel}
+      <span class="text-muted/60 text-[10px]">{activeModel}</span>
+    {/if}
+  </div>
+
+  {#if drawerOpen}
+    <div class="absolute left-0 top-[26px] bottom-0 w-64 z-20 border-r border-border/50 overflow-y-auto surface-blur"
+      style="background: rgb(var(--surface) / 0.92);">
+      {#if sessionsLoading}
+        <p class="text-muted text-xs px-3 py-2 font-mono">loading…</p>
+      {:else}
+        {#each sessionList as s (s.id)}
+          <button
+            class="w-full text-left px-3 py-2 border-b border-border/20 hover:bg-surface2/60 group/sess"
+            class:bg-surface2={s.id === sessionId}
+            on:click={() => pickSession(s.id)}
+          >
+            <span class="flex items-center justify-between gap-2 text-xs">
+              <span class="truncate text-fg">{s.topic ?? s.summary?.slice(0, 40) ?? s.id.slice(0, 8)}</span>
+              <span
+                class="opacity-0 group-hover/sess:opacity-60 hover:!opacity-100 hover:text-err shrink-0"
+                role="button"
+                tabindex="0"
+                on:click={(ev) => removeSession(s.id, ev)}
+                on:keydown={(ev) => ev.key === 'Enter' && removeSession(s.id, ev)}
+              >×</span>
+            </span>
+            <span class="flex gap-2 text-[10px] text-muted font-mono">
+              <span>{s.turn_count} turns</span>
+              <span>{relTime(s.updated_at)}</span>
+              {#if s.metadata?.source}<span>{s.metadata.source}</span>{/if}
+            </span>
+          </button>
+        {:else}
+          <p class="text-muted text-xs px-3 py-2 font-mono">No sessions yet.</p>
+        {/each}
+      {/if}
+    </div>
+  {/if}
+
   <div bind:this={viewport} class="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-sm">
     {#each messages as m, i}
       <div class="flex gap-3 group">

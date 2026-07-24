@@ -39,3 +39,10 @@ export function fsList(path: string): Promise<FsListing> {
 export function fsRead(path: string): Promise<FsReadResult> {
   return jsonFetch<FsReadResult>(`/zeus-os/fs/file?path=${encodeURIComponent(path)}`);
 }
+
+export function fsWrite(path: string, content: string): Promise<{ ok: boolean; path: string }> {
+  return jsonFetch(`/zeus-os/fs/write`, {
+    method: 'POST',
+    body: JSON.stringify({ path, content })
+  });
+}

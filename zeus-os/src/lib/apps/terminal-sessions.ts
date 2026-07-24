@@ -62,6 +62,14 @@ export function setActiveTab(instanceId: string, tabId: string) {
   state.activeTabId = tabId;
 }
 
+export function renameTab(instanceId: string, tabId: string, label: string) {
+  const state = getWindowState(instanceId);
+  const trimmed = label.trim();
+  state.tabs = state.tabs.map((t) =>
+    t.id === tabId ? { ...t, label: trimmed || 'shell' } : t
+  );
+}
+
 export function closeTab(instanceId: string, tabId: string): TerminalTab[] {
   const state = getWindowState(instanceId);
   state.tabs = state.tabs.filter((t) => t.id !== tabId);

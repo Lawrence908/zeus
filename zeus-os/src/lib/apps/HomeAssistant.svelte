@@ -14,6 +14,9 @@
   let editing = false;
   let urlInput = '';
   let host: HTMLDivElement;
+  // Collapsed by default once a URL is configured: the header is setup
+  // chrome, not something you need while actually driving HA.
+  let headerOpen = false;
 
   async function load() {
     loading = true;
@@ -66,28 +69,42 @@
   }
 </script>
 
-<div class="h-full w-full flex flex-col font-mono text-xs">
-  <header class="px-3 py-1.5 border-b border-border/40 flex items-center gap-2">
-    <h3 class="text-accent text-sm">Home Assistant</h3>
-    {#if mode === 'proxy'}
-      <span class="text-[10px] px-1.5 py-0.5 rounded bg-ok/20 text-ok" title="Routed through Zeus reverse proxy with CF Access service-token headers">
-        proxy · CF token
-      </span>
-      <span class="text-muted text-[10px] truncate">→ {upstream}</span>
-    {:else}
-      <span class="text-muted text-[10px] truncate">{url || '(no url configured)'}</span>
-    {/if}
-    <div class="ml-auto flex gap-1">
-      <button class="text-[10px] px-2 py-0.5 border border-border/60 rounded" on:click={() => (editing = !editing)}>
-        {editing ? 'cancel' : 'change url'}
-      </button>
-      {#if url}
-        <button class="text-[10px] px-2 py-0.5 border border-accent text-accent rounded" on:click={openInNewTab}>
-          open ↗
-        </button>
+<div class="h-full w-full flex flex-col font-mono text-xs relative">
+  {#if headerOpen || !url || error}
+    <header class="px-3 py-1.5 border-b border-border/40 flex items-center gap-2">
+      <h3 class="text-accent text-sm">Home Assistant</h3>
+      {#if mode === 'proxy'}
+        <span class="text-[10px] px-1.5 py-0.5 rounded bg-ok/20 text-ok" title="Routed through Zeus reverse proxy with CF Access service-token headers">
+          proxy · CF token
+        </span>
+        <span class="text-muted text-[10px] truncate">→ {upstream}</span>
+      {:else}
+        <span class="text-muted text-[10px] truncate">{url || '(no url configured)'}</span>
       {/if}
-    </div>
-  </header>
+      <div class="ml-auto flex gap-1">
+        <button class="text-[10px] px-2 py-0.5 border border-border/60 rounded" on:click={() => (editing = !editing)}>
+          {editing ? 'cancel' : 'change url'}
+        </button>
+        {#if url}
+          <button class="text-[10px] px-2 py-0.5 border border-accent text-accent rounded" on:click={openInNewTab}>
+            open ↗
+          </button>
+          <button
+            class="text-[10px] px-2 py-0.5 border border-border/60 rounded text-muted hover:text-fg"
+            on:click={() => (headerOpen = false)}
+            title="Hide header"
+          >hide ▴</button>
+        {/if}
+      </div>
+    </header>
+  {:else}
+    <button
+      class="absolute top-1 right-1 z-10 text-[10px] px-1.5 py-0.5 rounded text-muted/60 hover:text-fg surface-blur"
+      style="background: rgb(var(--surface) / 0.7);"
+      on:click={() => (headerOpen = true)}
+      title="Show Home Assistant panel controls"
+    >⚙</button>
+  {/if}
 
   {#if editing}
     <div class="px-3 py-2 border-b border-border/40 flex items-center gap-2 bg-surface2/30">
