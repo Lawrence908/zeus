@@ -1,0 +1,36 @@
+# zeus/orchestration/swarm/worker.py
+"""Worker abstraction: the coordinator dispatches a TaskNode to a Worker.
+
+Phase 0 ships StubWorker (instant no-op) so the state machine can be exercised
+without a sandbox. Phase 1 adds a sandboxed Claude Code worker implementing the
+same protocol (spawn `claude -p` in an OpenShell/NemoClaw container on a git
+worktree, stream results back).
+"""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from pydantic import BaseModel
+
+from zeus.orchestration.swarm.models import Run, TaskNode
+
+
+class WorkerResult(BaseModel):
+    success: bool
+    output: str = ""
+    error: str | None = None
+
+
+class Worker(Protocol):
+    async def run(self, node: TaskNode, run: Run) -> WorkerResult: ...
+
+
+class StubWorker:
+    """No-op worker: marks every node succeeded. For P0 state-machine tests."""
+
+    async def run(self, node: TaskNode, run: Run) -> WorkerResult:
+        return WorkerResult(
+            success=True,
+            output=f"[stub] would complete {node.id!r}: {node.title}",
+        )

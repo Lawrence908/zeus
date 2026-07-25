@@ -32,6 +32,7 @@ from zeus.core.zeus_os import router as zeus_os_router
 from zeus.integrations.telegram import build_telegram_bot
 from zeus.memory.store import get_memory_store
 from zeus.kronos.api import router as kronos_router
+from zeus.orchestration.swarm.api import router as swarm_router
 from zeus.orchestration.bus import router as orchestration_router
 from zeus.orchestration.hooks import build_default_registry, bus_metrics
 from zeus.orchestration.runtime import AgentRuntime
@@ -179,6 +180,24 @@ async def lifespan(app: FastAPI):
     app.state.kronos_scheduler = None
     app.state.kronos_task = None
     app.state.kronos_recent_runs = None
+
+    # Argo swarm (P0): durable run store + coordinator over a stub worker.
+    # Sandboxed Claude Code workers replace the stub in P1.
+    app.state.swarm_store = None
+    app.state.swarm_coordinator = None
+    if os.getenv("ZEUS_SWARM_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
+        import logging as _logging
+
+        from zeus.orchestration.swarm.coordinator import Coordinator
+        from zeus.orchestration.swarm.store import SwarmStore
+        from zeus.orchestration.swarm.worker import StubWorker
+
+        sw_db_path = os.getenv("ZEUS_SWARM_DB_PATH", "zeus/data/swarm.db")
+        os.makedirs(os.path.dirname(sw_db_path) or ".", exist_ok=True)
+        sw_store = SwarmStore(sw_db_path)
+        app.state.swarm_store = sw_store
+        app.state.swarm_coordinator = Coordinator(sw_store, StubWorker())
+        _logging.getLogger("zeus.swarm").info("Argo swarm enabled (stub worker, db=%s)", sw_db_path)
     if os.getenv("ZEUS_KRONOS_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
         try:
             from collections import deque as _deque
@@ -295,6 +314,7 @@ app.include_router(chat_router)
 app.include_router(voice_state_router)
 app.include_router(orchestration_router)
 app.include_router(kronos_router)
+app.include_router(swarm_router)
 app.include_router(newsletter_router)
 app.include_router(vault_router)
 app.include_router(inbox_router)
