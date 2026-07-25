@@ -2,12 +2,16 @@
   import { onDestroy, onMount } from 'svelte';
   import type { AppInstance } from '$lib/wm/tree';
   import {
+    deleteKnowledgeBatch,
     knowledgeFacets,
     listKnowledge,
     searchKnowledge,
     type KnowledgeEntry,
     type KnowledgeFacetValue
   } from '$lib/api/knowledge';
+  import { confirmDialog } from '$lib/components/confirm';
+  import SortFilterBar, { type SortOption } from '$lib/components/SortFilterBar.svelte';
+  import { notify } from '$lib/notify/store';
 
   export let app: AppInstance;
   void app;
@@ -77,6 +81,43 @@
     }
   }
 
+  // Client-side ordering. Search results keep API order ("relevance").
+  let sortBy = 'relevance';
+  let sortDesc = false;
+  const SORT_OPTIONS: SortOption[] = [
+    { value: 'relevance', label: 'relevance' },
+    { value: 'date', label: 'date' },
+    { value: 'source', label: 'source' },
+    { value: 'title', label: 'title' }
+  ];
+  $: view =
+    sortBy === 'relevance'
+      ? entries
+      : (() => {
+          // Ascending comparators; the direction toggle reverses.
+          const sorted = entries.slice().sort((a, b) => {
+            if (sortBy === 'date') return (a.created_at ?? '').localeCompare(b.created_at ?? '');
+            if (sortBy === 'source') return a.source.localeCompare(b.source);
+            return (a.title ?? a.text).localeCompare(b.title ?? b.text);
+          });
+          return sortDesc ? sorted.reverse() : sorted;
+        })();
+
+  async function dropSelected() {
+    if (!selected) return;
+    const label = selected.title || selected.text.slice(0, 60);
+    if (!(await confirmDialog(`Delete knowledge chunk?\n\n"${label}"`, { confirmLabel: 'Delete' }))) return;
+    try {
+      await deleteKnowledgeBatch([selected.id]);
+      notify({ title: 'Deleted', kind: 'ok', ttlMs: 1500 });
+      selected = null;
+      await refresh();
+      await refreshFacets();
+    } catch (e) {
+      notify({ title: 'Delete failed', body: String(e).slice(0, 160), kind: 'err' });
+    }
+  }
+
   onMount(() => {
     refresh();
     refreshFacets();
@@ -98,32 +139,38 @@
     </div>
   {/if}
 
-  <header class="px-3 py-2 border-b border-border/40 flex items-center gap-2 flex-wrap">
-    <input
-      bind:value={searchQ}
-      placeholder="Hybrid search (Enter)…"
-      class="flex-1 min-w-[140px] bg-transparent border-b border-border/40 text-fg outline-none"
-      on:keydown={(ev) => ev.key === 'Enter' && refresh()}
-    />
-    <select bind:value={sourceFilter} class="bg-surface text-fg p-1 rounded border border-border/40 text-[11px]" on:change={refresh}>
-      <option value="">all sources</option>
-      {#each facets.source ?? [] as f (f.value)}
-        <option value={f.value}>{f.value} ({f.count})</option>
-      {/each}
-    </select>
-    <select bind:value={docTypeFilter} class="bg-surface text-fg p-1 rounded border border-border/40 text-[11px]" on:change={refresh}>
-      <option value="">all types</option>
-      {#each facets.doc_type ?? [] as f (f.value)}
-        <option value={f.value}>{f.value} ({f.count})</option>
-      {/each}
-    </select>
-    <button class="text-[10px] px-2 py-0.5 border border-border/60 rounded" on:click={refresh}>refresh</button>
-    <span class="text-[10px] text-muted">{entries.length} / {totalPoints} total {loading ? 'loading…' : ''} {lastFetched}</span>
-  </header>
+  <SortFilterBar
+    bind:query={searchQ}
+    placeholder="Hybrid search (Enter)…"
+    sortOptions={SORT_OPTIONS}
+    bind:sortBy
+    bind:sortDesc
+    total={entries.length}
+    on:submit={refresh}
+  >
+    <div slot="extra" class="contents">
+      <select bind:value={sourceFilter} class="bg-surface text-fg p-1 rounded border border-border/40 text-[11px] shrink-0" on:change={refresh}>
+        <option value="">all sources</option>
+        {#each facets.source ?? [] as f (f.value)}
+          <option value={f.value}>{f.value} ({f.count})</option>
+        {/each}
+      </select>
+      <select bind:value={docTypeFilter} class="bg-surface text-fg p-1 rounded border border-border/40 text-[11px] shrink-0" on:change={refresh}>
+        <option value="">all types</option>
+        {#each facets.doc_type ?? [] as f (f.value)}
+          <option value={f.value}>{f.value} ({f.count})</option>
+        {/each}
+      </select>
+      <button class="text-[10px] px-2 py-0.5 border border-border/60 rounded shrink-0" on:click={refresh}>refresh</button>
+      <span class="text-[10px] text-muted shrink-0" title="visible / total points">
+        / {totalPoints}{loading ? ' · loading…' : lastFetched ? ` · ${lastFetched}` : ''}
+      </span>
+    </div>
+  </SortFilterBar>
 
   <div class="flex-1 flex min-h-0">
     <ul class="w-1/2 overflow-y-auto border-r border-border/40">
-      {#each entries as e (e.id)}
+      {#each view as e (e.id)}
         <li class="border-b border-border/20" class:bg-surface2={selected?.id === e.id}>
           <button class="w-full text-left px-3 py-2 hover:bg-surface2/60" on:click={() => (selected = e)}>
             <p class="text-fg leading-snug truncate">{e.title || e.text.slice(0, 80)}</p>
@@ -140,7 +187,10 @@
     <section class="w-1/2 overflow-y-auto p-3">
       {#if selected}
         <header class="mb-2">
-          <h3 class="text-accent text-sm">{selected.title || '(untitled)'}</h3>
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-accent text-sm truncate">{selected.title || '(untitled)'}</h3>
+            <button class="text-[10px] px-2 py-0.5 border border-err/60 text-err rounded shrink-0" on:click={dropSelected}>Delete</button>
+          </div>
           <p class="text-muted text-[10px] mt-1">{selected.source}{selected.doc_type ? ` · ${selected.doc_type}` : ''}</p>
           {#if selected.url}
             <a href={selected.url} target="_blank" rel="noopener" class="text-accent text-[10px] underline">{selected.url}</a>

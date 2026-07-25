@@ -65,3 +65,10 @@ export function searchKnowledge(
     body: JSON.stringify({ query, limit })
   });
 }
+
+export function deleteKnowledgeBatch(ids: string[]): Promise<{ ok: boolean; deleted: number }> {
+  return jsonFetch('/knowledge/delete_batch', {
+    method: 'POST',
+    body: JSON.stringify({ ids })
+  });
+}
