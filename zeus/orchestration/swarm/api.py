@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from zeus.orchestration.swarm import config, dag
 from zeus.orchestration.swarm.coordinator import Coordinator
@@ -26,6 +26,13 @@ class ApproveBody(BaseModel):
     approve: bool = True
 
 
+class PlanBody(BaseModel):
+    goal: str
+    repo: str
+    budget_usd: float = 10.0
+    max_parallel: int = 3
+
+
 def _store(request: Request) -> SwarmStore:
     s: SwarmStore | None = getattr(request.app.state, "swarm_store", None)
     if s is None:
@@ -38,6 +45,13 @@ def _coordinator(request: Request) -> Coordinator:
     if c is None:
         raise HTTPException(503, detail="Swarm is not enabled (ZEUS_SWARM_ENABLED)")
     return c
+
+
+def _planner(request: Request):
+    p = getattr(request.app.state, "swarm_planner", None)
+    if p is None:
+        raise HTTPException(503, detail="Swarm planner is not configured")
+    return p
 
 
 def _validate_repo(repo: str) -> str:
@@ -64,6 +78,25 @@ async def create_run(spec: RunSpec, request: Request) -> RunView:
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc)) from exc
     spec = spec.model_copy(update={"repo": _validate_repo(spec.repo)})
+    return await _store(request).create_run(spec)
+
+
+@router.post("/plan", response_model=RunView)
+async def plan_run(body: PlanBody, request: Request) -> RunView:
+    """Metis: scope a goal into a task DAG, then create a run awaiting plan approval."""
+    repo = _validate_repo(body.repo)
+    try:
+        specs = await _planner(request).plan(body.goal, repo)
+    except Exception as exc:  # noqa: BLE001 - planner (LLM) failures surface as 502
+        raise HTTPException(502, detail=f"planner failed: {exc}") from exc
+    try:
+        dag.assert_acyclic(specs)  # type: ignore[arg-type]
+        spec = RunSpec(
+            goal=body.goal, repo=repo, nodes=specs,
+            budget_usd=body.budget_usd, max_parallel=body.max_parallel,
+        )
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(422, detail=f"planner produced an invalid DAG: {exc}") from exc
     return await _store(request).create_run(spec)
 
 

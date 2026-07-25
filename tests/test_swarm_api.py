@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from zeus.orchestration.swarm.api import router
 from zeus.orchestration.swarm.coordinator import Coordinator
+from zeus.orchestration.swarm.planner import StubPlanner
 from zeus.orchestration.swarm.store import SwarmStore
 from zeus.orchestration.swarm.worker import StubWorker
 
@@ -18,6 +19,7 @@ def _client() -> TestClient:
     app = FastAPI()
     app.state.swarm_store = store
     app.state.swarm_coordinator = Coordinator(store, StubWorker())
+    app.state.swarm_planner = StubPlanner()
     app.include_router(router)
     return TestClient(app)
 
@@ -82,6 +84,29 @@ def test_rejects_cyclic_dag(monkeypatch, tmp_path):
         ],
     })
     assert r.status_code == 422
+
+
+def test_plan_scopes_goal_into_run(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", str(tmp_path))
+    c = _client()
+    r = c.post("/swarm/plan", json={"goal": "add a /health endpoint", "repo": str(tmp_path)})
+    assert r.status_code == 200, r.text
+    view = r.json()
+    assert view["run"]["status"] == "pending_plan_approval"
+    # StubPlanner's fixed DAG
+    assert [n["id"] for n in view["nodes"]] == ["implement", "verify"]
+
+    # The Metis-proposed plan IS what you approve at gate 1; then it runs.
+    plan = _pending(view, "plan")
+    r = c.post(f"/swarm/runs/{view['run']['id']}/approve",
+               json={"approval_id": plan["id"], "approve": True})
+    assert r.json()["run"]["status"] == "pending_final_approval"
+
+
+def test_plan_rejects_repo_off_allowlist(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", str(tmp_path))
+    c = _client()
+    assert c.post("/swarm/plan", json={"goal": "x", "repo": "/etc"}).status_code == 422
 
 
 def test_missing_run_404():

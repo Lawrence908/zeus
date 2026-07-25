@@ -185,6 +185,7 @@ async def lifespan(app: FastAPI):
     # Sandboxed Claude Code workers replace the stub in P1.
     app.state.swarm_store = None
     app.state.swarm_coordinator = None
+    app.state.swarm_planner = None
     if os.getenv("ZEUS_SWARM_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
         import logging as _logging
 
@@ -210,9 +211,15 @@ async def lifespan(app: FastAPI):
 
                 sw_worker = ClaudeCodeWorker()
             sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
+            from zeus.orchestration.swarm.planner import ClaudePlanner
+
+            app.state.swarm_planner = ClaudePlanner()
         else:
             sw_worker = StubWorker()
             sw_factory = None
+            from zeus.orchestration.swarm.planner import StubPlanner
+
+            app.state.swarm_planner = StubPlanner()
         app.state.swarm_coordinator = Coordinator(sw_store, sw_worker, sw_factory)  # type: ignore[arg-type]
         _logging.getLogger("zeus.swarm").info(
             "Argo swarm enabled (worker=%s, db=%s)", sw_kind, sw_db_path
