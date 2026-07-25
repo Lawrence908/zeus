@@ -36,6 +36,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [kronos-frontend-plan.md](kronos-frontend-plan.md) | product | `/jobs` dashboard plan for the React SPA: jobs table, detail drawer, cron builder, live execution feed. |
 | [kronos-job-catalog.md](kronos-job-catalog.md) | ticket | Brainstorm of useful scheduled jobs grouped by domain, with tools each needs (existing vs to-build) and a recommended build order. Use as the planning surface when picking the next Kronos work item. |
 | [nemoclaw-ops.md](nemoclaw-ops.md) | ops | NemoClaw + OpenShell templated runbook: SSH tunnels, inference routing, policies, backups. Fill in your own host names and paths. |
+| [swarm-orchestration-plan.md](swarm-orchestration-plan.md) | product | Argo swarm-orchestration plan: Metis planner + Argo coordinator dispatching sandboxed Claude Code workers (argonauts) on git worktrees, PR-per-task, under checkpoint approvals. Phased build on AgentRuntime/TaskRunner/bus + OpenShell sandbox. |
 | [claude-code-architecture-notes.md](claude-code-architecture-notes.md) | product | External analysis of Claude Code architecture patterns that informed Zeus's design. |
 | [zeus-mcp-tool-expansion-prompt.md](zeus-mcp-tool-expansion-prompt.md) | bootstrap | Triage prompt for a Claude Code session to review candidate MCP tools, flag safety/deps, and pick which ones become Linear tickets. |
 
