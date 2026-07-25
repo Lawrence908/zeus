@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from zeus.orchestration.swarm.models import NodeStatus, TaskNode
 
-_TERMINAL = {NodeStatus.SUCCEEDED, NodeStatus.FAILED, NodeStatus.SKIPPED}
+_TERMINAL = {
+    NodeStatus.SUCCEEDED,
+    NodeStatus.FAILED,
+    NodeStatus.SKIPPED,
+    NodeStatus.UNREACHABLE,
+}
 
 
 def assert_acyclic(nodes: list[TaskNode]) -> None:
@@ -59,17 +64,17 @@ def dispatchable(nodes: list[TaskNode]) -> list[TaskNode]:
     return [n for n in nodes if n.status == NodeStatus.READY]
 
 
-def is_complete(nodes: list[TaskNode]) -> bool:
-    """Every node terminal and none failed (skips allowed)."""
-    return all(n.status in _TERMINAL for n in nodes) and not has_failure(nodes)
+def all_settled(nodes: list[TaskNode]) -> bool:
+    """Every node has reached a terminal state (nothing left to schedule)."""
+    return all(n.status in _TERMINAL for n in nodes)
+
+
+def any_succeeded(nodes: list[TaskNode]) -> bool:
+    return any(n.status == NodeStatus.SUCCEEDED for n in nodes)
 
 
 def has_failure(nodes: list[TaskNode]) -> bool:
     return any(n.status == NodeStatus.FAILED for n in nodes)
-
-
-def all_terminal(nodes: list[TaskNode]) -> bool:
-    return all(n.status in _TERMINAL for n in nodes)
 
 
 def descendants(node_id: str, nodes: list[TaskNode]) -> list[TaskNode]:

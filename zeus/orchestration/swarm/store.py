@@ -61,11 +61,14 @@ class SwarmStore:
                     acceptance        TEXT NOT NULL,
                     tool_scope        TEXT NOT NULL,
                     requires_approval INTEGER NOT NULL,
+                    max_attempts      INTEGER NOT NULL DEFAULT 1,
                     status            TEXT NOT NULL,
                     attempts          INTEGER NOT NULL,
                     worker_id         TEXT,
                     output            TEXT,
                     error             TEXT,
+                    cost_usd          REAL NOT NULL DEFAULT 0,
+                    session_id        TEXT,
                     updated_at        TEXT NOT NULL,
                     PRIMARY KEY (run_id, id)
                 )
@@ -115,11 +118,14 @@ class SwarmStore:
             acceptance=r["acceptance"],
             tool_scope=json.loads(r["tool_scope"]),
             requires_approval=bool(r["requires_approval"]),
+            max_attempts=r["max_attempts"],
             status=NodeStatus(r["status"]),
             attempts=r["attempts"],
             worker_id=r["worker_id"],
             output=r["output"],
             error=r["error"],
+            cost_usd=r["cost_usd"],
+            session_id=r["session_id"],
             updated_at=r["updated_at"],
         )
 
@@ -163,12 +169,13 @@ class SwarmStore:
                 status = NodeStatus.READY if not n.deps else NodeStatus.BLOCKED
                 conn.execute(
                     "INSERT INTO swarm_nodes (run_id, id, title, deps, acceptance, tool_scope,"
-                    " requires_approval, status, attempts, worker_id, output, error, updated_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " requires_approval, max_attempts, status, attempts, worker_id, output, error,"
+                    " cost_usd, session_id, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         run.id, n.id, n.title, json.dumps(n.deps), n.acceptance,
-                        json.dumps(n.tool_scope), int(n.requires_approval), status.value,
-                        0, None, None, None, now,
+                        json.dumps(n.tool_scope), int(n.requires_approval), n.max_attempts,
+                        status.value, 0, None, None, None, 0.0, None, now,
                     ),
                 )
             # Gate 1: the plan itself must be approved before anything runs.
@@ -233,9 +240,11 @@ class SwarmStore:
         with self._connect() as conn:
             conn.execute(
                 "UPDATE swarm_nodes SET status = ?, attempts = ?, worker_id = ?, output = ?,"
-                " error = ?, requires_approval = ?, updated_at = ? WHERE run_id = ? AND id = ?",
+                " error = ?, requires_approval = ?, cost_usd = ?, session_id = ?, updated_at = ?"
+                " WHERE run_id = ? AND id = ?",
                 (node.status.value, node.attempts, node.worker_id, node.output,
-                 node.error, int(node.requires_approval), _now_iso(), node.run_id, node.id),
+                 node.error, int(node.requires_approval), node.cost_usd, node.session_id,
+                 _now_iso(), node.run_id, node.id),
             )
 
     async def create_approval(

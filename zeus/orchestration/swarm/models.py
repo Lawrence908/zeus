@@ -17,7 +17,8 @@ class RunStatus(str, Enum):
     RUNNING = "running"
     PENDING_FINAL_APPROVAL = "pending_final_approval"  # gate 3: approve the merge
     COMPLETED = "completed"
-    FAILED = "failed"
+    COMPLETED_PARTIAL = "completed_partial"  # fail-open: some nodes failed/unreachable
+    FAILED = "failed"  # nothing succeeded
     CANCELLED = "cancelled"
     PAUSED_BUDGET = "paused_budget"
 
@@ -28,8 +29,9 @@ class NodeStatus(str, Enum):
     PENDING_APPROVAL = "pending_approval"  # gate 2: approve a write/risky node
     RUNNING = "running"
     SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    SKIPPED = "skipped"
+    FAILED = "failed"  # exhausted attempts
+    SKIPPED = "skipped"  # write gate rejected
+    UNREACHABLE = "unreachable"  # a dependency failed (fail-open)
 
 
 class ApprovalKind(str, Enum):
@@ -58,6 +60,7 @@ class TaskNodeSpec(BaseModel):
     acceptance: str = ""  # human/verifier acceptance note (verifier lands in P3)
     tool_scope: list[str] = Field(default_factory=list)  # min tools this node may use
     requires_approval: bool = False  # gate 2 before this node runs
+    max_attempts: int = Field(default=1, ge=1, le=5)  # retry budget (loop lands in P1)
 
     @field_validator("id")
     @classmethod
@@ -104,11 +107,14 @@ class TaskNode(BaseModel):
     acceptance: str = ""
     tool_scope: list[str] = Field(default_factory=list)
     requires_approval: bool = False
+    max_attempts: int = 1
     status: NodeStatus = NodeStatus.BLOCKED
     attempts: int = 0
     worker_id: str | None = None
     output: str | None = None
     error: str | None = None
+    cost_usd: float = 0.0
+    session_id: str | None = None  # Claude Code session (for transcript + ledger)
     updated_at: str = ""
 
 

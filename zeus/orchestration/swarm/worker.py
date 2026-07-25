@@ -20,6 +20,9 @@ class WorkerResult(BaseModel):
     success: bool
     output: str = ""
     error: str | None = None
+    # From `claude -p` result JSON: feeds the usage ledger + kill-switch budget.
+    cost_usd: float = 0.0
+    session_id: str | None = None
 
 
 class Worker(Protocol):

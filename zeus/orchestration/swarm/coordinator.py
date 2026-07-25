@@ -60,13 +60,18 @@ class Coordinator:
             view = await self._store.get_view(run_id)
             assert view is not None
 
-            if dag.has_failure(view.nodes):
-                await self._store.set_run_status(run_id, RunStatus.FAILED)
-                logger.warning("swarm run %s failed", run_id)
-                break
-            if dag.is_complete(view.nodes):
-                await self._store.create_approval(run_id, ApprovalKind.FINAL)
-                await self._store.set_run_status(run_id, RunStatus.PENDING_FINAL_APPROVAL)
+            if dag.all_settled(view.nodes):
+                # Fail-open: if anything succeeded, deliver that subgraph through the
+                # final gate. Otherwise distinguish a real failure from a run whose
+                # work was all rejected away (nothing failed, nothing to deliver).
+                if dag.any_succeeded(view.nodes):
+                    await self._store.create_approval(run_id, ApprovalKind.FINAL)
+                    await self._store.set_run_status(run_id, RunStatus.PENDING_FINAL_APPROVAL)
+                elif dag.has_failure(view.nodes):
+                    await self._store.set_run_status(run_id, RunStatus.FAILED)
+                    logger.warning("swarm run %s failed (no node succeeded)", run_id)
+                else:
+                    await self._store.set_run_status(run_id, RunStatus.CANCELLED)
                 break
             if not progressed:
                 break  # waiting on an approval gate (nothing else dispatchable)
@@ -103,13 +108,19 @@ class Coordinator:
             progressed = True
 
             result = await self._worker.run(n, run)
+            n.cost_usd = result.cost_usd
+            n.session_id = result.session_id
             if result.success:
                 n.status = NodeStatus.SUCCEEDED
                 n.output = result.output
+                await self._store.update_node(n)
             else:
+                # TODO(P1): retry up to n.max_attempts before giving up.
                 n.status = NodeStatus.FAILED
                 n.error = result.error or "worker reported failure"
-            await self._store.update_node(n)
+                await self._store.update_node(n)
+                # Fail-open: strand everything downstream, keep the rest running.
+                await self._mark_unreachable(n, nodes)
 
         return progressed
 
@@ -142,9 +153,16 @@ class Coordinator:
             return await self.advance(run_id)
 
         elif ap.kind == ApprovalKind.FINAL:
-            await self._store.set_run_status(
-                run_id, RunStatus.COMPLETED if approve else RunStatus.CANCELLED
-            )
+            if approve:
+                view = await self._store.get_view(run_id)
+                all_ok = view is not None and all(
+                    n.status == NodeStatus.SUCCEEDED for n in view.nodes
+                )
+                await self._store.set_run_status(
+                    run_id, RunStatus.COMPLETED if all_ok else RunStatus.COMPLETED_PARTIAL
+                )
+            else:
+                await self._store.set_run_status(run_id, RunStatus.CANCELLED)
 
         return await self._store.get_view(run_id)
 
@@ -159,11 +177,25 @@ class Coordinator:
         await self._store.set_run_status(run_id, RunStatus.CANCELLED)
         return await self._store.get_view(run_id)
 
+    _TERMINAL = (
+        NodeStatus.SUCCEEDED,
+        NodeStatus.FAILED,
+        NodeStatus.SKIPPED,
+        NodeStatus.UNREACHABLE,
+    )
+
     async def _skip_cascade(self, node: TaskNode, nodes: list[TaskNode]) -> None:
         """Reject a node: skip it and every node that (transitively) depends on it."""
         node.status = NodeStatus.SKIPPED
         await self._store.update_node(node)
         for d in dag.descendants(node.id, nodes):
-            if d.status not in (NodeStatus.SUCCEEDED, NodeStatus.FAILED):
+            if d.status not in self._TERMINAL:
                 d.status = NodeStatus.SKIPPED
+                await self._store.update_node(d)
+
+    async def _mark_unreachable(self, node: TaskNode, nodes: list[TaskNode]) -> None:
+        """Fail-open: a node failed, so its transitive dependents can never run."""
+        for d in dag.descendants(node.id, nodes):
+            if d.status not in self._TERMINAL:
+                d.status = NodeStatus.UNREACHABLE
                 await self._store.update_node(d)

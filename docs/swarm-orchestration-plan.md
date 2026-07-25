@@ -12,9 +12,9 @@ Working name: **Argo** (the quest engine); workers are **argonauts**; the scoper
 | Autonomy (v1) | Checkpoint approvals - plan approval + approval on risky/write actions |
 | Worker substrate | Hybrid - Zeus orchestrator + Claude Code / Agent SDK workers |
 | Isolation | Container / OS sandbox (OpenShell gateway / NemoClaw), git worktree per task |
-| Repo scope | **Any project under `~/`** (dev-scoped: edit code + open PRs; never deploy/restart services) |
-| Worker invocation | **Claude Code CLI, headless** (`claude -p …`) in the sandbox container |
-| Merge strategy | **PR-per-task** - each passing node → branch → PR for your review/merge |
+| Repo scope | **Allowlist config of absolute repo paths**, ships with just `~/zeus` (`ZEUS_SWARM_REPO_ALLOWLIST`). Adding canary/AstrID later is a config edit. |
+| Worker invocation | **Claude Code CLI, headless** (`claude -p --output-format stream-json`) in the sandbox container |
+| Merge strategy | **Per-run integration branch** `swarm/run-<id>` (commit-per-node); one PR out at the end |
 
 ## What we build on (existing substrate)
 
@@ -79,17 +79,23 @@ Working name: **Argo** (the quest engine); workers are **argonauts**; the scoper
 
 ## Phasing
 
-- **Phase 0 - Foundations.** DAG task model + durable run store; `/swarm/*` API skeleton; approval-gate primitive; dispatch to a **stub** worker (no sandbox yet). Verifies the state machine + gates end-to-end.
-- **Phase 1 - One sandboxed worker.** A single Claude Code argonaut in a NemoClaw/OpenShell container on a git worktree completes **one** scoped task with an acceptance check, Gate 2, and Aegis. Proves the worker + sandbox + merge path.
+- **Phase 0 - Foundations (done).** DAG task model + durable run store; `/swarm/*` API; approval-gate primitive; repo allowlist + self-edit denylist config; **fail-open** semantics; dispatch to a **stub** worker. State machine + gates verified end-to-end (15 tests).
+- **Phase 1a - Worker seam (host).** Replace the stub with a real Claude Code argonaut: `claude -p --output-format stream-json` on a **git worktree** of `~/zeus`, scoped `--allowedTools`, capture `session_id`/`total_cost_usd`, run on the **host** first (Aegis + denylist diff-check, no container). Merge the worktree into `swarm/run-<id>`. This is where the seam + integration-branch + PR path get proven cheaply.
+- **Phase 1b - Sandbox.** Move the same worker into a NemoClaw/OpenShell container. Budget explicitly for **auth (credentials into the sandbox) and egress to `api.anthropic.com`** - that is what stalls this phase, not the agent. The worker contract is unchanged from 1a.
 - **Phase 2 - Scoper + sequential DAG.** Metis turns a goal into spec + DAG; Gate 1; coordinator runs the DAG respecting deps (still 1 worker).
-- **Phase 3 - Parallel + verify loop.** N parallel argonauts; verifier-driven iterate-to-done; budgets + kill-switch.
+- **Phase 3 - Parallel + verify loop.** N parallel argonauts; verifier-driven iterate-to-done; retries -> fail-open; budgets + kill-switch (thresholding on `total_cost_usd`).
 - **Phase 4 - UX + resilience.** Zeus OS Swarm app, Telegram approvals, metrics, durable resume after restart.
+
+**Naming:** `argo` collides with Argo Workflows / Argo CD (which may run on this homelab). `Argo` coordinator + `argonauts` workers is kept, but env/config are namespaced `ZEUS_SWARM_*` to avoid friction.
 
 ## Resolved
 
-- **Repo scope:** any project under `~/`. Still **dev-scoped** - argonauts edit source in worktrees and open PRs; they never run deploy/restart/`docker` against live services. Editing an infra file (e.g. `services/*/compose.yaml`) in a worktree → PR is allowed; a human merges + deploys.
-- **Worker invocation:** Claude Code CLI, headless (`claude -p` with a scoped allowed-tools set + per-task system prompt), one process per node inside its sandbox container. See `docs/claude-code-architecture-notes.md`.
-- **Merge strategy:** PR-per-task. Each node that passes acceptance → its worktree branch is pushed → a PR is opened (linked in the run store / Swarm UI). Gate 3 becomes "review the open PRs."
+- **Repo scope:** an allowlist of absolute repo paths (`ZEUS_SWARM_REPO_ALLOWLIST`, `zeus/orchestration/swarm/config.py`), shipping with just `~/zeus`. "Anything under `~/`" is rejected: `~` holds non-repos, `.ssh`, and stray `.env` files, and a worktree needs a git repo anyway. Two things fall out of targeting the zeus repo:
+  - Worktrees only check out **tracked** files. `zeus/data/` is gitignored, so a worker's workspace never contains the context pack, the Obsidian mirror, or the SQLite ledgers - a privacy boundary for free, and a second reason to use worktrees over pointing a container at the live tree.
+  - A worker editing the zeus repo can edit the thing supervising it. A **path denylist** (`ZEUS_SWARM_PATH_DENYLIST`, default `zeus/safety/policies/**`, `zeus/orchestration/**`, `.env*`) is enforced by the coordinator on the worker's **diff** (P1b), not just via tool args. An agent that can weaken its own Aegis policy has no Aegis policy.
+- **Worker invocation:** Claude Code CLI, headless: `claude -p --output-format stream-json`, with `--allowedTools`, `--permission-mode`, and `--max-turns` as the safety surface. The result JSON carries `session_id` and `total_cost_usd`, which drop into the usage ledger and give the kill-switch a real threshold (both already on the `WorkerResult` / `TaskNode` models). The `Worker` protocol is the seam - CLI now, SDK later without touching the coordinator. Set `ANTHROPIC_API_KEY` regardless (overrides subscription auth, makes spend attributable per run). Transcripts land as JSONL under `~/.claude/projects/<escaped-repo-path>/`; capture cost/session from the result object and, for question-asking, have the worker write its question set to a repo markdown file rather than blocking.
+- **Merge strategy:** PR-per-task and a task DAG conflict (if B depends on A, B's worktree needs A's changes; gating that on review stalls the run at the first dependency edge). Instead: the coordinator merges each passing node's worktree into a per-run integration branch `swarm/run-<id>` (one commit per node); dependent nodes branch from the integration branch so the DAG flows; at the end, one PR from `swarm/run-<id>` to `main`. Artifact = batched PR per run; internal mechanism = auto-merge; diff is reviewable commit-by-commit. The two gates stay put: plan approval in, merge approval out.
+- **Fail-open:** when a node exhausts its retries it does not fail the run. The coordinator marks the node `failed`, marks its transitive dependents `unreachable`, and keeps scheduling the rest; the run settles to `completed_partial` (delivering the passing subgraph) unless nothing succeeded. Built into the P0 model (`RunStatus.COMPLETED_PARTIAL`, `NodeStatus.UNREACHABLE`), not bolted on.
 
 ## Proposed defaults (adjust anytime)
 

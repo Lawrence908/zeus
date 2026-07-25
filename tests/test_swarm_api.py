@@ -29,12 +29,12 @@ def _pending(view: dict, kind: str, node_id=None):
     return None
 
 
-def test_create_approve_complete_over_http():
+def test_create_approve_complete_over_http(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", str(tmp_path))
     c = _client()
-    home = os.path.expanduser("~")
     r = c.post("/swarm/runs", json={
         "goal": "do the thing",
-        "repo": home,
+        "repo": str(tmp_path),
         "nodes": [
             {"id": "a", "title": "step a"},
             {"id": "b", "title": "step b", "deps": ["a"]},
@@ -62,7 +62,8 @@ def test_create_approve_complete_over_http():
     assert c.get(f"/swarm/runs/{run_id}").json()["run"]["status"] == "completed"
 
 
-def test_rejects_repo_outside_home():
+def test_rejects_repo_off_allowlist(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", str(tmp_path))
     c = _client()
     r = c.post("/swarm/runs", json={
         "goal": "x", "repo": "/etc", "nodes": [{"id": "a", "title": "a"}],
@@ -70,10 +71,11 @@ def test_rejects_repo_outside_home():
     assert r.status_code == 422
 
 
-def test_rejects_cyclic_dag():
+def test_rejects_cyclic_dag(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", str(tmp_path))
     c = _client()
     r = c.post("/swarm/runs", json={
-        "goal": "x", "repo": os.path.expanduser("~"),
+        "goal": "x", "repo": str(tmp_path),
         "nodes": [
             {"id": "a", "title": "a", "deps": ["b"]},
             {"id": "b", "title": "b", "deps": ["a"]},

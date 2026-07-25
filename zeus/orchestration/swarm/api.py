@@ -13,7 +13,7 @@ import os
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from zeus.orchestration.swarm import dag
+from zeus.orchestration.swarm import config, dag
 from zeus.orchestration.swarm.coordinator import Coordinator
 from zeus.orchestration.swarm.models import Run, RunSpec, RunView
 from zeus.orchestration.swarm.store import SwarmStore
@@ -41,15 +41,13 @@ def _coordinator(request: Request) -> Coordinator:
 
 
 def _validate_repo(repo: str) -> str:
-    """Repo must resolve to a path under the home directory (dev-scoped)."""
-    expanded = os.path.expanduser(repo)
-    if not os.path.isabs(expanded):
-        raise HTTPException(422, detail="repo must be an absolute path (or ~-relative)")
-    real = os.path.realpath(expanded)
-    home = os.path.realpath(os.path.expanduser("~"))
-    if real != home and not real.startswith(home + os.sep):
-        raise HTTPException(422, detail="repo must be under the home directory")
-    return real
+    """Repo must be on the configured allowlist (ships with just the zeus repo)."""
+    if not config.repo_allowed(repo):
+        raise HTTPException(
+            422,
+            detail=f"repo not on the swarm allowlist (ZEUS_SWARM_REPO_ALLOWLIST): {repo!r}",
+        )
+    return os.path.realpath(os.path.expanduser(repo))
 
 
 @router.get("/health")

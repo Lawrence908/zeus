@@ -36,6 +36,16 @@ class FailingWorker:
         return WorkerResult(success=False, error="boom")
 
 
+class SelectiveFailWorker:
+    def __init__(self, fail_ids):
+        self.fail_ids = set(fail_ids)
+
+    async def run(self, node, run) -> WorkerResult:
+        if node.id in self.fail_ids:
+            return WorkerResult(success=False, error=f"{node.id} boom")
+        return WorkerResult(success=True, output="ok")
+
+
 # ---------------------------------------------------------------------------
 # Happy path with a node-write gate
 # ---------------------------------------------------------------------------
@@ -123,11 +133,12 @@ def test_reject_node_write_cascade_skips_descendants():
         view = await coord.resolve(view.run.id, plan.id, approve=True)
         gate = view.pending_approval(ApprovalKind.NODE_WRITE, node_id="a")
 
-        # Reject a -> a skipped, b (its descendant) skipped -> run completes with skips.
+        # Reject a -> a skipped, b (its descendant) skipped. Nothing succeeded and
+        # nothing failed, so the run is cancelled (no subgraph to deliver).
         view = await coord.resolve(view.run.id, gate.id, approve=False)
         assert _status(view, "a") == NodeStatus.SKIPPED
         assert _status(view, "b") == NodeStatus.SKIPPED
-        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+        assert view.run.status == RunStatus.CANCELLED
 
     asyncio.run(scenario())
 
@@ -137,7 +148,7 @@ def test_reject_node_write_cascade_skips_descendants():
 # ---------------------------------------------------------------------------
 
 
-def test_worker_failure_fails_run():
+def test_worker_failure_with_no_survivors_fails_run():
     store, _, path = _fresh()
     coord = Coordinator(store, FailingWorker())
 
@@ -148,7 +159,34 @@ def test_worker_failure_fails_run():
         plan = view.pending_approval(ApprovalKind.PLAN)
         view = await coord.resolve(view.run.id, plan.id, approve=True)
         assert _status(view, "a") == NodeStatus.FAILED
-        assert view.run.status == RunStatus.FAILED
+        assert view.run.status == RunStatus.FAILED  # nothing succeeded
+
+    asyncio.run(scenario())
+
+
+def test_fail_open_delivers_passing_subgraph():
+    store, _, _ = _fresh()
+    coord = Coordinator(store, SelectiveFailWorker({"b"}))
+
+    async def scenario():
+        # a is an independent root; b fails and strands its dependent c.
+        spec = RunSpec(
+            goal="x",
+            repo=os.path.expanduser("~"),
+            nodes=[_node("a"), _node("b"), _node("c", deps=["b"])],
+        )
+        view = await store.create_run(spec)
+        plan = view.pending_approval(ApprovalKind.PLAN)
+        view = await coord.resolve(view.run.id, plan.id, approve=True)
+
+        assert _status(view, "a") == NodeStatus.SUCCEEDED
+        assert _status(view, "b") == NodeStatus.FAILED
+        assert _status(view, "c") == NodeStatus.UNREACHABLE  # fail-open, not a run failure
+        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+
+        final = view.pending_approval(ApprovalKind.FINAL)
+        view = await coord.resolve(view.run.id, final.id, approve=True)
+        assert view.run.status == RunStatus.COMPLETED_PARTIAL
 
     asyncio.run(scenario())
 
