@@ -95,7 +95,13 @@
     refreshApps();
     query = '';
     selected = 0;
-    tick().then(() => inputEl?.focus());
+    // Only steal focus (and pop the on-screen keyboard) on desktop. On mobile
+    // the launcher is a bottom sheet you tap through, so leave the input unfocused.
+    tick().then(() => {
+      if (typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches) {
+        inputEl?.focus();
+      }
+    });
   }
 
   function pick(i: number) {
@@ -126,17 +132,21 @@
 
 {#if open}
   <div
-    class="absolute inset-0 z-40 flex items-start justify-center pt-[15vh]"
+    class="absolute inset-0 z-40 flex items-end justify-center md:items-start md:pt-[15vh]"
     style="background: rgb(0 0 0 / 0.35); backdrop-filter: blur(6px);"
     role="presentation"
     on:click|self={() => (open = false)}
     transition:fade={{ duration: 120 }}
   >
     <div
-      class="surface-blur rounded-2xl shadow-2xl w-[min(640px,92vw)] overflow-hidden border border-border/40"
+      class="surface-blur shadow-2xl overflow-hidden border border-border/40 flex flex-col
+             w-full rounded-t-2xl max-h-[80vh]
+             md:w-[min(640px,92vw)] md:rounded-2xl md:max-h-[70vh]"
       transition:scale={{ duration: 220, start: 0.96, easing: cubicOut }}
     >
-      <div class="p-3 border-b border-border/40">
+      <!-- mobile grab handle -->
+      <div class="md:hidden mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-muted/40 shrink-0"></div>
+      <div class="p-3 border-b border-border/40 shrink-0">
         <input
           bind:this={inputEl}
           bind:value={query}
@@ -145,7 +155,7 @@
           class="w-full bg-transparent text-fg placeholder:text-muted/70 outline-none text-base font-mono"
         />
       </div>
-      <ul class="max-h-[50vh] overflow-y-auto">
+      <ul class="flex-1 min-h-0 overflow-y-auto">
         {#each filtered as e, i (e.id)}
           <li>
             <button
@@ -164,7 +174,7 @@
           <li class="px-4 py-6 text-center text-muted text-sm">No matches.</li>
         {/each}
       </ul>
-      <footer class="px-4 py-2 text-[10px] text-muted border-t border-border/40 flex justify-between">
+      <footer class="px-4 py-2 text-[10px] text-muted border-t border-border/40 justify-between shrink-0 hidden md:flex">
         <span><kbd>↑</kbd>/<kbd>↓</kbd> select &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> close &nbsp;·&nbsp; modifier: <span class="text-fg">{MODIFIER_LABEL[modifier]}</span></span>
         <span>{filtered.length} / {entries.length}</span>
       </footer>

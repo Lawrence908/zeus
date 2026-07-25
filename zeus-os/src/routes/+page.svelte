@@ -234,7 +234,9 @@
   });
 </script>
 
-<div class="h-screen w-screen overflow-hidden">
+<!-- Use dynamic viewport height so the bottom dock (+ launcher) stays on-screen on
+     mobile — 100vh sits behind the browser URL bar and pushes the dock below the fold. -->
+<div class="w-screen overflow-hidden" style="height: 100vh; height: 100dvh;">
   {#if isMobile}
     <MobileShell
       {modifier}

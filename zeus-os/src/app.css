@@ -66,6 +66,13 @@ html,
 body {
   height: 100%;
   margin: 0;
+  /* Lock the shell to the viewport; the app owns all scrolling internally. */
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  height: 100dvh;
 }
 
 body {
