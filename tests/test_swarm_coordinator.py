@@ -32,7 +32,7 @@ def _status(view, nid):
 
 
 class FailingWorker:
-    async def run(self, node, run) -> WorkerResult:
+    async def run(self, node, run, workspace=None) -> WorkerResult:
         return WorkerResult(success=False, error="boom")
 
 
@@ -40,7 +40,7 @@ class SelectiveFailWorker:
     def __init__(self, fail_ids):
         self.fail_ids = set(fail_ids)
 
-    async def run(self, node, run) -> WorkerResult:
+    async def run(self, node, run, workspace=None) -> WorkerResult:
         if node.id in self.fail_ids:
             return WorkerResult(success=False, error=f"{node.id} boom")
         return WorkerResult(success=True, output="ok")

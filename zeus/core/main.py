@@ -196,8 +196,21 @@ async def lifespan(app: FastAPI):
         os.makedirs(os.path.dirname(sw_db_path) or ".", exist_ok=True)
         sw_store = SwarmStore(sw_db_path)
         app.state.swarm_store = sw_store
-        app.state.swarm_coordinator = Coordinator(sw_store, StubWorker())
-        _logging.getLogger("zeus.swarm").info("Argo swarm enabled (stub worker, db=%s)", sw_db_path)
+
+        sw_kind = os.getenv("ZEUS_SWARM_WORKER", "stub").strip().lower()
+        if sw_kind == "claude":
+            from zeus.orchestration.swarm.claude_worker import ClaudeCodeWorker
+            from zeus.orchestration.swarm.worktree import CodeWorkspace
+
+            sw_worker: object = ClaudeCodeWorker()
+            sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
+        else:
+            sw_worker = StubWorker()
+            sw_factory = None
+        app.state.swarm_coordinator = Coordinator(sw_store, sw_worker, sw_factory)  # type: ignore[arg-type]
+        _logging.getLogger("zeus.swarm").info(
+            "Argo swarm enabled (worker=%s, db=%s)", sw_kind, sw_db_path
+        )
     if os.getenv("ZEUS_KRONOS_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
         try:
             from collections import deque as _deque

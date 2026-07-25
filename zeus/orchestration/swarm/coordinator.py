@@ -21,6 +21,7 @@ deterministic and easy to test.
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from zeus.orchestration.swarm import dag
 from zeus.orchestration.swarm.models import (
@@ -34,16 +35,27 @@ from zeus.orchestration.swarm.models import (
 )
 from zeus.orchestration.swarm.store import SwarmStore
 from zeus.orchestration.swarm.worker import Worker
+from zeus.orchestration.swarm.worktree import CodeWorkspace
 
 logger = logging.getLogger("zeus.swarm.coordinator")
 
 _MAX_ITERS = 10_000  # safety bound on the drive loop
 
+# Builds a per-run git workspace; None for the stub path (no worktree).
+WorkspaceFactory = Callable[[str, str], CodeWorkspace]
+
 
 class Coordinator:
-    def __init__(self, store: SwarmStore, worker: Worker) -> None:
+    def __init__(
+        self,
+        store: SwarmStore,
+        worker: Worker,
+        workspace_factory: WorkspaceFactory | None = None,
+    ) -> None:
         self._store = store
         self._worker = worker
+        self._workspace_factory = workspace_factory
+        self._workspaces: dict[str, CodeWorkspace] = {}
 
     # ---- driver ----------------------------------------------------------
 
@@ -65,13 +77,16 @@ class Coordinator:
                 # final gate. Otherwise distinguish a real failure from a run whose
                 # work was all rejected away (nothing failed, nothing to deliver).
                 if dag.any_succeeded(view.nodes):
+                    # Keep the workspace (integration branch) until the final gate.
                     await self._store.create_approval(run_id, ApprovalKind.FINAL)
                     await self._store.set_run_status(run_id, RunStatus.PENDING_FINAL_APPROVAL)
                 elif dag.has_failure(view.nodes):
                     await self._store.set_run_status(run_id, RunStatus.FAILED)
                     logger.warning("swarm run %s failed (no node succeeded)", run_id)
+                    await self._teardown_workspace(run_id)
                 else:
                     await self._store.set_run_status(run_id, RunStatus.CANCELLED)
+                    await self._teardown_workspace(run_id)
                 break
             if not progressed:
                 break  # waiting on an approval gate (nothing else dispatchable)
@@ -107,22 +122,36 @@ class Coordinator:
             capacity -= 1
             progressed = True
 
-            result = await self._worker.run(n, run)
+            ws = self._workspaces.get(run.id)
+            result = await self._worker.run(n, run, ws.path if ws else None)
             n.cost_usd = result.cost_usd
             n.session_id = result.session_id
-            if result.success:
+
+            if not result.success:
+                # TODO(P1b): retry up to n.max_attempts before giving up.
+                await self._fail(n, nodes, result.error or "worker reported failure")
+            elif ws is not None:
+                # Denylist-check the diff, then commit the node onto the run branch.
+                commit = await ws.commit_node(n)
+                if commit.denied:
+                    await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
+                else:
+                    n.status = NodeStatus.SUCCEEDED
+                    n.output = result.output
+                    await self._store.update_node(n)
+            else:
                 n.status = NodeStatus.SUCCEEDED
                 n.output = result.output
                 await self._store.update_node(n)
-            else:
-                # TODO(P1): retry up to n.max_attempts before giving up.
-                n.status = NodeStatus.FAILED
-                n.error = result.error or "worker reported failure"
-                await self._store.update_node(n)
-                # Fail-open: strand everything downstream, keep the rest running.
-                await self._mark_unreachable(n, nodes)
 
         return progressed
+
+    async def _fail(self, node: TaskNode, nodes: list[TaskNode], error: str) -> None:
+        node.status = NodeStatus.FAILED
+        node.error = error
+        await self._store.update_node(node)
+        # Fail-open: strand everything downstream, keep the rest running.
+        await self._mark_unreachable(node, nodes)
 
     # ---- gates -----------------------------------------------------------
 
@@ -135,6 +164,9 @@ class Coordinator:
         if ap.kind == ApprovalKind.PLAN:
             if approve:
                 await self._store.set_run_status(run_id, RunStatus.RUNNING)
+                view = await self._store.get_view(run_id)
+                if view is not None:
+                    await self._setup_workspace(view.run)
                 return await self.advance(run_id)
             await self._store.set_run_status(run_id, RunStatus.CANCELLED)
 
@@ -163,6 +195,8 @@ class Coordinator:
                 )
             else:
                 await self._store.set_run_status(run_id, RunStatus.CANCELLED)
+            # Integration branch stays for review; only the worktree is removed.
+            await self._teardown_workspace(run_id)
 
         return await self._store.get_view(run_id)
 
@@ -171,10 +205,11 @@ class Coordinator:
         if view is None:
             return None
         for n in view.nodes:
-            if n.status not in (NodeStatus.SUCCEEDED, NodeStatus.FAILED, NodeStatus.SKIPPED):
+            if n.status not in self._TERMINAL:
                 n.status = NodeStatus.SKIPPED
                 await self._store.update_node(n)
         await self._store.set_run_status(run_id, RunStatus.CANCELLED)
+        await self._teardown_workspace(run_id)
         return await self._store.get_view(run_id)
 
     _TERMINAL = (
@@ -183,6 +218,23 @@ class Coordinator:
         NodeStatus.SKIPPED,
         NodeStatus.UNREACHABLE,
     )
+
+    # ---- workspace lifecycle --------------------------------------------
+
+    async def _setup_workspace(self, run: Run) -> None:
+        if self._workspace_factory is None:
+            return
+        ws = self._workspace_factory(run.repo, run.id)
+        await ws.setup()
+        self._workspaces[run.id] = ws
+
+    async def _teardown_workspace(self, run_id: str, *, keep_branch: bool = True) -> None:
+        ws = self._workspaces.pop(run_id, None)
+        if ws is not None:
+            try:
+                await ws.teardown(keep_branch=keep_branch)
+            except Exception:  # best-effort; a dangling worktree is prunable
+                logger.exception("workspace teardown failed for run %s", run_id)
 
     async def _skip_cascade(self, node: TaskNode, nodes: list[TaskNode]) -> None:
         """Reject a node: skip it and every node that (transitively) depends on it."""
