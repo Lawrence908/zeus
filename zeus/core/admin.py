@@ -312,6 +312,43 @@ async def tools_invocations(
     }
 
 
+@router.post("/tools/invoke")
+async def tools_invoke(request: Request) -> dict[str, Any]:
+    """Manually run a chat-path registry tool (Zeus OS Tools app "try" form).
+
+    Routes through the same _execute_one path as the chat loop, so Aegis
+    arg/result gates and the invocation recorder all apply. Gated by the
+    same ZEUS_TOOLS_ENABLED flag as the loop; MCP-only tools are not
+    invokable here (they live in the separate stdio process).
+    """
+    import uuid
+
+    from zeus.core.tools import tools_enabled
+    from zeus.core.tools.base import ToolCall
+    from zeus.core.tools.loop import _execute_one
+
+    if not tools_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="chat-path tools are disabled (ZEUS_TOOLS_ENABLED=0)",
+        )
+    body = await request.json()
+    tool = body.get("tool")
+    arguments = body.get("arguments") or {}
+    if not isinstance(tool, str) or not tool:
+        raise HTTPException(status_code=422, detail="'tool' is required")
+    if not isinstance(arguments, dict):
+        raise HTTPException(status_code=422, detail="'arguments' must be an object")
+    call = ToolCall(call_id=f"manual-{uuid.uuid4().hex[:8]}", name=tool, arguments=arguments)
+    result = await _execute_one(call)
+    return {
+        "tool": result.name,
+        "content": result.content,
+        "is_error": result.is_error,
+        "duration_ms": result.duration_ms,
+    }
+
+
 @router.get("/llm_usage")
 async def admin_llm_usage(
     request: Request,

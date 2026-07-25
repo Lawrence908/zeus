@@ -27,8 +27,32 @@ export interface ToolInvocation {
   source?: string;
 }
 
-export function listTools(): Promise<{ tools: ToolDirEntry[]; count: number; tools_enabled?: boolean }> {
+export interface ToolsDirectory {
+  tools: ToolDirEntry[];
+  // Chat-path loop state (gates POST /admin/tools/invoke).
+  chat?: { enabled: boolean; max_calls_per_query: number; count: number };
+  mcp?: { write_enabled: boolean; count: number };
+}
+
+export function listTools(): Promise<ToolsDirectory> {
   return jsonFetch('/admin/tools');
+}
+
+export interface ToolInvokeResult {
+  tool: string;
+  content: string;
+  is_error: boolean;
+  duration_ms: number;
+}
+
+export function invokeTool(
+  tool: string,
+  args: Record<string, unknown>
+): Promise<ToolInvokeResult> {
+  return jsonFetch('/admin/tools/invoke', {
+    method: 'POST',
+    body: JSON.stringify({ tool, arguments: args })
+  });
 }
 
 export function listInvocations(opts: { limit?: number; tool?: string } = {}): Promise<{

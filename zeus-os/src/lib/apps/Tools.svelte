@@ -1,7 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import type { AppInstance } from '$lib/wm/tree';
-  import { listInvocations, listTools, type ToolDirEntry, type ToolInvocation } from '$lib/api/tools';
+  import {
+    invokeTool,
+    listInvocations,
+    listTools,
+    type ToolDirEntry,
+    type ToolInvocation,
+    type ToolInvokeResult
+  } from '$lib/api/tools';
 
   export let app: AppInstance;
   void app;
@@ -47,7 +54,8 @@
         }
       }
       tools = [...merged.values()];
-      toolsEnabled = (t as { tools_enabled?: boolean }).tools_enabled;
+      // Loop state lives under `chat.enabled` (gates POST /admin/tools/invoke).
+      toolsEnabled = t.chat?.enabled;
       invocations = inv.invocations ?? [];
       error = '';
       lastFetched = new Date().toLocaleTimeString();
@@ -108,6 +116,67 @@
       return '';
     }
   }
+
+  // ── try-tool form ──
+  let tryOpen = false;
+  let tryArgs = '{}';
+  let tryBusy = false;
+  let tryResult: ToolInvokeResult | null = null;
+  let tryError = '';
+
+  // Skeleton args from the JSON schema so the operator doesn't start from {}.
+  function schemaSkeleton(t: ToolDirEntry): string {
+    const props = (t.parameters as { properties?: Record<string, { type?: string; default?: unknown }> } | undefined)
+      ?.properties;
+    if (!props) return '{}';
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(props)) {
+      if (v.default !== undefined) out[k] = v.default;
+      else if (v.type === 'number' || v.type === 'integer') out[k] = 0;
+      else if (v.type === 'boolean') out[k] = false;
+      else if (v.type === 'array') out[k] = [];
+      else if (v.type === 'object') out[k] = {};
+      else out[k] = '';
+    }
+    return JSON.stringify(out, null, 2);
+  }
+
+  function openTry() {
+    if (!selected) return;
+    tryOpen = !tryOpen;
+    tryResult = null;
+    tryError = '';
+    if (tryOpen) tryArgs = schemaSkeleton(selected);
+  }
+
+  async function runTry() {
+    if (!selected || tryBusy) return;
+    tryError = '';
+    tryResult = null;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(tryArgs || '{}');
+    } catch (e) {
+      tryError = `invalid JSON: ${e instanceof Error ? e.message : e}`;
+      return;
+    }
+    tryBusy = true;
+    try {
+      tryResult = await invokeTool(selected.name, parsed);
+      await refresh();
+    } catch (e) {
+      tryError = String(e).slice(0, 300);
+    } finally {
+      tryBusy = false;
+    }
+  }
+
+  // Reset the try form when a different tool is selected.
+  $: if (selected) {
+    tryOpen = false;
+    tryResult = null;
+    tryError = '';
+  }
 </script>
 
 <div class="h-full w-full flex flex-col font-mono text-xs">
@@ -164,15 +233,27 @@
       <div class="p-3 border-b border-border/40">
         <header class="flex items-center justify-between mb-1">
           <h3 class="text-accent text-sm">{selected.name}</h3>
-          <button
-            class="text-muted hover:text-fg text-[10px]"
-            on:click={() => {
-              toolFilter = toolFilter === selected!.name ? '' : selected!.name;
-              refresh();
-            }}
-          >
-            {toolFilter === selected.name ? 'Show all' : 'Filter feed'}
-          </button>
+          <div class="flex gap-2">
+            {#if (selected.sources ?? []).includes('chat')}
+              <button
+                class="text-[10px] px-2 py-0.5 border rounded"
+                class:border-accent={tryOpen}
+                class:text-accent={tryOpen}
+                class:border-border={!tryOpen}
+                class:text-muted={!tryOpen}
+                on:click={openTry}
+              >try</button>
+            {/if}
+            <button
+              class="text-muted hover:text-fg text-[10px]"
+              on:click={() => {
+                toolFilter = toolFilter === selected!.name ? '' : selected!.name;
+                refresh();
+              }}
+            >
+              {toolFilter === selected.name ? 'Show all' : 'Filter feed'}
+            </button>
+          </div>
         </header>
         <p class="text-muted leading-relaxed">{selected.description}</p>
         {#if selected.parameters}
@@ -180,6 +261,39 @@
             <summary class="text-muted cursor-pointer">parameters schema</summary>
             <pre class="mt-1 text-[10px] text-fg whitespace-pre-wrap overflow-x-auto">{JSON.stringify(selected.parameters, null, 2)}</pre>
           </details>
+        {/if}
+        {#if tryOpen}
+          <div class="mt-2 border border-border/40 rounded p-2 space-y-2">
+            <textarea
+              bind:value={tryArgs}
+              rows="4"
+              spellcheck="false"
+              class="w-full bg-surface rounded border border-border/40 p-2 text-[11px] text-fg outline-none resize-y font-mono"
+            ></textarea>
+            <div class="flex items-center gap-2">
+              <button
+                class="text-[10px] px-3 py-1 rounded bg-accent text-bg disabled:opacity-40"
+                disabled={tryBusy || toolsEnabled === false}
+                title={toolsEnabled === false ? 'Chat-path tools are disabled (ZEUS_TOOLS_ENABLED=0)' : 'Run this tool'}
+                on:click={runTry}
+              >{tryBusy ? 'running…' : 'run'}</button>
+              {#if toolsEnabled === false}
+                <span class="text-warn text-[10px]">loop disabled · set ZEUS_TOOLS_ENABLED=1</span>
+              {/if}
+              {#if tryError}<span class="text-err text-[10px]">{tryError}</span>{/if}
+              {#if tryResult}
+                <span class="text-[10px]" class:text-ok={!tryResult.is_error} class:text-err={tryResult.is_error}>
+                  {tryResult.is_error ? 'error' : 'ok'} · {tryResult.duration_ms}ms
+                </span>
+              {/if}
+            </div>
+            {#if tryResult}
+              <pre class="text-[10px] whitespace-pre-wrap break-words max-h-48 overflow-y-auto p-2 rounded"
+                class:text-fg={!tryResult.is_error}
+                class:text-err={tryResult.is_error}
+                style="background: rgb(var(--surface-2) / 0.4);">{tryResult.content}</pre>
+            {/if}
+          </div>
         {/if}
       </div>
     {/if}
