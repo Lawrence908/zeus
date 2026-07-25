@@ -198,11 +198,17 @@ async def lifespan(app: FastAPI):
         app.state.swarm_store = sw_store
 
         sw_kind = os.getenv("ZEUS_SWARM_WORKER", "stub").strip().lower()
-        if sw_kind == "claude":
-            from zeus.orchestration.swarm.claude_worker import ClaudeCodeWorker
+        if sw_kind in ("claude", "sandbox"):
             from zeus.orchestration.swarm.worktree import CodeWorkspace
 
-            sw_worker: object = ClaudeCodeWorker()
+            if sw_kind == "sandbox":
+                from zeus.orchestration.swarm.sandbox import SandboxedClaudeWorker
+
+                sw_worker: object = SandboxedClaudeWorker()
+            else:
+                from zeus.orchestration.swarm.claude_worker import ClaudeCodeWorker
+
+                sw_worker = ClaudeCodeWorker()
             sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
         else:
             sw_worker = StubWorker()

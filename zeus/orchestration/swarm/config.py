@@ -56,3 +56,25 @@ def path_denied(rel_path: str) -> bool:
 
 def denied_paths(rel_paths: list[str]) -> list[str]:
     return [p for p in rel_paths if path_denied(p)]
+
+
+# ---------------------------------------------------------------------------
+# Sandbox (P1b) - container knobs for the sandboxed argonaut.
+# ---------------------------------------------------------------------------
+
+
+def sandbox_image() -> str:
+    return os.getenv("ZEUS_SWARM_SANDBOX_IMAGE", "zeus-swarm-argonaut:latest")
+
+
+def sandbox_network() -> str:
+    # Needs egress to api.anthropic.com. Lock down to a dedicated network later.
+    return os.getenv("ZEUS_SWARM_SANDBOX_NETWORK", "bridge")
+
+
+def sandbox_limits() -> dict[str, str]:
+    return {
+        "memory": os.getenv("ZEUS_SWARM_SANDBOX_MEMORY", "2g"),
+        "cpus": os.getenv("ZEUS_SWARM_SANDBOX_CPUS", "2"),
+        "pids": os.getenv("ZEUS_SWARM_SANDBOX_PIDS", "512"),
+    }
