@@ -92,6 +92,29 @@ def test_denied_path_is_rejected_and_discarded(tmp_path):
     asyncio.run(scenario())
 
 
+def test_commit_bypasses_repo_precommit_hook(tmp_path):
+    # A repo pre-commit hook (e.g. a docs-index check) must not stall the swarm's
+    # mechanical per-node commits; the final PR is where hooks/CI run.
+    repo = str(tmp_path / "repo")
+    os.makedirs(repo)
+    _init_repo(repo)
+    hook = os.path.join(repo, ".git", "hooks", "pre-commit")
+    with open(hook, "w") as f:
+        f.write("#!/bin/sh\necho blocked >&2\nexit 1\n")
+    os.chmod(hook, 0o755)
+
+    async def scenario():
+        ws = CodeWorkspace(repo, "hooked", base_dir=str(tmp_path / "wt"))
+        path = await ws.setup()
+        with open(os.path.join(path, "note.txt"), "w") as f:
+            f.write("hi\n")
+        res = await ws.commit_node(_node("a"))
+        assert res.committed and res.commit  # --no-verify bypassed the failing hook
+        await ws.teardown()
+
+    asyncio.run(scenario())
+
+
 def test_noop_node_commits_nothing(tmp_path):
     repo = str(tmp_path / "repo")
     os.makedirs(repo)

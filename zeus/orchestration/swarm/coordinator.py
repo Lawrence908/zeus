@@ -132,13 +132,19 @@ class Coordinator:
                 await self._fail(n, nodes, result.error or "worker reported failure")
             elif ws is not None:
                 # Denylist-check the diff, then commit the node onto the run branch.
-                commit = await ws.commit_node(n)
-                if commit.denied:
-                    await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
+                # Any git failure (hook, lock, conflict) fails the node fail-open
+                # rather than crashing the coordinator.
+                try:
+                    commit = await ws.commit_node(n)
+                except Exception as exc:  # noqa: BLE001 - surface as a node failure
+                    await self._fail(n, nodes, f"commit failed: {exc}")
                 else:
-                    n.status = NodeStatus.SUCCEEDED
-                    n.output = result.output
-                    await self._store.update_node(n)
+                    if commit.denied:
+                        await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
+                    else:
+                        n.status = NodeStatus.SUCCEEDED
+                        n.output = result.output
+                        await self._store.update_node(n)
             else:
                 n.status = NodeStatus.SUCCEEDED
                 n.output = result.output

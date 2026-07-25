@@ -110,9 +110,12 @@ class CodeWorkspace:
             return CommitResult(committed=False, denied=denied)
 
         await _git(["add", "-A"], self.path)
+        # --no-verify: swarm integration commits are mechanical; the repo's own
+        # pre-commit hooks (e.g. docs-index checks) run on the final PR / CI, not
+        # on every per-node commit, so a hook must not stall or crash a run.
         await _git(
             ["-c", "user.name=zeus-swarm", "-c", "user.email=swarm@zeus.local",
-             "commit", "-m", f"swarm node {node.id}: {node.title}"],
+             "commit", "--no-verify", "-m", f"swarm node {node.id}: {node.title}"],
             self.path,
         )
         sha = (await _git(["rev-parse", "HEAD"], self.path)).strip()
