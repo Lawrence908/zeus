@@ -1,7 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import type { AppInstance } from '$lib/wm/tree';
-  import { getStatus, listTasks, type AgentInfo, type AgentTask } from '$lib/api/orchestration';
+  import {
+    getStatus,
+    getTask,
+    listTasks,
+    type AgentInfo,
+    type AgentTask,
+    type AgentTaskDetail
+  } from '$lib/api/orchestration';
 
   export let app: AppInstance;
   void app;
@@ -28,6 +35,27 @@
       error = String(e);
     } finally {
       loading = false;
+    }
+  }
+
+  // Expandable task detail (GET /orchestration/tasks/{id}).
+  let openTaskId: string | null = null;
+  let taskDetail: AgentTaskDetail | null = null;
+  let taskDetailErr = '';
+
+  async function toggleTask(id: string) {
+    if (openTaskId === id) {
+      openTaskId = null;
+      taskDetail = null;
+      return;
+    }
+    openTaskId = id;
+    taskDetail = null;
+    taskDetailErr = '';
+    try {
+      taskDetail = await getTask(id);
+    } catch (e) {
+      taskDetailErr = String(e).slice(0, 160);
     }
   }
 
@@ -131,11 +159,45 @@
       <ul class="space-y-1">
         {#each tasks.slice(0, 15) as t (t.task_id)}
           <li class="border-b border-border/20 py-1">
-            <div class="flex items-center justify-between text-[10px] text-muted">
-              <span>{t.agent} · {t.action}</span>
-              <span class:text-ok={t.status === 'done'} class:text-err={t.status === 'error'} class="text-fg">{t.status}</span>
-            </div>
+            <button class="w-full text-left" on:click={() => toggleTask(t.task_id)}>
+              <div class="flex items-center justify-between text-[10px] text-muted">
+                <span class="truncate">
+                  {t.agent} · {t.description ?? t.action ?? t.task_id.slice(0, 8)}
+                  {#if t.step_count}<span class="text-muted/60"> · {t.results_count ?? 0}/{t.step_count} steps</span>{/if}
+                </span>
+                <span
+                  class="shrink-0 ml-2"
+                  class:text-ok={t.status === 'done'}
+                  class:text-err={t.status === 'failed' || t.status === 'error'}
+                  class:text-warn={t.status === 'running'}
+                >{t.status}{t.elapsed_ms ? ` · ${Math.round(t.elapsed_ms)}ms` : ''}</span>
+              </div>
+            </button>
             {#if t.error}<p class="text-err text-[10px]">{t.error}</p>{/if}
+            {#if openTaskId === t.task_id}
+              <div class="mt-1 border border-border/30 rounded p-2 text-[10px]">
+                {#if taskDetailErr}
+                  <p class="text-err">{taskDetailErr}</p>
+                {:else if !taskDetail}
+                  <p class="text-muted">loading…</p>
+                {:else}
+                  {#each taskDetail.results ?? [] as r, i}
+                    {@const out = r.data ?? r.output}
+                    <div class="mb-1">
+                      <span class="text-muted">{r.step_name ?? `step ${i + 1}`}</span>
+                      <span class:text-ok={r.status === 'ok' || r.status === 'done'} class:text-err={r.status === 'failed'} class:text-warn={r.status === 'skipped'}> {r.status}</span>
+                      {#if r.duration_ms}<span class="text-muted/60"> · {Math.round(r.duration_ms)}ms</span>{/if}
+                      {#if r.error}<p class="text-err whitespace-pre-wrap">{r.error}</p>{/if}
+                      {#if out !== undefined && out !== null}
+                        <pre class="text-fg/80 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{typeof out === 'string' ? out.slice(0, 500) : JSON.stringify(out, null, 1).slice(0, 500)}</pre>
+                      {/if}
+                    </div>
+                  {:else}
+                    <p class="text-muted">no step results yet.</p>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
           </li>
         {:else}
           <li class="text-muted text-[10px]">No tasks in the bus.</li>

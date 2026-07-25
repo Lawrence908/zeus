@@ -37,13 +37,37 @@ export interface OrchestrationStatus {
 export interface AgentTask {
   task_id: string;
   agent: string;
-  action: string;
-  args?: Record<string, unknown>;
-  status: 'pending' | 'running' | 'done' | 'error' | string;
-  created_at?: string;
-  finished_at?: string | null;
-  result?: unknown;
+  description?: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | string;
+  elapsed_ms?: number | null;
+  step_count?: number;
+  results_count?: number;
+  // Legacy field names kept for older backends.
+  action?: string;
   error?: string | null;
+}
+
+// Mirrors the backend TaskRecord (zeus/orchestration/runtime.py). Each result is
+// a StepResult: { step_name, status, data, error, duration_ms }. Note the output
+// payload is `data`, not `output`.
+export interface AgentStepResult {
+  step_name?: string;
+  status?: string;
+  data?: unknown;
+  error?: string | null;
+  duration_ms?: number;
+  [k: string]: unknown;
+}
+
+export interface AgentTaskDetail {
+  id: string;
+  agent_name: string;
+  description?: string;
+  status: string;
+  elapsed_ms?: number | null;
+  steps?: { name?: string; endpoint?: string; [k: string]: unknown }[];
+  results?: AgentStepResult[];
+  [k: string]: unknown;
 }
 
 export async function getStatus(): Promise<OrchestrationStatus> {
@@ -70,6 +94,10 @@ export async function getStatus(): Promise<OrchestrationStatus> {
 
 export function listTasks(): Promise<AgentTask[] | { tasks: AgentTask[] }> {
   return jsonFetch('/orchestration/tasks');
+}
+
+export function getTask(taskId: string): Promise<AgentTaskDetail> {
+  return jsonFetch(`/orchestration/tasks/${encodeURIComponent(taskId)}`);
 }
 
 export function createTask(req: {
