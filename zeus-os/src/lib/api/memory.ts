@@ -115,6 +115,27 @@ export function deleteMemory(id: string): Promise<{ ok: boolean }> {
   return jsonFetch(`/memory/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
+export interface MemoryAddResult {
+  status: string;
+  added: number;
+  skipped: number;
+  errors: string[];
+}
+
+export function addMemory(
+  text: string,
+  opts: { source?: string; extract_facts?: boolean } = {}
+): Promise<MemoryAddResult> {
+  return jsonFetch('/memory/add', {
+    method: 'POST',
+    body: JSON.stringify({
+      text,
+      source: opts.source ?? 'manual',
+      extract_facts: opts.extract_facts ?? false
+    })
+  });
+}
+
 export function bulkDeleteMemories(ids: string[]): Promise<{ deleted: number }> {
   return jsonFetch('/memory/delete_batch', {
     method: 'POST',

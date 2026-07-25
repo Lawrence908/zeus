@@ -2,7 +2,9 @@
   import { onDestroy, onMount } from 'svelte';
   import type { AppInstance } from '$lib/wm/tree';
   import { notify } from '$lib/notify/store';
+  import { confirmDialog } from '$lib/components/confirm';
   import {
+    addMemory,
     bulkDeleteMemories,
     deleteMemory,
     listMemories,
@@ -33,10 +35,9 @@
   let editMemory = '';
   let editCategory = '';
   let timer: ReturnType<typeof setInterval> | null = null;
-  const chosen = new Set<string>();
+  // Reassigned (not mutated in place) so Svelte tracks selection changes.
+  let chosen = new Set<string>();
   $: chosenCount = chosen.size;
-  let _: number = 0; // bump to force re-render of chosen-derived UI
-  void _;
 
   async function refreshSources() {
     try {
@@ -77,7 +78,7 @@
   function toggleChoose(id: string) {
     if (chosen.has(id)) chosen.delete(id);
     else chosen.add(id);
-    _ += 1;
+    chosen = new Set(chosen);
   }
 
   async function saveEdit() {
@@ -100,7 +101,7 @@
   }
 
   async function dropOne(id: string) {
-    if (!confirm('Delete this memory?')) return;
+    if (!(await confirmDialog('Delete this memory?', { confirmLabel: 'Delete' }))) return;
     try {
       await deleteMemory(id);
       if (selected?.id === id) selected = null;
@@ -112,15 +113,47 @@
 
   async function bulkDelete() {
     if (chosen.size === 0) return;
-    if (!confirm(`Delete ${chosen.size} memories?`)) return;
+    if (!(await confirmDialog(`Delete ${chosen.size} memories?`, { confirmLabel: 'Delete all' }))) return;
     try {
       const r = await bulkDeleteMemories([...chosen]);
       notify({ title: `Deleted ${r.deleted}`, kind: 'ok', ttlMs: 1800 });
-      chosen.clear();
-      _ += 1;
+      chosen = new Set();
       await refresh();
     } catch (e) {
       notify({ title: 'Bulk delete failed', body: String(e).slice(0, 160), kind: 'err' });
+    }
+  }
+
+  // Select-all toggles every currently visible entry.
+  function toggleAll() {
+    if (chosen.size === entries.length && entries.length > 0) {
+      chosen = new Set();
+    } else {
+      chosen = new Set(entries.map((m) => m.id));
+    }
+  }
+
+  // ── quick-add ──
+  let addOpen = false;
+  let addText = '';
+  let addExtract = false;
+
+  async function quickAdd() {
+    const t = addText.trim();
+    if (!t) return;
+    try {
+      const r = await addMemory(t, { extract_facts: addExtract });
+      notify({
+        title: r.added > 0 ? `Added ${r.added}` : 'Nothing added',
+        body: r.errors.join('; ').slice(0, 120) || undefined,
+        kind: r.added > 0 ? 'ok' : 'warn',
+        ttlMs: 2200
+      });
+      addText = '';
+      addOpen = false;
+      await refresh();
+    } catch (e) {
+      notify({ title: 'Add failed', body: String(e).slice(0, 160), kind: 'err' });
     }
   }
 
@@ -165,6 +198,13 @@
       {/each}
     </select>
     <button class="text-[10px] px-2 py-0.5 border border-border/60 rounded" on:click={refresh}>refresh</button>
+    <button
+      class="text-[10px] px-2 py-0.5 border rounded"
+      class:border-accent={addOpen}
+      class:text-accent={addOpen}
+      class:border-border={!addOpen}
+      on:click={() => (addOpen = !addOpen)}
+    >+ add</button>
     {#if chosenCount > 0}
       <button class="text-[10px] px-2 py-0.5 border border-err/60 text-err rounded" on:click={bulkDelete}>
         delete {chosenCount}
@@ -173,8 +213,38 @@
     <span class="text-[10px] text-muted">{entries.length} {loading ? 'loading…' : ''} {lastFetched}</span>
   </header>
 
+  {#if addOpen}
+    <div class="px-3 py-2 border-b border-border/40 bg-surface2/30 flex items-start gap-2">
+      <textarea
+        bind:value={addText}
+        rows="2"
+        placeholder="New memory (plain fact, e.g. 'Prefers dark roast coffee')…"
+        class="flex-1 bg-transparent border border-border/40 rounded p-2 text-fg outline-none resize-none"
+        on:keydown={(ev) => ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey) && quickAdd()}
+      ></textarea>
+      <div class="flex flex-col gap-1 shrink-0">
+        <button class="text-[10px] px-3 py-1 rounded bg-accent text-bg disabled:opacity-40" disabled={!addText.trim()} on:click={quickAdd}>save</button>
+        <label class="flex items-center gap-1 text-[10px] text-muted cursor-pointer" title="Route through LLM fact extraction instead of storing verbatim">
+          <input type="checkbox" bind:checked={addExtract} />
+          extract
+        </label>
+      </div>
+    </div>
+  {/if}
+
   <div class="flex-1 flex min-h-0">
     <ul class="w-1/2 overflow-y-auto border-r border-border/40">
+      {#if entries.length > 1}
+        <li class="border-b border-border/30 px-3 py-1 flex items-center gap-2 text-[10px] text-muted">
+          <input
+            type="checkbox"
+            checked={chosenCount === entries.length && entries.length > 0}
+            indeterminate={chosenCount > 0 && chosenCount < entries.length}
+            on:change={toggleAll}
+          />
+          <span>select all</span>
+        </li>
+      {/if}
       {#each entries as m (m.id)}
         {@const view = memoryView(m)}
         <li class="border-b border-border/20" class:bg-surface2={selected?.id === m.id}>
