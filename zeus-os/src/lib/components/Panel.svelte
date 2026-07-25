@@ -51,8 +51,8 @@
   class="surface-blur absolute top-0 left-0 right-0 z-30 flex items-center px-3 select-none"
   style="height: var(--panel-height);"
 >
-  <!-- workspaces -->
-  <div class="flex gap-1.5 items-center">
+  <!-- workspaces (hidden on mobile — the mobile dock provides workspace dots) -->
+  <div class="hidden md:flex gap-1.5 items-center">
     {#each $wm.workspaces as w (w.id)}
       <button
         class="text-xs font-mono w-6 h-5 rounded-md grid place-items-center transition-colors"
@@ -77,20 +77,21 @@
 
   <!-- system stats + clock -->
   <div class="flex items-center gap-3 text-xs font-mono text-muted">
+    <!-- detailed stats hidden on mobile to avoid overflow -->
     {#if cpu !== null}
-      <span title="CPU"><span class="text-accent">CPU</span> {cpu.toFixed(0)}%</span>
+      <span class="hidden md:inline" title="CPU"><span class="text-accent">CPU</span> {cpu.toFixed(0)}%</span>
     {/if}
     {#if memPct !== null}
-      <span title="Memory"><span class="text-accent">MEM</span> {memPct}%</span>
+      <span class="hidden md:inline" title="Memory"><span class="text-accent">MEM</span> {memPct}%</span>
     {/if}
     {#if gpu !== null}
-      <span title="GPU utilization"><span class="text-accent">GPU</span> {gpu.toFixed(0)}%</span>
+      <span class="hidden md:inline" title="GPU utilization"><span class="text-accent">GPU</span> {gpu.toFixed(0)}%</span>
     {/if}
     {#if vramPct !== null}
-      <span title="VRAM used / total"><span class="text-accent">VRAM</span> {vramPct}%</span>
+      <span class="hidden md:inline" title="VRAM used / total"><span class="text-accent">VRAM</span> {vramPct}%</span>
     {/if}
     <span
-      class="px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide text-bg bg-accent2/80"
+      class="hidden md:inline-block px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide text-bg bg-accent2/80"
       title="WM modifier — open the launcher (Ctrl+Space) and search 'modifier' to change"
     >
       {MODIFIER_LABEL[modifier]}

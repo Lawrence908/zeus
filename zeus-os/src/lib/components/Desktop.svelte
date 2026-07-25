@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
 
@@ -10,6 +10,8 @@
   import type { ModifierMode } from '$lib/wm/keybinds';
 
   export let modifier: ModifierMode = 'Meta';
+
+  const dispatch = createEventDispatcher<{ openLauncher: void }>();
 
   // Lay out windows inside the area below the top panel, with the configured
   // gap on all sides. Recompute on resize.
@@ -65,9 +67,21 @@
               <kbd class="font-mono">Super</kbd> +
               <kbd class="font-mono">D</kbd> &nbsp;Launcher
             </p>
+            <p class="text-muted/60 text-sm mt-1">or tap the <span class="text-accent font-semibold">+</span> button</p>
           </div>
         </div>
       {/if}
     </div>
   {/key}
+
+  <!-- Touch launcher: opens the app launcher without a keyboard (tablets, touch displays). -->
+  <button
+    class="absolute bottom-5 right-5 z-30 w-14 h-14 grid place-items-center rounded-full text-3xl leading-none shadow-lg active:scale-95 transition-transform"
+    style="background: rgb(var(--accent)); color: rgb(var(--bg));"
+    on:click={() => dispatch('openLauncher')}
+    aria-label="Open app launcher"
+    title="Open app launcher"
+  >
+    +
+  </button>
 </div>

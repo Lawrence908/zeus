@@ -5,6 +5,7 @@
   import MobileShell from '$lib/components/MobileShell.svelte';
   import Launcher from '$lib/components/Launcher.svelte';
   import Cheatsheet from '$lib/components/Cheatsheet.svelte';
+  import ConfirmHost from '$lib/components/ConfirmHost.svelte';
   import Notifications from '$lib/components/Notifications.svelte';
   import { notify } from '$lib/notify/store';
 
@@ -235,11 +236,19 @@
 
 <div class="h-screen w-screen overflow-hidden">
   {#if isMobile}
-    <MobileShell {modifier} />
+    <MobileShell
+      {modifier}
+      on:openLauncher={() => { cheatsheetOpen = false; launcherOpen = true; }}
+      on:voicePtt={() => runAction({ kind: 'voicePtt' })}
+    />
   {:else}
-    <Desktop {modifier} />
+    <Desktop
+      {modifier}
+      on:openLauncher={() => { cheatsheetOpen = false; launcherOpen = true; }}
+    />
   {/if}
   <Launcher bind:open={launcherOpen} {modifier} on:setModifier={(e) => runAction({ kind: 'setModifier', mode: e.detail })} />
   <Cheatsheet bind:open={cheatsheetOpen} {modifier} />
+  <ConfirmHost />
   <Notifications />
 </div>

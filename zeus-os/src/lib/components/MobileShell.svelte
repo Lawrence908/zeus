@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import Panel from './Panel.svelte';
   import type { ModifierMode } from '$lib/wm/keybinds';
 
   export let modifier: ModifierMode = 'Meta';
+
+  const dispatch = createEventDispatcher<{ openLauncher: void; voicePtt: void }>();
   import Terminal from '$lib/apps/Terminal.svelte';
   import Chat from '$lib/apps/Chat.svelte';
   import SystemMonitor from '$lib/apps/SystemMonitor.svelte';
@@ -70,7 +73,7 @@
   <Panel {modifier} />
   <div class="flex-1 overflow-hidden mt-[30px]">
     {#if visible && Comp}
-      <div class="absolute inset-0" style="top: 30px; bottom: 56px;">
+      <div class="absolute inset-0" style="top: 30px; bottom: 86px;">
         <div class="window-shell focused absolute inset-2 overflow-hidden">
           <header
             class="flex items-center justify-between px-3 py-1.5 text-xs"
@@ -85,37 +88,64 @@
         </div>
       </div>
     {:else}
-      <div class="absolute inset-0 grid place-items-center text-muted text-sm">
-        Tap the + button to open an app.
+      <div class="absolute inset-0 grid place-items-center text-muted text-sm px-8 text-center">
+        Tap the <span class="text-accent font-semibold">+</span> button below to open an app.
       </div>
     {/if}
   </div>
 
-  <!-- bottom dock: workspace dots + nav -->
+  <!-- workspace dots strip (above the dock) -->
+  <div
+    class="surface-blur absolute left-0 right-0 flex items-center justify-center gap-2"
+    style="bottom: 64px; height: 22px;"
+  >
+    {#each $wm.workspaces as w (w.id)}
+      <button
+        class="w-2.5 h-2.5 rounded-full transition-colors"
+        class:bg-accent={w.id === $wm.activeWs}
+        class:bg-muted={w.id !== $wm.activeWs}
+        on:click={() => switchWorkspace(w.id)}
+        aria-label="Workspace {w.id}"
+      ></button>
+    {/each}
+  </div>
+
+  <!-- bottom dock: prev · launcher · mic · next -->
   <nav
-    class="surface-blur absolute bottom-0 left-0 right-0 flex items-center justify-between px-3"
-    style="height: 56px;"
+    class="surface-blur absolute bottom-0 left-0 right-0 flex items-center justify-between px-4"
+    style="height: 64px;"
   >
     <button
-      class="text-fg/80 text-xl px-3"
+      class="w-11 h-11 grid place-items-center text-fg/80 text-2xl rounded-full active:bg-surface2/60"
       on:click={() => step(-1)}
       aria-label="Previous window"
     >
       ‹
     </button>
-    <div class="flex gap-1.5">
-      {#each $wm.workspaces as w (w.id)}
-        <button
-          class="w-2.5 h-2.5 rounded-full"
-          class:bg-accent={w.id === $wm.activeWs}
-          class:bg-muted={w.id !== $wm.activeWs}
-          on:click={() => switchWorkspace(w.id)}
-          aria-label="Workspace {w.id}"
-        ></button>
-      {/each}
+
+    <div class="flex items-center gap-3">
+      <!-- Launcher / open-app FAB -->
+      <button
+        class="w-14 h-14 grid place-items-center rounded-full text-3xl leading-none shadow-lg"
+        style="background: rgb(var(--accent)); color: rgb(var(--bg));"
+        on:click={() => dispatch('openLauncher')}
+        aria-label="Open app launcher"
+      >
+        +
+      </button>
+      <!-- Voice push-to-talk -->
+      <button
+        class="w-11 h-11 grid place-items-center rounded-full text-lg active:bg-surface2/60"
+        style="border: 1px solid rgb(var(--border-color) / 0.7);"
+        on:click={() => dispatch('voicePtt')}
+        aria-label="Voice push to talk"
+      >
+        🎙
+      </button>
     </div>
+
     <button
-      class="text-fg/80 text-xl px-3"
+      class="w-11 h-11 grid place-items-center text-fg/80 text-2xl rounded-full active:bg-surface2/60"
       on:click={() => step(1)}
       aria-label="Next window"
     >

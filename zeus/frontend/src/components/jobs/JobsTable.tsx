@@ -56,8 +56,8 @@ export function JobsTable({ onSelect }: Props) {
   }
 
   return (
-    <div className="border border-outline-variant/20 rounded overflow-hidden">
-      <table className="w-full">
+    <div className="border border-outline-variant/20 rounded overflow-x-auto custom-scrollbar">
+      <table className="w-full min-w-[640px]">
         <thead className="bg-surface-container-high">
           <tr>
             {COLUMNS.map((col, i) => (
