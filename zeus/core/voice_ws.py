@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 import os
 
-from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from zeus.voice.state import VoiceStatePublishBody, voice_state_message
@@ -45,6 +46,27 @@ async def publish_voice_state(
     )
     await hub.publish(msg)
     return PublishAck()
+
+
+@router.get("/voice/tts")
+async def voice_tts(text: str = Query(..., min_length=1, max_length=2000)) -> Response:
+    """
+    Optional Voicebox proxy for browser clients (Zeus OS voice orb, etc.).
+
+    Disabled by default; opt in with ZEUS_VOICE_TTS_ENABLED=1 and make sure
+    VOICEBOX_URL is reachable from the container (host.docker.internal:5050 or
+    the host's LAN address). Returns audio/wav; clients fall back to browser
+    speech synthesis on 501.
+    """
+    if os.getenv("ZEUS_VOICE_TTS_ENABLED", "0") != "1":
+        raise HTTPException(status_code=501, detail="server-side TTS is disabled")
+    from zeus.voice.tts import VoiceboxTTS
+
+    try:
+        wav = await VoiceboxTTS().synthesize(text)
+    except Exception as exc:  # noqa: BLE001 — surface upstream failure
+        raise HTTPException(status_code=502, detail=f"voicebox: {exc}") from exc
+    return Response(content=wav, media_type="audio/wav")
 
 
 @router.websocket("/ws/voice-state")

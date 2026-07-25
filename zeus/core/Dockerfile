@@ -6,9 +6,12 @@ WORKDIR /app
 # git: needed by zeus.ingest.sources.git (commit history ingest)
 # libzim-dev: native library for python `libzim` bindings used by
 # zeus.ingest.sources.kiwix_zim (disk ZIM → zeus_knowledge ingest)
-# ripgrep: backs /vault/search (olympian_file_search)
+# ripgrep: backs /vault/search (olympian_file_search) and /zeus-os/fs/search
+# openssh-client: Zeus OS Phase 1.5 PTY router shells out to the docker host
+# via `ssh chris@host.docker.internal` to provide a real host terminal and
+# nvidia-smi for GPU stats; gated by ZEUS_OS_PTY_HOST_SSH=1.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git libzim-dev ripgrep \
+ && apt-get install -y --no-install-recommends git libzim-dev ripgrep openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

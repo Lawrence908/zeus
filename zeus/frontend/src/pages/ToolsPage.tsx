@@ -112,8 +112,8 @@ function ToolDirectory({ tools }: { tools: ToolSpec[] }) {
           <p className="font-body text-sm text-on-surface-variant">No tools match the current filter.</p>
         </div>
       ) : (
-        <div className="border border-outline-variant/20 rounded overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="border border-outline-variant/20 rounded overflow-x-auto custom-scrollbar">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-surface-container-high text-[10px] font-label uppercase tracking-widest text-on-surface-variant/70">
               <tr>
                 <th className="text-left px-3 py-2 font-label font-semibold">Name</th>
@@ -557,7 +557,7 @@ export function ToolsPage() {
     <div className="flex flex-col h-screen bg-background">
       <TopNav />
       <div className="flex-1 overflow-y-auto custom-scrollbar pt-[52px]">
-        <div className="max-w-6xl mx-auto px-6 py-8">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8">
           {/* Header */}
           <div className="mb-6">
             <h1 className="font-headline font-bold text-2xl text-on-surface mb-1">Tools</h1>

@@ -174,7 +174,59 @@ def _active_model_name() -> str:
     return ZEUS_DEV_MODEL if _chat_use_claude() else _ollama_model()
 
 
-async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
+# Per-million pricing for chat-path Anthropic models. Keep small + auditable;
+# add new entries when models land. Ollama is free (cost_usd=0 always).
+_ANTHROPIC_PRICING_PER_MTOK: dict[str, tuple[float, float]] = {
+    # model id substring → (input USD per million, output USD per million)
+    "claude-opus-4-7": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5": (0.80, 4.0),
+}
+
+
+def _anthropic_cost_usd(model: str, tokens_in: int, tokens_out: int) -> float:
+    for key, (in_rate, out_rate) in _ANTHROPIC_PRICING_PER_MTOK.items():
+        if key in model:
+            return (tokens_in / 1_000_000.0) * in_rate + (tokens_out / 1_000_000.0) * out_rate
+    return 0.0
+
+
+def _log_chat_usage(
+    *,
+    caller: str,
+    provider: str,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    latency_ms: int,
+    tier: int,
+) -> None:
+    """Best-effort chat-path usage ledger write. Imported lazily to avoid a
+    circular import on module load (small_llm imports nothing from query)."""
+    if tokens_in <= 0 and tokens_out <= 0:
+        return
+    try:
+        from zeus.core.small_llm import log_usage
+
+        cost = _anthropic_cost_usd(model, tokens_in, tokens_out) if provider == "anthropic" else 0.0
+        log_usage(
+            caller=caller,
+            provider=provider,
+            model=model,
+            tier=tier,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost,
+            latency_ms=latency_ms,
+            ok=True,
+            error=None,
+        )
+    except Exception as exc:
+        logger.debug("chat-path usage log skipped: %s", exc)
+
+
+async def _run_llm(*, system: str, user_prompt: str, max_tokens: int, caller: str = "chat.run_llm") -> str:
+    t0 = time.monotonic()
     if _chat_use_claude():
         import anthropic
 
@@ -184,6 +236,16 @@ async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user_prompt}],
+        )
+        usage = getattr(msg, "usage", None)
+        _log_chat_usage(
+            caller=caller,
+            provider="anthropic",
+            model=ZEUS_DEV_MODEL,
+            tokens_in=int(getattr(usage, "input_tokens", 0) or 0),
+            tokens_out=int(getattr(usage, "output_tokens", 0) or 0),
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            tier=1,
         )
         block = msg.content[0]
         if block.type != "text":
@@ -208,6 +270,15 @@ async def _run_llm(*, system: str, user_prompt: str, max_tokens: int) -> str:
             raise RuntimeError(_ollama_model_missing_message(detail=body))
         r.raise_for_status()
         data = r.json()
+        _log_chat_usage(
+            caller=caller,
+            provider="ollama",
+            model=model,
+            tokens_in=int(data.get("prompt_eval_count", 0) or 0),
+            tokens_out=int(data.get("eval_count", 0) or 0),
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            tier=1,
+        )
         msg = data.get("message") or {}
         return str(msg.get("content") or "").strip()
 
@@ -227,6 +298,7 @@ async def _run_llm_with_tools(
     follow-ups). `turn_idx` is the loop iteration — used only to synthesise
     unique call_ids on the Ollama path (Ollama has no native tool_use_id).
     """
+    t0 = time.monotonic()
     if _chat_use_claude():
         import anthropic
 
@@ -237,6 +309,16 @@ async def _run_llm_with_tools(
             system=system,
             tools=tools_to_anthropic(tools),
             messages=messages,
+        )
+        usage = getattr(msg, "usage", None)
+        _log_chat_usage(
+            caller="chat.run_llm_with_tools",
+            provider="anthropic",
+            model=ZEUS_DEV_MODEL,
+            tokens_in=int(getattr(usage, "input_tokens", 0) or 0),
+            tokens_out=int(getattr(usage, "output_tokens", 0) or 0),
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            tier=1,
         )
         return parse_anthropic_message(msg)
 
@@ -261,7 +343,17 @@ async def _run_llm_with_tools(
             body = (r.text or "")[:300]
             raise RuntimeError(_ollama_model_missing_message(detail=body))
         r.raise_for_status()
-        return parse_ollama_message(r.json(), turn_idx=turn_idx)
+        data = r.json()
+        _log_chat_usage(
+            caller="chat.run_llm_with_tools",
+            provider="ollama",
+            model=model,
+            tokens_in=int(data.get("prompt_eval_count", 0) or 0),
+            tokens_out=int(data.get("eval_count", 0) or 0),
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            tier=1,
+        )
+        return parse_ollama_message(data, turn_idx=turn_idx)
 
 
 async def _run_llm_stream(
@@ -270,6 +362,7 @@ async def _run_llm_stream(
     user_prompt: str,
     max_tokens: int,
 ) -> AsyncIterator[str]:
+    t0 = time.monotonic()
     if _chat_use_claude():
         import anthropic
 
@@ -281,19 +374,40 @@ async def _run_llm_stream(
             messages=[{"role": "user", "content": user_prompt}],
             stream=True,
         )
+        tokens_in = 0
+        tokens_out = 0
         async for event in stream:
             et = getattr(event, "type", None)
             et_str = et.value if hasattr(et, "value") else et
-            if et_str != "content_block_delta":
-                continue
-            delta = event.delta
-            dt = getattr(delta, "type", None)
-            dt_str = dt.value if hasattr(dt, "value") else dt
-            if dt_str != "text_delta":
-                continue
-            text = getattr(delta, "text", None) or ""
-            if text:
-                yield text
+            # Anthropic emits message_start (with usage.input_tokens) and
+            # message_delta (with usage.output_tokens cumulative).
+            if et_str == "message_start":
+                msg = getattr(event, "message", None)
+                u = getattr(msg, "usage", None) if msg else None
+                if u is not None:
+                    tokens_in = int(getattr(u, "input_tokens", 0) or 0)
+            elif et_str == "message_delta":
+                u = getattr(event, "usage", None)
+                if u is not None:
+                    tokens_out = int(getattr(u, "output_tokens", tokens_out) or tokens_out)
+            elif et_str == "content_block_delta":
+                delta = event.delta
+                dt = getattr(delta, "type", None)
+                dt_str = dt.value if hasattr(dt, "value") else dt
+                if dt_str != "text_delta":
+                    continue
+                text = getattr(delta, "text", None) or ""
+                if text:
+                    yield text
+        _log_chat_usage(
+            caller="chat.run_llm_stream",
+            provider="anthropic",
+            model=ZEUS_DEV_MODEL,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            tier=1,
+        )
         return
 
     base = _ollama_url()
@@ -307,6 +421,8 @@ async def _run_llm_stream(
         "stream": True,
         "options": _ollama_options(max_tokens=max_tokens),
     }
+    tokens_in = 0
+    tokens_out = 0
     async with httpx.AsyncClient() as client:
         async with client.stream(
             "POST",
@@ -330,7 +446,19 @@ async def _run_llm_stream(
                 if piece:
                     yield str(piece)
                 if data.get("done"):
+                    # Ollama emits final stats on the done frame.
+                    tokens_in = int(data.get("prompt_eval_count", 0) or 0)
+                    tokens_out = int(data.get("eval_count", 0) or 0)
                     break
+    _log_chat_usage(
+        caller="chat.run_llm_stream",
+        provider="ollama",
+        model=model,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        latency_ms=int((time.monotonic() - t0) * 1000),
+        tier=1,
+    )
 
 
 # Sub-budget split within the retrieval third of the context window.
@@ -659,7 +787,16 @@ class QueryEngine:
         use_context: bool = True,
         max_tokens: int = 512,
         source: str = "chat",
+        tool_calls_out: list[dict] | None = None,
     ) -> AsyncIterator[str]:
+        """Stream a reply chunk-by-chunk.
+
+        When ZEUS_TOOLS_ENABLED is on and any tool is registered, the tool loop
+        runs end-to-end before any text is yielded (the loop is inherently
+        multi-round). The final assistant reply is then emitted as a single
+        chunk. Tool-call descriptions are appended to ``tool_calls_out`` so
+        the caller can surface them on the done SSE event.
+        """
         _ = source
         t0 = time.monotonic()
         t = t0
@@ -704,6 +841,53 @@ class QueryEngine:
         t_llm = time.monotonic()
         current_prompt = user_prompt
         aegis_on = aegis_enabled()
+
+        # Tool-aware path: if tools are enabled and any are registered, run the
+        # tool loop to completion (it requires multiple round trips that can't
+        # be naturally streamed) and yield the assembled reply as one chunk.
+        # The model's final turn is what the user sees; tool calls flow back
+        # to the caller through tool_calls_out so the SSE done event can carry
+        # them and the Chat UI can render the collapsible tool-call card.
+        from zeus.core.tools import registry as tool_registry
+        from zeus.core.tools import tools_enabled, tools_max_calls
+
+        if tools_enabled() and tool_registry.available():
+            from zeus.core.tools.loop import run_tool_loop
+
+            loop_result = await run_tool_loop(
+                system=system,
+                user_prompt=current_prompt,
+                tools=tool_registry.list_specs(),
+                max_tokens=max_tokens,
+                max_calls=tools_max_calls(),
+                use_claude=_chat_use_claude(),
+            )
+            reply = loop_result.reply
+            if loop_result.tool_calls and tool_calls_out is not None:
+                tool_calls_out.extend(
+                    {"name": c.name, "arguments": c.arguments}
+                    for c in loop_result.tool_calls
+                )
+                sources.extend(f"tool:{c.name}" for c in loop_result.tool_calls)
+            if aegis_on:
+                outcome = evaluate_text(reply, policy_name=None)
+                if outcome.status == "rejected":
+                    reply = outcome.message or "This response was blocked by safety policy."
+                else:
+                    reply = outcome.text
+            yield reply
+            _log_timing("llm.stream_total", (time.monotonic() - t_llm) * 1000)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            turn = Turn(
+                user=message,
+                assistant=reply,
+                timestamp=time.time(),
+                context_sources=sources,
+                latency_ms=latency_ms,
+            )
+            await self.sessions.append_turn(sid, turn)
+            return
+
         # Stream incrementally when Aegis is disabled; buffer when enabled so
         # we can evaluate the full reply before emitting.
         parts: list[str] = []

@@ -64,7 +64,13 @@ function MetricRow({ label, value, status = 'ok' }: MetricRowProps) {
   )
 }
 
-export function StatusPanel() {
+interface StatusPanelProps {
+  // On mobile the panel is an off-canvas drawer; on desktop it is always inline.
+  open?: boolean
+  onClose?: () => void
+}
+
+export function StatusPanel({ open = false, onClose }: StatusPanelProps = {}) {
   const [status, setStatus] = useState<StatusData>({})
   const [metrics, setMetrics] = useState<MetricsData>({})
   const [activeModel, setActiveModel] = useState<ActiveModelData>({})
@@ -97,9 +103,35 @@ export function StatusPanel() {
   }, [])
 
   return (
-    <aside className="w-[280px] shrink-0 border-l border-outline-variant/20 flex flex-col bg-surface-container-lowest/30">
+    <>
+      {/* Mobile backdrop */}
+      {open && (
+        <button
+          className="md:hidden fixed inset-0 top-[52px] z-30 bg-black/50"
+          aria-label="Close status panel"
+          onClick={() => onClose?.()}
+        />
+      )}
+      <aside
+        className={[
+          'fixed top-[52px] bottom-0 right-0 z-40 w-[280px] max-w-[85vw] transform transition-transform duration-200',
+          'md:static md:top-0 md:z-auto md:max-w-none md:translate-x-0 md:transition-none',
+          'shrink-0 border-l border-outline-variant/20 flex flex-col bg-surface-container-lowest md:bg-surface-container-lowest/30',
+          open ? 'translate-x-0' : 'translate-x-full',
+        ].join(' ')}
+      >
+      {/* Mobile close */}
+      <div className="md:hidden flex justify-end px-2 pt-2">
+        <button
+          onClick={() => onClose?.()}
+          className="w-9 h-9 flex items-center justify-center text-on-surface-variant hover:text-on-surface"
+          aria-label="Close status panel"
+        >
+          <span className="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
       {/* Voice state indicator */}
-      <div className="flex flex-col items-center p-6 border-b border-outline-variant/20">
+      <div className="flex flex-col items-center p-6 pt-2 md:pt-6 border-b border-outline-variant/20">
         <PhaosOrb size="compact" />
       </div>
 
@@ -164,6 +196,7 @@ export function StatusPanel() {
           </div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }

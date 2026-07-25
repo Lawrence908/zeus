@@ -88,9 +88,9 @@ export function JobsPage() {
       <TopNav />
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pt-[52px]">
-        <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 md:py-8">
           {/* Header */}
-          <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
             <div>
               <div className="flex items-center gap-3 mb-1">
                 <h1 className="font-headline font-bold text-2xl text-on-surface">Jobs</h1>

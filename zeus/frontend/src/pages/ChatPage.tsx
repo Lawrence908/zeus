@@ -1,5 +1,5 @@
 // zeus/frontend/src/pages/ChatPage.tsx
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import { TopNav } from '../components/layout/TopNav'
 import { SessionsSidebar } from '../components/chat/SessionsSidebar'
 import { MessageList } from '../components/chat/MessageList'
@@ -13,6 +13,10 @@ import { useVoiceChat } from '../hooks/useVoiceChat'
 export function ChatPage() {
   const { sessions, activeSessionId, setSessions, setActiveSession, setMessages } = useChatStore()
   const { send } = useStreamingChat()
+
+  // Mobile-only off-canvas drawers (sessions on the left, status on the right).
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [statusOpen, setStatusOpen] = useState(false)
 
   // Connect voice WebSocket (Phaos / host-native Orpheus state)
   useVoiceState()
@@ -74,14 +78,35 @@ export function ChatPage() {
 
   return (
     <div className="flex flex-col h-screen bg-background">
-      <TopNav />
+      <TopNav
+        mobileLeftSlot={
+          <button
+            onClick={() => { setStatusOpen(false); setSidebarOpen((v) => !v) }}
+            className="w-9 h-9 flex items-center justify-center text-on-surface-variant hover:text-on-surface"
+            title="Sessions"
+            aria-label="Toggle sessions"
+          >
+            <span className="material-symbols-outlined text-[20px]">forum</span>
+          </button>
+        }
+        mobileRightSlot={
+          <button
+            onClick={() => { setSidebarOpen(false); setStatusOpen((v) => !v) }}
+            className="w-9 h-9 flex items-center justify-center text-on-surface-variant hover:text-on-surface"
+            title="System status"
+            aria-label="Toggle status panel"
+          >
+            <span className="material-symbols-outlined text-[20px]">monitoring</span>
+          </button>
+        }
+      />
 
       {/* Main layout below nav */}
       <div className="flex flex-1 overflow-hidden pt-[52px]">
-        <SessionsSidebar />
+        <SessionsSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
         {/* Center: messages + input */}
-        <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <MessageList />
           <ChatInput
             onSend={handleSend}
@@ -95,7 +120,7 @@ export function ChatPage() {
           />
         </div>
 
-        <StatusPanel />
+        <StatusPanel open={statusOpen} onClose={() => setStatusOpen(false)} />
       </div>
     </div>
   )

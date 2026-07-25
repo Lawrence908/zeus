@@ -509,6 +509,7 @@ def _sse_done_event(
     model_used: str,
     topic: str | None = None,
     token_estimate: int | None = None,
+    tool_calls: list[dict] | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "type": "done",
@@ -520,6 +521,8 @@ def _sse_done_event(
         payload["topic"] = topic
     if token_estimate is not None:
         payload["token_estimate"] = token_estimate
+    if tool_calls:
+        payload["tool_calls"] = tool_calls
     return f"data: {json.dumps(payload)}\n\n"
 
 
@@ -553,12 +556,14 @@ async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingRe
             yield b": stream-open\n\n"
             yield _sse_phase_event("context").encode("utf-8")
             accumulated: list[str] = []
+            tool_calls: list[dict] = []
             async for chunk in engine.query_stream(
                 body.message,
                 session_id_out,
                 use_context=body.use_context,
                 max_tokens=max_out,
                 source="chat",
+                tool_calls_out=tool_calls,
             ):
                 accumulated.append(chunk)
                 yield _sse_token_event(chunk).encode("utf-8")
@@ -573,6 +578,7 @@ async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingRe
                 model_used=_active_model_name(),
                 topic=topic,
                 token_estimate=token_estimate,
+                tool_calls=tool_calls or None,
             ).encode("utf-8")
         except Exception as e:
             yield _sse_error_event(str(e)).encode("utf-8")

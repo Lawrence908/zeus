@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design tokens. Themes set the same vars under [data-theme="..."] selectors.
+   ──────────────────────────────────────────────────────────────────────────── */
+:root {
+  --gap: 8px;
+  --border: 2px;
+  --radius: 10px;
+  --panel-height: 30px;
+  --surface-alpha: 0.78;
+  --shadow-window: 0 14px 40px -16px rgba(0, 0, 0, 0.65);
+  --anim-window: 180ms;
+  --anim-launcher: 220ms;
+  --anim-workspace: 240ms;
+}
+
+/* Catppuccin Mocha (default) */
+[data-theme='catppuccin-mocha'] {
+  --bg: 30 30 46; /* base */
+  --surface: 49 50 68; /* surface0 */
+  --surface-2: 69 71 90; /* surface1 */
+  --fg: 205 214 244; /* text */
+  --muted: 166 173 200; /* subtext0 */
+  --accent: 137 180 250; /* blue */
+  --accent-2: 203 166 247; /* mauve */
+  --ok: 166 227 161; /* green */
+  --warn: 249 226 175; /* yellow */
+  --err: 243 139 168; /* red */
+  --border-color: 88 91 112; /* surface2 */
+}
+
+/* Tokyo Night */
+[data-theme='tokyo-night'] {
+  --bg: 26 27 38;
+  --surface: 36 40 59;
+  --surface-2: 65 72 104;
+  --fg: 192 202 245;
+  --muted: 169 177 214;
+  --accent: 122 162 247;
+  --accent-2: 187 154 247;
+  --ok: 158 206 106;
+  --warn: 224 175 104;
+  --err: 247 118 142;
+  --border-color: 86 95 137;
+}
+
+/* Gruvbox Dark */
+[data-theme='gruvbox-dark'] {
+  --bg: 40 40 40;
+  --surface: 60 56 54;
+  --surface-2: 80 73 69;
+  --fg: 235 219 178;
+  --muted: 168 153 132;
+  --accent: 250 189 47;
+  --accent-2: 184 187 38;
+  --ok: 184 187 38;
+  --warn: 250 189 47;
+  --err: 251 73 52;
+  --border-color: 102 92 84;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  /* Lock the shell to the viewport; the app owns all scrolling internally. */
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  height: 100dvh;
+}
+
+body {
+  background:
+    radial-gradient(120% 80% at 70% 0%, rgb(var(--accent) / 0.06), transparent 60%),
+    radial-gradient(80% 60% at 0% 100%, rgb(var(--accent-2) / 0.04), transparent 60%),
+    rgb(var(--bg));
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.surface-blur {
+  background: rgb(var(--surface) / var(--surface-alpha));
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+.snap-out {
+  transition-timing-function: cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+/* Focused window border accent. Animate the border-color and shadow rather
+   than re-rendering the window. */
+.window-shell {
+  border: var(--border) solid rgb(var(--border-color));
+  border-radius: var(--radius);
+  background: rgb(var(--surface) / 0.92);
+  box-shadow: var(--shadow-window);
+  transition:
+    border-color 160ms ease-out,
+    box-shadow 160ms ease-out;
+}
+.window-shell.focused {
+  border-color: rgb(var(--accent));
+  box-shadow:
+    0 0 0 1px rgb(var(--accent) / 0.35),
+    var(--shadow-window);
+}
+
+/* Obsidian vault body — inline images, lists, etc. */
+.obsidian-body img {
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgb(var(--border-color) / 0.5);
+  margin: 0.5rem 0;
+  display: block;
+}
+
+.obsidian-body a[href^='obsidian://'] {
+  color: rgb(var(--accent-2));
+  text-decoration: none;
+  border-bottom: 1px dotted rgb(var(--accent-2) / 0.6);
+  cursor: pointer;
+}
+.obsidian-body a[href^='obsidian://']:hover {
+  border-bottom-style: solid;
+}
+
+/* Scrollbar tuned to the theme. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--surface-2) / 0.7);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--accent) / 0.6);
+}

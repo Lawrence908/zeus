@@ -302,21 +302,21 @@ export function SettingsPage() {
     <div className="flex flex-col h-screen bg-background">
       <TopNav />
 
-      <div className="flex flex-1 overflow-hidden pt-[52px]">
-        {/* Settings nav sidebar */}
-        <aside className="w-[220px] shrink-0 border-r border-outline-variant/20 bg-surface-container-lowest/50 p-4">
-          <div className="mb-4">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden pt-[52px]">
+        {/* Settings nav — horizontal scroll strip on mobile, side column on desktop */}
+        <aside className="w-full md:w-[220px] shrink-0 border-b md:border-b-0 md:border-r border-outline-variant/20 bg-surface-container-lowest/50 p-2 md:p-4 overflow-x-auto md:overflow-visible">
+          <div className="mb-4 hidden md:block">
             <span className="text-[10px] font-label uppercase tracking-[0.2em] text-on-surface-variant/40">
               Configuration
             </span>
           </div>
-          <nav className="flex flex-col gap-0.5">
+          <nav className="flex md:flex-col gap-0.5 flex-nowrap">
             {SECTIONS.map((section) => (
               <button
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
                 className={[
-                  'flex items-center gap-2.5 px-3 py-2 rounded text-sm font-body transition-colors text-left',
+                  'flex items-center gap-2.5 px-3 py-2 rounded text-sm font-body transition-colors text-left shrink-0 whitespace-nowrap',
                   activeSection === section.id
                     ? 'bg-surface-container-low text-primary-container'
                     : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low/50',
@@ -333,7 +333,7 @@ export function SettingsPage() {
         </aside>
 
         {/* Settings content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-8 py-8 max-w-2xl">
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-8 py-6 md:py-8 max-w-2xl">
           {/* Model section */}
           {activeSection === 'model' && (
             <div>

@@ -14,7 +14,13 @@ function timeAgo(timestamp: number): string {
   return `${days}d ago`
 }
 
-export function SessionsSidebar() {
+interface SessionsSidebarProps {
+  // On mobile the sidebar is an off-canvas drawer; on desktop it is always inline.
+  open?: boolean
+  onClose?: () => void
+}
+
+export function SessionsSidebar({ open = false, onClose }: SessionsSidebarProps = {}) {
   const { sessions, activeSessionId, setSessions, setActiveSession, setMessages } = useChatStore()
   const [memoryLoad, setMemoryLoad] = useState(64)
 
@@ -56,6 +62,7 @@ export function SessionsSidebar() {
 
   const handleSessionClick = async (session: Session) => {
     setActiveSession(session.id)
+    onClose?.()
     try {
       const res = await fetch(`/chat/sessions/${session.id}/messages`)
       if (res.ok) {
@@ -72,6 +79,7 @@ export function SessionsSidebar() {
   const handleNewSession = async () => {
     setActiveSession(null)
     setMessages([])
+    onClose?.()
     try {
       const res = await fetch('/chat/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
       if (res.ok) {
@@ -118,7 +126,23 @@ export function SessionsSidebar() {
   }
 
   return (
-    <aside className="w-[240px] shrink-0 border-r border-outline-variant/20 flex flex-col bg-surface-container-lowest/50">
+    <>
+      {/* Mobile backdrop */}
+      {open && (
+        <button
+          className="md:hidden fixed inset-0 top-[52px] z-30 bg-black/50"
+          aria-label="Close sessions"
+          onClick={() => onClose?.()}
+        />
+      )}
+      <aside
+        className={[
+          'fixed top-[52px] bottom-0 left-0 z-40 w-[280px] max-w-[85vw] transform transition-transform duration-200',
+          'md:static md:top-0 md:z-auto md:w-[240px] md:max-w-none md:translate-x-0 md:transition-none',
+          'shrink-0 border-r border-outline-variant/20 flex flex-col bg-surface-container-lowest md:bg-surface-container-lowest/50',
+          open ? 'translate-x-0' : '-translate-x-full',
+        ].join(' ')}
+      >
       {/* New Session button */}
       <div className="p-3 border-b border-outline-variant/20">
         <button
@@ -208,6 +232,7 @@ export function SessionsSidebar() {
           />
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
