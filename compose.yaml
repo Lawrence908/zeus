@@ -43,6 +43,11 @@ services:
       # which causes the runner to respawn and re-probe CUDA — slow, and tickles the
       # NVML-after-daemon-reload bug that drops the embedder onto CPU).
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
+      # Server-wide default context window for any client that doesn't pass its own
+      # options.num_ctx (e.g. the meeting-notes app hitting this Ollama directly on
+      # 11435). Raised from Ollama's built-in 4096 now that mcp-mesh no longer holds
+      # 5.6GB of VRAM permanently — verify size_vram after changing this.
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-8192}
       # Quieter llama.cpp / GGUF load traces in logs (unset or "info" when debugging loads)
       - GGML_LOG_LEVEL=${OLLAMA_GGML_LOG_LEVEL:-error}
     deploy:
