@@ -97,8 +97,29 @@ def test_parallel_independent_nodes_both_land(tmp_path):
     asyncio.run(scenario())
 
 
-def test_parallel_merge_conflict_fails_one_open(tmp_path):
-    # Both nodes edit README.md from the same base tip -> one merges, one conflicts.
+def test_parallel_merge_conflict_auto_rebase_recovers(tmp_path, monkeypatch):
+    # Both nodes edit README.md from the same base tip -> one merges, the other
+    # conflicts. P9a: the loser re-cuts from the new tip and redoes, so both land.
+    monkeypatch.setenv("ZEUS_SWARM_MERGE_CONFLICT_RETRIES", "1")
+    repo, store, coord = _mk(
+        tmp_path, FileWorker({"a": ("README.md", "from a\n"), "b": ("README.md", "from b\n")}))
+
+    async def scenario():
+        spec = RunSpec(goal="g", repo=repo, max_parallel=2,
+                       nodes=[TaskNodeSpec(id="a", title="a"), TaskNodeSpec(id="b", title="b")])
+        view = await store.create_run(spec)
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)
+        assert sorted(n.status.value for n in view.nodes) == ["succeeded", "succeeded"]
+        # the rebased node ran twice (initial conflict + redo)
+        assert max(n.attempts for n in view.nodes) == 2
+        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+
+    asyncio.run(scenario())
+
+
+def test_parallel_merge_conflict_no_retry_fails_one(tmp_path, monkeypatch):
+    # With auto-rebase disabled, the classic behaviour: one node fails fail-open.
+    monkeypatch.setenv("ZEUS_SWARM_MERGE_CONFLICT_RETRIES", "0")
     repo, store, coord = _mk(
         tmp_path, FileWorker({"a": ("README.md", "from a\n"), "b": ("README.md", "from b\n")}))
 
@@ -111,8 +132,7 @@ def test_parallel_merge_conflict_fails_one_open(tmp_path):
         assert statuses == ["failed", "succeeded"]  # exactly one lost the merge race
         failed = next(n for n in view.nodes if n.status == NodeStatus.FAILED)
         assert "merge conflict" in (failed.error or "")
-        # fail-open: the winner is still delivered
-        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL  # fail-open
 
     asyncio.run(scenario())
 

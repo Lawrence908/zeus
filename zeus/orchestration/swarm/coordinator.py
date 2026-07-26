@@ -256,17 +256,20 @@ class Coordinator:
             await self._store.update_node(n)
             return
         node_path = await ws.new_node_worktree(n.id) if ws else None
+        conflicts_left = config.merge_conflict_retries()  # P9a auto-rebase budget
         try:
             feedback: str | None = None
-            for attempt in range(1, n.max_attempts + 1):
-                n.attempts = attempt
+            work_attempt = 0  # gates worker/verify retries against max_attempts
+            while True:
+                work_attempt += 1
+                n.attempts += 1  # total tries (incl. rebase redos) for observability
                 result = await self._worker.run(n, run, node_path, feedback=feedback)
                 n.cost_usd += result.cost_usd  # accumulate across retries
                 n.session_id = result.session_id or n.session_id
 
                 if not result.success:
                     feedback = f"Worker error: {result.error}"
-                    if attempt < n.max_attempts:
+                    if work_attempt < n.max_attempts:
                         await self._store.update_node(n)
                         continue
                     await self._fail(n, nodes, result.error or "worker reported failure")
@@ -277,10 +280,10 @@ class Coordinator:
                     feedback = f"Verification (`{n.check}`) failed:\n{vres.output}"
                     if node_path is not None:
                         await ws.discard_in(node_path)  # drop the failed attempt
-                    if attempt < n.max_attempts:
+                    if work_attempt < n.max_attempts:
                         await self._store.update_node(n)
                         continue
-                    await self._fail(n, nodes, f"verification failed after {attempt} attempt(s)")
+                    await self._fail(n, nodes, f"verification failed after {work_attempt} attempt(s)")
                     return
 
                 # Passed (or no check): commit in the node worktree, then merge.
@@ -296,6 +299,24 @@ class Coordinator:
                     if commit.committed:
                         merge = await ws.merge_node(n.id)
                         if not merge.merged:
+                            # P9a: rebase-by-redo. A conflict means another node merged
+                            # work that overlaps ours; re-cut a worktree from the new
+                            # integration tip and redo, instead of failing outright.
+                            if conflicts_left > 0:
+                                conflicts_left -= 1
+                                feedback = (
+                                    f"Your change conflicted with work merged concurrently "
+                                    f"({merge.conflicts}). Redo it against the current state "
+                                    f"of the repository."
+                                )
+                                await self._store.append_event(
+                                    n.run_id, "node_status",
+                                    f"merge conflict, rebasing ({merge.conflicts})", n.id)
+                                await ws.teardown_node(node_path)
+                                node_path = await ws.new_node_worktree(n.id)  # fresh tip
+                                work_attempt = 0  # give the redo a full verify budget
+                                await self._store.update_node(n)
+                                continue
                             await self._fail(n, nodes, f"merge conflict: {merge.conflicts}")
                             return
                 n.status = NodeStatus.SUCCEEDED

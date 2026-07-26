@@ -132,6 +132,12 @@ def hybrid_local() -> bool:
     return os.getenv("ZEUS_SWARM_HYBRID_LOCAL", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
+def merge_conflict_retries() -> int:
+    """Extra worker redos (auto-rebase, P9a) when a node's merge conflicts with
+    concurrently-merged work, before the node fails. Separate from verify retries."""
+    return int(os.getenv("ZEUS_SWARM_MERGE_CONFLICT_RETRIES", "1"))
+
+
 def sandbox_limits() -> dict[str, str]:
     return {
         "memory": os.getenv("ZEUS_SWARM_SANDBOX_MEMORY", "2g"),
