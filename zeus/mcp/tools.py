@@ -364,3 +364,12 @@ async def capitolscope_leaderboard(*, limit: int = 20) -> dict[str, Any]:
     """Members ranked by composite Scrutiny Score (trading edge, pre-earnings
     positioning, committee conflicts, herding, disclosure lag, bet-size anomaly)."""
     return await _cs_get("leaderboard", {"limit": limit})
+
+
+async def capitolscope_context_pack(*, days: int = 7) -> dict[str, Any]:
+    """One-call, LLM-ready CapitolScope feed for synthesis: the week's
+    congressional-trading activity plus week-over-week deltas and trend labels
+    (sector rotation, newly-active tickers, member-count changes), notable
+    clusters/trades, and top scrutiny movers. Feed this to a model to connect
+    congressional trading shifts to global events."""
+    return await _cs_get("context-pack", {"days": days})

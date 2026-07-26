@@ -16,6 +16,7 @@ load_dotenv()
 
 from zeus.mcp.tools import (
     capitolscope_active_tickers,
+    capitolscope_context_pack,
     capitolscope_digest,
     capitolscope_leaderboard,
     capitolscope_sector_flow,
@@ -165,6 +166,11 @@ async def capitolscope_digest_tool(days: int = 7):
 @mcp.tool(name="capitolscope_active_tickers")
 async def capitolscope_active_tickers_tool(days: int = 90, limit: int = 25):
     return await capitolscope_active_tickers(days=days, limit=limit)
+
+
+@mcp.tool(name="capitolscope_context_pack")
+async def capitolscope_context_pack_tool(days: int = 7):
+    return await capitolscope_context_pack(days=days)
 
 
 @mcp.tool(name="capitolscope_ticker")
