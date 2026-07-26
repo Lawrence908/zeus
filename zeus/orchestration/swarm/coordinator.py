@@ -25,7 +25,7 @@ import logging
 import os
 from typing import Callable
 
-from zeus.orchestration.swarm import dag
+from zeus.orchestration.swarm import config, dag
 from zeus.orchestration.swarm.models import (
     Approval,
     ApprovalKind,
@@ -37,6 +37,7 @@ from zeus.orchestration.swarm.models import (
     TaskNode,
 )
 from zeus.orchestration.swarm.notifier import ApprovalNotifier, NullNotifier
+from zeus.orchestration.swarm.pr import PrResult, PullRequestOpener
 from zeus.orchestration.swarm.store import SwarmStore
 from zeus.orchestration.swarm.verifier import NoopVerifier, Verifier
 from zeus.orchestration.swarm.worker import Worker
@@ -58,12 +59,14 @@ class Coordinator:
         workspace_factory: WorkspaceFactory | None = None,
         verifier: Verifier | None = None,
         notifier: ApprovalNotifier | None = None,
+        pr_opener: PullRequestOpener | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
         self._workspace_factory = workspace_factory
         self._verifier = verifier or NoopVerifier()
         self._notifier = notifier or NullNotifier()
+        self._pr_opener = pr_opener or PullRequestOpener()
         self._workspaces: dict[str, CodeWorkspace] = {}
 
     async def _notify(self, run: Run, approval: Approval) -> None:
@@ -348,19 +351,56 @@ class Coordinator:
 
         elif ap.kind == ApprovalKind.FINAL:
             if approve:
-                view = await self._store.get_view(run_id)
-                all_ok = view is not None and all(
-                    n.status == NodeStatus.SUCCEEDED for n in view.nodes
-                )
-                await self._store.set_run_status(
-                    run_id, RunStatus.COMPLETED if all_ok else RunStatus.COMPLETED_PARTIAL
-                )
+                await self._finalize(run_id)
             else:
                 await self._store.set_run_status(run_id, RunStatus.CANCELLED)
             # Integration branch stays for review; only the worktree is removed.
             await self._teardown_workspace(run_id)
 
         return await self._store.get_view(run_id)
+
+    async def _finalize(self, run_id: str) -> None:
+        """Final gate approved (P7): run a run-level project check on the integration
+        branch, then (opt-in) open a PR. Must run before the workspace is torn down.
+
+        A failing project check does not discard the merged work - the run settles
+        COMPLETED_PARTIAL with the check output and no PR, so the branch is there to
+        fix. A passing check (or none) with all nodes green settles COMPLETED.
+        """
+        view = await self._store.get_view(run_id)
+        if view is None:
+            return
+        all_ok = all(n.status == NodeStatus.SUCCEEDED for n in view.nodes)
+        ws = self._workspaces.get(run_id)
+
+        # Run-level check on the assembled branch, reusing the (sandboxed) verifier.
+        check_cmd = (view.run.project_check or config.project_check_default()).strip()
+        passed: bool | None = None
+        output: str | None = None
+        if check_cmd and ws is not None and ws.integration_path is not None:
+            synthetic = TaskNode(run_id=run_id, id="__project__",
+                                 title="project check", check=check_cmd)
+            vres = await self._verifier.verify(synthetic, ws.integration_path)
+            passed, output = vres.passed, vres.output
+
+        status = RunStatus.COMPLETED if (all_ok and passed is not False) else RunStatus.COMPLETED_PARTIAL
+
+        pr_url: str | None = None
+        if passed is not False and config.auto_pr() and ws is not None:
+            nodes_summary = "\n".join(
+                f"- {n.id}: {n.title} ({n.status.value})" for n in view.nodes
+            )
+            # Reflect the check result on the run so the PR body can read it.
+            run_for_pr = view.run.model_copy(update={"project_check_passed": passed})
+            pr: PrResult = await self._pr_opener.open(run_for_pr, ws.branch, nodes_summary)
+            pr_url = pr.url
+            if pr.error:
+                logger.warning("swarm %s: PR not opened: %s", run_id, pr.error)
+
+        await self._store.finalize_run(
+            run_id, status, pr_url=pr_url,
+            project_check_passed=passed, project_check_output=output,
+        )
 
     async def kill(self, run_id: str) -> RunView | None:
         view = await self._store.get_view(run_id)

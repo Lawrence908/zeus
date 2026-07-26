@@ -33,6 +33,10 @@ export interface Run {
   max_parallel: number;
   dry_run: boolean;
   planner_cost_usd: number;
+  project_check: string;
+  project_check_passed: boolean | null;
+  project_check_output: string | null;
+  pr_url: string | null;
   created_at: string;
   updated_at: string;
 }

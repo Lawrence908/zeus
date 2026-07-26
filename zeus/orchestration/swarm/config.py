@@ -179,3 +179,26 @@ def verify_limits() -> dict[str, str]:
         "cpus": os.getenv("ZEUS_SWARM_VERIFY_CPUS", "2"),
         "pids": os.getenv("ZEUS_SWARM_VERIFY_PIDS", "512"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Final gate (P7) - run-level project check + auto-PR.
+# ---------------------------------------------------------------------------
+
+
+def project_check_default() -> str:
+    """Run-level check on the integration branch at the final gate (full suite /
+    build). Empty = skip. A per-run value (planner or API) overrides this."""
+    return os.getenv("ZEUS_SWARM_PROJECT_CHECK", "").strip()
+
+
+def auto_pr() -> bool:
+    """Open a GitHub PR from the integration branch when the final gate is approved
+    and the project check passes. OFF by default: pushing a branch and opening a
+    PR on the real repo is an outward action, so it stays opt-in."""
+    return os.getenv("ZEUS_SWARM_AUTO_PR", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def pr_base() -> str:
+    """Base branch for the PR. Empty = auto-detect the repo's default branch."""
+    return os.getenv("ZEUS_SWARM_PR_BASE", "").strip()

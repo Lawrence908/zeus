@@ -33,6 +33,7 @@ class PlanBody(BaseModel):
     budget_usd: float = 10.0
     max_parallel: int = 3
     dry_run: bool = False
+    project_check: str | None = None  # override the planner's run-level check (P7)
 
 
 def _with_estimate(view: RunView) -> RunView:
@@ -98,10 +99,15 @@ async def plan_run(body: PlanBody, request: Request) -> RunView:
         raise HTTPException(502, detail=f"planner failed: {exc}") from exc
     try:
         dag.assert_acyclic(result.nodes)  # type: ignore[arg-type]
+        # Run-level check: explicit override > planner's suggestion > config default.
+        project_check = (
+            body.project_check if body.project_check is not None
+            else (result.project_check or config.project_check_default())
+        )
         spec = RunSpec(
             goal=body.goal, repo=repo, nodes=result.nodes,
             budget_usd=body.budget_usd, max_parallel=body.max_parallel, dry_run=body.dry_run,
-            planner_cost_usd=result.cost_usd,
+            planner_cost_usd=result.cost_usd, project_check=project_check,
         )
     except (ValueError, ValidationError) as exc:
         raise HTTPException(422, detail=f"planner produced an invalid DAG: {exc}") from exc

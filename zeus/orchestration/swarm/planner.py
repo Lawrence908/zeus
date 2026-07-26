@@ -30,6 +30,7 @@ class PlanResult(BaseModel):
     nodes: list[TaskNodeSpec]
     cost_usd: float = 0.0  # what Metis spent scoping (captured from the CLI result)
     session_id: str | None = None
+    project_check: str = ""  # run-level check for the final gate (P7)
 
 _PLAN_INSTRUCTIONS = """\
 You are Metis, the planner for an autonomous software swarm. Analyse this
@@ -43,7 +44,8 @@ Output ONLY a single JSON object, no prose, of the form:
    "check": "shell command that exits 0 when this node is correct",
    "tool_scope": ["Read","Edit","Write","Bash"], "model": "haiku",
    "requires_approval": false, "max_attempts": 2}
-]}
+ ],
+ "project_check": "one command that verifies the WHOLE change on the assembled branch (e.g. the full test suite / build); \"\" if none"}
 
 Rules:
 - ids are unique, short, kebab-case; deps reference other ids only (acyclic).
@@ -95,6 +97,15 @@ def parse_plan(text: str) -> list[TaskNodeSpec]:
     if not isinstance(raw_nodes, list) or not raw_nodes:
         raise ValueError("planner produced no nodes")
     return [TaskNodeSpec(**n) for n in raw_nodes]
+
+
+def parse_project_check(text: str) -> str:
+    """Pull the optional top-level `project_check` out of a plan (P7)."""
+    try:
+        obj = _extract_json(text)
+    except (ValueError, json.JSONDecodeError):
+        return ""
+    return str(obj.get("project_check", "")).strip() if isinstance(obj, dict) else ""
 
 
 class StubPlanner:
@@ -150,4 +161,7 @@ class ClaudePlanner:
             result_text = out.decode("utf-8", "replace")
         if not result_text:
             raise RuntimeError(f"planner produced no output: {err.decode('utf-8','replace')[:300]}")
-        return PlanResult(nodes=parse_plan(result_text), cost_usd=cost, session_id=session)
+        return PlanResult(
+            nodes=parse_plan(result_text), cost_usd=cost, session_id=session,
+            project_check=parse_project_check(result_text),
+        )

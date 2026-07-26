@@ -83,6 +83,7 @@ class RunSpec(BaseModel):
     max_parallel: int = Field(default=3, ge=1, le=16)
     dry_run: bool = False  # execute the DAG against a stub (zero spend) to validate shape
     planner_cost_usd: float = 0.0  # what Metis spent producing this DAG (set by /plan)
+    project_check: str = ""  # run-level check on the integration branch at the final gate (P7)
 
     @model_validator(mode="after")
     def _validate_dag(self) -> RunSpec:
@@ -144,6 +145,10 @@ class Run(BaseModel):
     max_parallel: int = 3
     dry_run: bool = False
     planner_cost_usd: float = 0.0
+    project_check: str = ""  # run-level check command (P7)
+    project_check_passed: bool | None = None  # None = not run yet / no check
+    project_check_output: str | None = None  # tail of the check output
+    pr_url: str | None = None  # PR opened at the final gate (P7), if auto-PR is on
     created_at: str = ""
     updated_at: str = ""
 

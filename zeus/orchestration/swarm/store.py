@@ -91,6 +91,20 @@ class SwarmStore:
                 )
                 """
             )
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add columns to an existing db idempotently (P7 finalization fields)."""
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(swarm_runs)")}
+        for col, ddl in (
+            ("project_check", "TEXT NOT NULL DEFAULT ''"),
+            ("project_check_passed", "INTEGER"),  # NULL = not run
+            ("project_check_output", "TEXT"),
+            ("pr_url", "TEXT"),
+        ):
+            if col not in have:
+                conn.execute(f"ALTER TABLE swarm_runs ADD COLUMN {col} {ddl}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)
@@ -110,6 +124,11 @@ class SwarmStore:
             max_parallel=r["max_parallel"],
             dry_run=bool(r["dry_run"]),
             planner_cost_usd=r["planner_cost_usd"],
+            project_check=r["project_check"],
+            project_check_passed=(None if r["project_check_passed"] is None
+                                  else bool(r["project_check_passed"])),
+            project_check_output=r["project_check_output"],
+            pr_url=r["pr_url"],
             created_at=r["created_at"],
             updated_at=r["updated_at"],
         )
@@ -169,9 +188,9 @@ class SwarmStore:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO swarm_runs (id, goal, repo, status, budget_usd, max_parallel, dry_run,"
-                " planner_cost_usd, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " planner_cost_usd, project_check, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (run.id, run.goal, run.repo, run.status.value, run.budget_usd, run.max_parallel,
-                 int(spec.dry_run), spec.planner_cost_usd, now, now),
+                 int(spec.dry_run), spec.planner_cost_usd, spec.project_check, now, now),
             )
             for n in spec.nodes:
                 # No deps -> ready immediately once the plan is approved; else blocked.
@@ -250,6 +269,30 @@ class SwarmStore:
             conn.execute(
                 "UPDATE swarm_runs SET budget_usd = ?, updated_at = ? WHERE id = ?",
                 (budget_usd, _now_iso(), run_id),
+            )
+
+    async def finalize_run(
+        self, run_id: str, status: RunStatus, *,
+        pr_url: str | None = None,
+        project_check_passed: bool | None = None,
+        project_check_output: str | None = None,
+    ) -> None:
+        """Record the final-gate outcome: status + project-check result + PR (P7)."""
+        await asyncio.to_thread(
+            self._finalize_run_sync, run_id, status, pr_url,
+            project_check_passed, project_check_output,
+        )
+
+    def _finalize_run_sync(
+        self, run_id: str, status: RunStatus, pr_url: str | None,
+        passed: bool | None, output: str | None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE swarm_runs SET status = ?, pr_url = ?, project_check_passed = ?,"
+                " project_check_output = ?, updated_at = ? WHERE id = ?",
+                (status.value, pr_url, (None if passed is None else int(passed)),
+                 output, _now_iso(), run_id),
             )
 
     async def update_node(self, node: TaskNode) -> None:

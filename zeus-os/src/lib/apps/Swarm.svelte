@@ -192,6 +192,22 @@
           <button class="text-[10px] px-2 py-0.5 border border-err/60 text-err rounded shrink-0" on:click={kill}>kill</button>
         </header>
 
+        {#if selected.run.project_check}
+          <div class="mb-2 text-[10px] flex items-center gap-2 flex-wrap">
+            <span class="text-muted">project check <span class="text-fg">{selected.run.project_check}</span></span>
+            {#if selected.run.project_check_passed === true}
+              <span class="text-ok">passed</span>
+            {:else if selected.run.project_check_passed === false}
+              <span class="text-err">failed</span>
+            {:else}
+              <span class="text-muted/60">not run</span>
+            {/if}
+            {#if selected.run.pr_url}
+              <a class="text-accent underline" href={selected.run.pr_url} target="_blank" rel="noopener">open PR ↗</a>
+            {/if}
+          </div>
+        {/if}
+
         {#if pending.length}
           <div class="mb-3 space-y-1">
             {#each pending as a (a.id)}
