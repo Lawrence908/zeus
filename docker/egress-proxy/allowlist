@@ -1,0 +1,7 @@
+# Hosts the swarm worker may reach (extended regex, one per line).
+# Anthropic API + its statsig/telemetry the CLI talks to.
+(^|\.)anthropic\.com$
+# Add package registries here ONLY if a run legitimately needs them, e.g.:
+# (^|\.)pypi\.org$
+# (^|\.)files\.pythonhosted\.org$
+# (^|\.)registry\.npmjs\.org$

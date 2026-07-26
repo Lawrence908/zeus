@@ -32,6 +32,7 @@ from zeus.core.zeus_os import router as zeus_os_router
 from zeus.integrations.telegram import build_telegram_bot
 from zeus.memory.store import get_memory_store
 from zeus.kronos.api import router as kronos_router
+from zeus.orchestration.swarm.api import router as swarm_router
 from zeus.orchestration.bus import router as orchestration_router
 from zeus.orchestration.hooks import build_default_registry, bus_metrics
 from zeus.orchestration.runtime import AgentRuntime
@@ -71,6 +72,20 @@ async def check_service(client: httpx.AsyncClient, name: str, url: str) -> Servi
         return ServiceHealth(name=name, status=status, latency_ms=round(latency, 1))
     except Exception:
         return ServiceHealth(name=name, status="down")
+
+
+def _make_swarm_answer(app: FastAPI):
+    """Late-bound Telegram `/answer` handler: routes an answer to the swarm
+    coordinator (which may be created after the bot). Returns a status string."""
+    async def _answer(run_id: str, text: str) -> str:
+        coord = getattr(app.state, "swarm_coordinator", None)
+        if coord is None:
+            return "Swarm is not enabled."
+        view = await coord.answer(run_id, text)
+        if view is None:
+            return f"Run {run_id} not found."
+        return f"Answer recorded for run {run_id}."
+    return _answer
 
 
 @asynccontextmanager
@@ -122,6 +137,7 @@ async def lifespan(app: FastAPI):
     from zeus.core.tools.status_read import register as _register_status_read
     from zeus.core.tools.web_search import register_if_configured as _register_web_search
     from zeus.core.tools.deep_research import register as _register_deep_research
+    from zeus.core.tools.swarm import register as _register_swarm_tools
 
     _register_current_time()
     _register_web_search()
@@ -134,6 +150,7 @@ async def lifespan(app: FastAPI):
     _register_calendar_today()
     _register_newsletter_latest()
     _register_deep_research()
+    _register_swarm_tools()  # swarm_status/propose/approve/answer (if ZEUS_SWARM_ENABLED)
     app.state.tools_registered = [spec.name for spec in tool_registry.list_specs()]
 
     # Observability — query log ring buffer
@@ -148,6 +165,7 @@ async def lifespan(app: FastAPI):
         tg_bot = build_telegram_bot(
             app.state.query_engine,
             overrides=app.state.runtime_settings.get_section("telegram"),
+            swarm_answer=_make_swarm_answer(app),
         )
         if tg_bot is not None:
             await tg_bot.start()
@@ -179,6 +197,106 @@ async def lifespan(app: FastAPI):
     app.state.kronos_scheduler = None
     app.state.kronos_task = None
     app.state.kronos_recent_runs = None
+
+    # Argo swarm (P0): durable run store + coordinator over a stub worker.
+    # Sandboxed Claude Code workers replace the stub in P1.
+    app.state.swarm_store = None
+    app.state.swarm_coordinator = None
+    app.state.swarm_planner = None
+    app.state.swarm_bus = None
+    if os.getenv("ZEUS_SWARM_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
+        import logging as _logging
+
+        from zeus.orchestration.swarm.coordinator import Coordinator
+        from zeus.orchestration.swarm.store import SwarmStore
+        from zeus.orchestration.swarm.worker import StubWorker
+
+        sw_db_path = os.getenv("ZEUS_SWARM_DB_PATH", "zeus/data/swarm.db")
+        os.makedirs(os.path.dirname(sw_db_path) or ".", exist_ok=True)
+        sw_store = SwarmStore(sw_db_path)
+        app.state.swarm_store = sw_store
+
+        sw_kind = os.getenv("ZEUS_SWARM_WORKER", "stub").strip().lower()
+        if sw_kind in ("claude", "sandbox", "local"):
+            from zeus.orchestration.swarm import config as _swcfg
+            from zeus.orchestration.swarm.worktree import CodeWorkspace
+
+            _default_model = _swcfg.model_default()  # per-node model overrides this (C1)
+            if sw_kind == "sandbox":
+                from zeus.orchestration.swarm.sandbox import SandboxedClaudeWorker
+
+                sw_worker: object = SandboxedClaudeWorker(model=_default_model)
+            elif sw_kind == "local":
+                from zeus.orchestration.swarm.local_worker import LocalWorker
+
+                sw_worker = LocalWorker()  # every node runs free on the homelab GPU
+            else:
+                from zeus.orchestration.swarm.claude_worker import ClaudeCodeWorker
+
+                sw_worker = ClaudeCodeWorker(model=_default_model)
+            # Hybrid (C4): let a paid run route local-tagged nodes to the free tier.
+            if sw_kind in ("claude", "sandbox") and _swcfg.hybrid_local():
+                from zeus.orchestration.swarm.local_worker import RoutingWorker
+
+                sw_worker = RoutingWorker(sw_worker)  # type: ignore[arg-type]
+            sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
+            from zeus.orchestration.swarm.planner import ClaudePlanner
+
+            app.state.swarm_planner = ClaudePlanner()
+            # P5: the node `check` is LLM-authored shell -> run it isolated, not on
+            # the host. Fall back to host exec only if allowed and the sandbox
+            # can't run (no docker), and say so loudly.
+            from zeus.orchestration.swarm.verifier import (
+                CommandVerifier,
+                SandboxedCommandVerifier,
+                docker_available,
+            )
+
+            if _swcfg.verify_sandbox() and docker_available():
+                sw_verifier: object = SandboxedCommandVerifier()
+            elif _swcfg.verify_host_fallback():
+                _logging.getLogger("zeus.swarm").warning(
+                    "verify sandbox unavailable (docker=%s, enabled=%s); running "
+                    "LLM-authored checks ON THE HOST. Set ZEUS_SWARM_VERIFY_HOST_FALLBACK=0 "
+                    "to fail closed instead.",
+                    docker_available(), _swcfg.verify_sandbox(),
+                )
+                sw_verifier = CommandVerifier()
+            else:
+                from zeus.orchestration.swarm.verifier import FailClosedVerifier
+
+                _logging.getLogger("zeus.swarm").warning(
+                    "verify sandbox unavailable and host fallback disabled; nodes "
+                    "with a check will fail closed (not verified on the host)."
+                )
+                sw_verifier = FailClosedVerifier()
+        else:
+            sw_worker = StubWorker()
+            sw_factory = None
+            from zeus.orchestration.swarm.planner import StubPlanner
+            from zeus.orchestration.swarm.verifier import NoopVerifier
+
+            app.state.swarm_planner = StubPlanner()
+            sw_verifier = NoopVerifier()
+        from zeus.orchestration.swarm.notifier import NullNotifier, TelegramNotifier
+
+        sw_notifier = TelegramNotifier.from_env() or NullNotifier()
+        from zeus.orchestration.swarm.events import SwarmEventBus
+
+        sw_bus = SwarmEventBus()
+        app.state.swarm_bus = sw_bus
+        sw_coordinator = Coordinator(  # type: ignore[arg-type]
+            sw_store, sw_worker, sw_factory, sw_verifier, sw_notifier, event_bus=sw_bus
+        )
+        app.state.swarm_coordinator = sw_coordinator
+        _logging.getLogger("zeus.swarm").info(
+            "Argo swarm enabled (worker=%s, db=%s)", sw_kind, sw_db_path
+        )
+        # P6: reconcile persisted runs with on-disk git after a restart - reset
+        # interrupted nodes, re-attach workspaces, reap orphan worktrees, and
+        # (unless disabled) resume RUNNING runs. Backgrounded so boot isn't blocked.
+        _resume = os.getenv("ZEUS_SWARM_RESUME_ON_START", "1").strip().lower() in ("1", "true", "yes", "on")
+        app.state.swarm_recover_task = asyncio.create_task(sw_coordinator.recover(resume=_resume))
     if os.getenv("ZEUS_KRONOS_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
         try:
             from collections import deque as _deque
@@ -295,6 +413,7 @@ app.include_router(chat_router)
 app.include_router(voice_state_router)
 app.include_router(orchestration_router)
 app.include_router(kronos_router)
+app.include_router(swarm_router)
 app.include_router(newsletter_router)
 app.include_router(vault_router)
 app.include_router(inbox_router)
@@ -523,7 +642,9 @@ async def _restart_telegram_bot(app: FastAPI) -> None:
         app.state.telegram_bot = None
 
     overrides = app.state.runtime_settings.get_section("telegram")
-    tg_bot = build_telegram_bot(app.state.query_engine, overrides=overrides)
+    tg_bot = build_telegram_bot(
+        app.state.query_engine, overrides=overrides, swarm_answer=_make_swarm_answer(app)
+    )
     if tg_bot is None:
         return
     try:

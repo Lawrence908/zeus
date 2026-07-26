@@ -4,17 +4,21 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Iterable
+from typing import Awaitable, Callable, Iterable
 
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
 )
+
+# (run_id, answer_text) -> human-readable status; wired to the swarm coordinator.
+SwarmAnswerFn = Callable[[str, str], Awaitable[str]]
 
 from zeus.core.query import QueryEngine
 from zeus.safety.policy_engine import aegis_enabled, evaluate_text
@@ -89,11 +93,13 @@ class TelegramBot:
         *,
         allowed_chat_ids: Iterable[int] = (),
         policy_name: str | None = None,
+        swarm_answer: SwarmAnswerFn | None = None,
     ) -> None:
         self._token = token
         self._qe = query_engine
         self._allowed: set[int] = set(allowed_chat_ids)
         self._policy = policy_name
+        self._swarm_answer = swarm_answer
         self._application: Application | None = None
         self._bot_username: str | None = None
 
@@ -112,6 +118,8 @@ class TelegramBot:
 
     async def start(self) -> None:
         application = ApplicationBuilder().token(self._token).build()
+        if self._swarm_answer is not None:
+            application.add_handler(CommandHandler("answer", self._on_answer))
         application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
         )
@@ -141,6 +149,29 @@ class TelegramBot:
             await app.shutdown()
         finally:
             self._application = None
+
+    async def _on_answer(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle `/answer <run_id> <text>` -> answer a swarm question gate (P10)."""
+        msg = update.effective_message
+        chat = update.effective_chat
+        if msg is None or chat is None or not msg.text or self._swarm_answer is None:
+            return
+        if self._allowed and chat.id not in self._allowed:
+            logger.warning("dropping /answer from disallowed chat_id=%s", chat.id)
+            return
+        parts = msg.text.split(maxsplit=2)  # ["/answer", run_id, "the answer text"]
+        if len(parts) < 3 or not parts[1].strip() or not parts[2].strip():
+            await msg.reply_text("Usage: /answer <run_id> <your answer>")
+            return
+        run_id, answer_text = parts[1].strip(), parts[2].strip()
+        try:
+            status = await self._swarm_answer(run_id, answer_text)
+        except Exception as exc:  # noqa: BLE001 - never crash the bot on a bad answer
+            logger.exception("swarm /answer failed: %s", exc)
+            status = "Sorry, that answer could not be delivered."
+        await msg.reply_text(status[:_TELEGRAM_MAX_LEN])
 
     async def _on_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -238,6 +269,8 @@ def _coerce_chat_ids(value: object) -> set[int]:
 def build_telegram_bot(
     query_engine: QueryEngine,
     overrides: dict | None = None,
+    *,
+    swarm_answer: SwarmAnswerFn | None = None,
 ) -> TelegramBot | None:
     """Construct a TelegramBot from runtime overrides + env, or return None.
 
@@ -277,4 +310,5 @@ def build_telegram_bot(
         query_engine,
         allowed_chat_ids=allowed,
         policy_name=policy,
+        swarm_answer=swarm_answer,
     )
