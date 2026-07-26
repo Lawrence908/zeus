@@ -97,6 +97,41 @@ def test_plan_scopes_goal_into_run(monkeypatch, tmp_path):
     assert [n["id"] for n in view["nodes"]] == ["implement", "verify"]
     # cost estimate is attached at the plan gate (C2)
     assert view["estimate"]["total_usd"] > 0
+
+
+# ---- P11 reach: multi-repo allowlist + propose ---------------------------
+
+
+def test_repos_lists_allowlist(monkeypatch, tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", f"{a},{b}")
+    c = _client()
+    data = c.get("/swarm/repos").json()
+    assert str(a) in data["repos"] and str(b) in data["repos"]
+    assert data["propose_enabled"] is False
+
+
+def test_propose_disabled_by_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", str(tmp_path))
+    monkeypatch.delenv("ZEUS_SWARM_PROPOSE_ENABLED", raising=False)
+    c = _client()
+    r = c.post("/swarm/propose", json={"goal": "do a thing"})
+    assert r.status_code == 403
+
+
+def test_propose_creates_plan_gated_run_with_capped_budget(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", str(tmp_path))
+    monkeypatch.setenv("ZEUS_SWARM_PROPOSE_ENABLED", "1")
+    monkeypatch.setenv("ZEUS_SWARM_PROPOSE_BUDGET_USD", "0.50")
+    c = _client()
+    # no repo passed -> defaults to the first allowlisted repo; budget capped
+    r = c.post("/swarm/propose", json={"goal": "add a health endpoint", "budget_usd": 999})
+    assert r.status_code == 200, r.text
+    view = r.json()
+    assert view["run"]["status"] == "pending_plan_approval"  # never auto-runs
+    assert view["run"]["repo"] == str(tmp_path)
+    assert view["run"]["budget_usd"] == 0.50  # hard cap enforced, not 999
     assert set(view["estimate"]["per_node"]) == {"implement", "verify"}
 
     # The Metis-proposed plan IS what you approve at gate 1; then it runs.

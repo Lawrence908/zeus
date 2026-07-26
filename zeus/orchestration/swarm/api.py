@@ -51,6 +51,12 @@ class PlanBody(BaseModel):
     project_check: str | None = None  # override the planner's run-level check (P7)
 
 
+class ProposeBody(BaseModel):
+    goal: str
+    repo: str | None = None  # defaults to the first allowlisted repo
+    budget_usd: float = 1.0  # capped at ZEUS_SWARM_PROPOSE_BUDGET_USD server-side
+
+
 def _with_estimate(view: RunView) -> RunView:
     view.estimate = estimate_run(view.nodes)
     return view
@@ -98,6 +104,44 @@ def _validate_repo(repo: str) -> str:
 async def swarm_health(request: Request) -> dict:
     enabled = getattr(request.app.state, "swarm_store", None) is not None
     return {"enabled": enabled}
+
+
+@router.get("/repos")
+async def repos() -> dict:
+    """The configured repo allowlist (P11), so the UI can offer a picker."""
+    return {"repos": config.repo_allowlist(), "propose_enabled": config.propose_enabled()}
+
+
+@router.post("/propose", response_model=RunView)
+async def propose(body: ProposeBody, request: Request) -> RunView:
+    """Autonomously scope a goal into a plan-gated run (P11 - e.g. Kairos).
+
+    Gated by ZEUS_SWARM_PROPOSE_ENABLED. The run always stops at the plan gate (a
+    human must approve before any spend), and its budget is hard-capped at
+    ZEUS_SWARM_PROPOSE_BUDGET_USD - an initiator cannot exceed it.
+    """
+    if not config.propose_enabled():
+        raise HTTPException(403, detail="proposing runs is disabled (ZEUS_SWARM_PROPOSE_ENABLED)")
+    allow = config.repo_allowlist()
+    repo = _validate_repo(body.repo) if body.repo else (allow[0] if allow else None)
+    if repo is None:
+        raise HTTPException(422, detail="no repo on the swarm allowlist to propose against")
+    budget = min(body.budget_usd, config.propose_budget_usd())
+    try:
+        result = await _planner(request).plan(body.goal, repo)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, detail=f"planner failed: {exc}") from exc
+    try:
+        dag.assert_acyclic(result.nodes)  # type: ignore[arg-type]
+        spec = RunSpec(
+            goal=body.goal, repo=repo, nodes=result.nodes, budget_usd=budget,
+            planner_cost_usd=result.cost_usd, project_check=result.project_check,
+        )
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(422, detail=f"planner produced an invalid DAG: {exc}") from exc
+    view = await _store(request).create_run(spec)
+    await _coordinator(request).notify_pending(view.run.id)  # ping the human to approve
+    return _with_estimate(view)
 
 
 @router.post("/runs", response_model=RunView)

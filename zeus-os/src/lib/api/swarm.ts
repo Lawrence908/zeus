@@ -104,6 +104,10 @@ export function swarmHealth(): Promise<{ enabled: boolean }> {
   return jsonFetch('/swarm/health');
 }
 
+export function swarmRepos(): Promise<{ repos: string[]; propose_enabled: boolean }> {
+  return jsonFetch('/swarm/repos');
+}
+
 export function listRuns(limit = 50): Promise<Run[]> {
   return jsonFetch(`/swarm/runs?limit=${limit}`);
 }

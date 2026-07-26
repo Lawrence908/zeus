@@ -15,6 +15,7 @@
     runEvents,
     swarmHealth,
     swarmMetrics,
+    swarmRepos,
     type ApprovalKind,
     type NodeStatus,
     type Run,
@@ -38,7 +39,8 @@
   let events: SwarmEvent[] = [];
 
   let goal = '';
-  let repo = '/home/chris/zeus';
+  let repo = '';
+  let repos: string[] = [];
   let dryRun = false;
 
   const NODE_COLOR: Record<NodeStatus, string> = {
@@ -165,6 +167,12 @@
     } catch {
       enabled = false;
     }
+    try {
+      repos = (await swarmRepos()).repos;
+      if (repos.length && !repo) repo = repos[0];
+    } catch {
+      /* repos endpoint unavailable; leave the picker empty */
+    }
     await refresh();
     // Live updates via SSE; keep a slow poll as a fallback if the stream drops.
     stream = openEventStream(onStreamUpdate);
@@ -195,11 +203,23 @@
       class="flex-1 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-fg focus:border-accent/70"
       on:keydown={(e) => e.key === 'Enter' && submitPlan()}
     />
-    <input
-      bind:value={repo}
-      class="w-44 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-muted"
-      title="Target repo (must be on the swarm allowlist)"
-    />
+    {#if repos.length}
+      <select
+        bind:value={repo}
+        class="w-44 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-muted focus:border-accent/70"
+        title="Target repo (from the swarm allowlist)"
+      >
+        {#each repos as r}
+          <option value={r}>{r.split('/').slice(-1)[0]}</option>
+        {/each}
+      </select>
+    {:else}
+      <input
+        bind:value={repo}
+        class="w-44 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-muted"
+        title="Target repo (must be on the swarm allowlist)"
+      />
+    {/if}
     <label class="flex items-center gap-1 text-[10px] text-muted cursor-pointer" title="Run the DAG against a stub (zero spend) to validate its shape">
       <input type="checkbox" bind:checked={dryRun} />
       dry-run

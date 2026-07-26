@@ -135,6 +135,21 @@ async def _dispatch_file_search(args: dict[str, Any]) -> Any:
     return await _http_post_json("/vault/search", payload)
 
 
+async def _dispatch_swarm_propose(args: dict[str, Any]) -> Any:
+    """Propose a plan-gated swarm run (P11). Double-gated: this tool must be on the
+    Kairos allowlist AND ZEUS_SWARM_PROPOSE_ENABLED=1 (the endpoint enforces the
+    latter and the tight budget cap). The run always waits for human approval."""
+    goal = str(args.get("goal") or "").strip()
+    if not goal:
+        raise ValueError("swarm_propose requires 'goal'")
+    payload: dict[str, Any] = {"goal": goal}
+    if args.get("repo"):
+        payload["repo"] = str(args["repo"])
+    if args.get("budget_usd") is not None:
+        payload["budget_usd"] = float(args["budget_usd"])
+    return await _http_post_json("/swarm/propose", payload)
+
+
 async def _dispatch_calendar_today(args: dict[str, Any]) -> Any:
     return await _http_get_json("/calendar/today")
 
@@ -152,6 +167,13 @@ _OLYMPIAN_READONLY_DISPATCH: dict[str, Any] = {
     "olympian_file_search": _dispatch_file_search,
     "zeus_calendar_today": _dispatch_calendar_today,
     "zeus_newsletter_latest": _dispatch_newsletter_latest,
+}
+
+# Non-read tools Kairos may call only when explicitly added to its allowlist.
+# swarm_propose creates a *plan-gated* run (no spend until a human approves) and
+# is additionally gated server-side by ZEUS_SWARM_PROPOSE_ENABLED.
+_OLYMPIAN_WRITE_DISPATCH: dict[str, Any] = {
+    "swarm_propose": _dispatch_swarm_propose,
 }
 
 
@@ -360,6 +382,9 @@ class KairosAgent:
         if tool in _OLYMPIAN_READONLY_DISPATCH:
             handler = _OLYMPIAN_READONLY_DISPATCH[tool]
             return await handler(args)
+
+        if tool in _OLYMPIAN_WRITE_DISPATCH:
+            return await _OLYMPIAN_WRITE_DISPATCH[tool](args)
 
         raise RuntimeError(f"tool dispatch not implemented: {tool}")
 

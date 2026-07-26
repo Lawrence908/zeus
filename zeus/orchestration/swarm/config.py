@@ -208,3 +208,21 @@ def auto_pr() -> bool:
 def pr_base() -> str:
     """Base branch for the PR. Empty = auto-detect the repo's default branch."""
     return os.getenv("ZEUS_SWARM_PR_BASE", "").strip()
+
+
+# ---------------------------------------------------------------------------
+# Reach (P11) - autonomous initiation of plan-gated runs (e.g. by Kairos).
+# ---------------------------------------------------------------------------
+
+
+def propose_enabled() -> bool:
+    """Allow a non-human initiator to create a plan-gated run via /swarm/propose.
+
+    OFF by default. A proposed run always stops at the plan gate (a human must
+    approve before any spend), so this only lets an agent *suggest* work."""
+    return os.getenv("ZEUS_SWARM_PROPOSE_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def propose_budget_usd() -> float:
+    """Hard ceiling on a proposed run's budget (tight; the initiator cannot raise it)."""
+    return float(os.getenv("ZEUS_SWARM_PROPOSE_BUDGET_USD", "1.00"))

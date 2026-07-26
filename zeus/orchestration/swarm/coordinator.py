@@ -76,6 +76,19 @@ class Coordinator:
         if self._bus is not None:
             await self._bus.publish({"run_id": run_id, "type": "update"})
 
+    async def notify_pending(self, run_id: str) -> None:
+        """Push a notification for a run's oldest pending gate (P11 propose flow).
+
+        create_run opens the plan gate without notifying (a human clicking 'plan'
+        is already watching); an autonomously-proposed run needs the human pinged.
+        """
+        view = await self._store.get_view(run_id)
+        if view is None:
+            return
+        ap = next((a for a in view.approvals if a.state == ApprovalState.PENDING), None)
+        if ap is not None:
+            await self._notify(view.run, ap)
+
     async def _notify(self, run: Run, approval: Approval) -> None:
         try:
             await self._notifier.approval_opened(run, approval)
