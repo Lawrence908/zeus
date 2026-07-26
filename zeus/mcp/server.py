@@ -7,7 +7,12 @@ Run:
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+
+# Load .env so tools that read os.getenv (e.g. CAPITOLSCOPE_SIGNALS_KEY) work
+# regardless of how the stdio MCP server is launched.
+load_dotenv()
 
 from zeus.mcp.tools import (
     capitolscope_active_tickers,
