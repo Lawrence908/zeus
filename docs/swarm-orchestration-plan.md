@@ -93,6 +93,20 @@ Working name: **Argo** (the quest engine); workers are **argonauts**; the scoper
 
 P0-P4 make Argo functionally complete for sequential and parallel runs on `~/zeus`. These phases harden it for real, unattended, production use. Ordered by priority.
 
+### Phase C - Cost & efficiency (chosen next; ahead of P5+)
+
+Every node is a full paid `claude -p` invocation, one model is used for all nodes, and you approve the plan before seeing any cost - so the per-run spend is what limits real usage. This phase attacks that. Ordered by leverage-over-effort; **C1 + C2 deliver most of the savings with low effort.**
+
+- **C1 - Per-node model routing (biggest lever, low effort).** A doc edit costs the same as a hard refactor today. Add optional `model` to `TaskNodeSpec`/`TaskNode`; Metis picks it per node (cheap model - Haiku-class - for trivial nodes: docs, config, single-file, rename; strong model for logic/multi-file). The workers already thread `--model` through `build_command`, so this is mostly: wire `node.model -> build_command`, add `ZEUS_SWARM_MODEL_DEFAULT`/`ZEUS_SWARM_MODEL_CHEAP`, and extend the Metis prompt with model-selection guidance. ~10x on the trivial nodes.
+- **C2 - Cost estimate + dry-run at the plan gate.** You currently approve blind, then spend. (a) Surface a per-node + run-total cost **estimate** (heuristic from model + tool_scope + title size, or a one-shot cheap-model estimator) on the RunView / Swarm app at Gate 1, shown against `budget_usd`. (b) A `dry_run` flag that runs the whole DAG against `StubWorker` (zero spend) to validate structure, gates, and merge order before committing to a real run.
+- **C3 - Cheaper planning.** Metis runs a strong-model exploration pass per plan. Make the planner model configurable (`ZEUS_SWARM_PLANNER_MODEL`, cheaper default; strong as opt-in for hard projects) with bounded exploration turns, and **capture Metis's own `cost_usd`/`session` into the run** (currently unrecorded) so planning spend is visible.
+- **C4 - Local-model worker tier (stretch).** Claude is the only worker; every node is paid. Add a `local` worker on the homelab Ollama (e.g. `qwen2.5-coder`) behind the same `Worker` protocol - a minimal read/propose-diff/apply loop for trivial nodes, with claude reserved for hard nodes via C1 routing. Bigger build (Ollama has no Claude-Code tool loop), so it is a later stretch, but it turns doc/config/boilerplate nodes free.
+
+**Cross-cutting:** wire swarm `cost_usd` into the existing `small_llm_usage.db` ledger + `/admin`; keep `max_attempts` default 1 so retries only cost where a `check` justifies them.
+
+### Hardening + capability (after Phase C)
+
+
 - **P5 - Sandbox the verifier + egress lockdown + Aegis (security; do first).**
   Gap: `CommandVerifier` runs `node.check` - an LLM-authored shell command - directly on the **host** in the worktree. P1b sandboxes the worker but not the check, so a planned `check` is an unsandboxed code-execution vector on zeus-core. The sandbox also uses the default docker network (unrestricted egress), and the swarm's denylist is separate from the existing `AegisPolicyEngine`.
   Scope: run `check` inside the same container image as the worker (mount the worktree, restricted network); a dedicated egress policy (allow only `api.anthropic.com` + whatever package registries a run needs); route the worker's diff summary + check output through Aegis under a new `swarm` policy; guarantee `ANTHROPIC_API_KEY` is never logged.
