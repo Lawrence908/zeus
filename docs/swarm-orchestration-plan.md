@@ -89,6 +89,15 @@ Working name: **Argo** (the quest engine); workers are **argonauts**; the scoper
 
 **Naming:** `argo` collides with Argo Workflows / Argo CD (which may run on this homelab). `Argo` coordinator + `argonauts` workers is kept, but env/config are namespaced `ZEUS_SWARM_*` to avoid friction.
 
+### Frontends: Zeus OS app + chat tools (no React SPA page)
+
+Orchestration has two surfaces, deliberately not three:
+
+- **Zeus OS Swarm app** (`zeus-os/src/lib/apps/Swarm.svelte`) - the rich, fully-featured home: goal submit + repo picker, live DAG, all gate types (plan / write / budget / question-text-box / final), metrics strip, activity feed, live SSE, PR link + CI badge, per-node transcript toggles.
+- **Chat-path tools** (`zeus/core/tools/swarm.py`, registered when `ZEUS_SWARM_ENABLED`) for organic use from the React chat dashboard: `swarm_status` (list / detail a run), `swarm_propose` (scope a goal into a plan-gated run), `swarm_approve` (resolve a pending gate - only on explicit user ask), `swarm_answer` (answer a question gate). Each wraps the `/swarm/*` loopback so the same server-side gates apply; they deep-link to the Zeus OS app for the rich view.
+
+A dedicated React SPA page was **declined** on purpose: it would duplicate ~all of `Swarm.svelte` in a second framework for the same functionality. Rich interaction lives in the Zeus OS app; chat covers propose/watch/approve inline.
+
 ## Future phases (post-P4 roadmap)
 
 P0-P4 make Argo functionally complete for sequential and parallel runs on `~/zeus`. These phases harden it for real, unattended, production use. Ordered by priority.
