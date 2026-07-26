@@ -138,3 +138,44 @@ def sandbox_limits() -> dict[str, str]:
         "cpus": os.getenv("ZEUS_SWARM_SANDBOX_CPUS", "2"),
         "pids": os.getenv("ZEUS_SWARM_SANDBOX_PIDS", "512"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Verify sandbox (P5) - the node's `check` is LLM-authored shell, so it must run
+# isolated, not on the host. Own image (needs the repo's test toolchain) and its
+# own, tighter network default (checks should not need egress).
+# ---------------------------------------------------------------------------
+
+
+def verify_sandbox() -> bool:
+    """Whether `node.check` runs in a container (P5). Off = legacy host exec."""
+    return os.getenv("ZEUS_SWARM_VERIFY_SANDBOX", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
+def verify_host_fallback() -> bool:
+    """If the verify sandbox can't run (no docker/image), fall back to host exec.
+
+    On by default so dev doesn't hard-break; the coordinator logs a loud WARNING
+    when it happens. Set to 0 to fail closed (a check that can't be sandboxed
+    fails) on hosts where running LLM-authored shell on the host is unacceptable.
+    """
+    return os.getenv("ZEUS_SWARM_VERIFY_HOST_FALLBACK", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
+def verify_image() -> str:
+    """Image the check runs in - must carry the repo's test toolchain + deps."""
+    return os.getenv("ZEUS_SWARM_VERIFY_IMAGE", "zeus-swarm-verify:latest")
+
+
+def verify_network() -> str:
+    """Checks should not need egress; default `none`. Widen per-stack if a check
+    must fetch (e.g. `pip install`)."""
+    return os.getenv("ZEUS_SWARM_VERIFY_NETWORK", "none")
+
+
+def verify_limits() -> dict[str, str]:
+    return {
+        "memory": os.getenv("ZEUS_SWARM_VERIFY_MEMORY", "2g"),
+        "cpus": os.getenv("ZEUS_SWARM_VERIFY_CPUS", "2"),
+        "pids": os.getenv("ZEUS_SWARM_VERIFY_PIDS", "512"),
+    }

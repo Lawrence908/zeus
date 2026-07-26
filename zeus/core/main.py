@@ -223,10 +223,35 @@ async def lifespan(app: FastAPI):
                 sw_worker = RoutingWorker(sw_worker)  # type: ignore[arg-type]
             sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
             from zeus.orchestration.swarm.planner import ClaudePlanner
-            from zeus.orchestration.swarm.verifier import CommandVerifier
 
             app.state.swarm_planner = ClaudePlanner()
-            sw_verifier: object = CommandVerifier()
+            # P5: the node `check` is LLM-authored shell -> run it isolated, not on
+            # the host. Fall back to host exec only if allowed and the sandbox
+            # can't run (no docker), and say so loudly.
+            from zeus.orchestration.swarm.verifier import (
+                CommandVerifier,
+                SandboxedCommandVerifier,
+                docker_available,
+            )
+
+            if _swcfg.verify_sandbox() and docker_available():
+                sw_verifier: object = SandboxedCommandVerifier()
+            elif _swcfg.verify_host_fallback():
+                _logging.getLogger("zeus.swarm").warning(
+                    "verify sandbox unavailable (docker=%s, enabled=%s); running "
+                    "LLM-authored checks ON THE HOST. Set ZEUS_SWARM_VERIFY_HOST_FALLBACK=0 "
+                    "to fail closed instead.",
+                    docker_available(), _swcfg.verify_sandbox(),
+                )
+                sw_verifier = CommandVerifier()
+            else:
+                from zeus.orchestration.swarm.verifier import FailClosedVerifier
+
+                _logging.getLogger("zeus.swarm").warning(
+                    "verify sandbox unavailable and host fallback disabled; nodes "
+                    "with a check will fail closed (not verified on the host)."
+                )
+                sw_verifier = FailClosedVerifier()
         else:
             sw_worker = StubWorker()
             sw_factory = None
