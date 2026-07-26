@@ -58,3 +58,56 @@ def test_worker_requires_docker(monkeypatch):
         res = await SandboxedClaudeWorker().run(_node(), _run(), "/host/wt")
         assert not res.success and "docker" in (res.error or "")
     asyncio.run(scenario())
+
+
+# ---- egress policy (worker-sandbox lockdown) ------------------------------
+
+
+def test_build_docker_command_injects_proxy_env():
+    argv = ["claude", "-p", "x"]
+    cmd = build_docker_command(
+        argv, workspace="/wt", image="img", network="zeus-swarm-egress",
+        limits={"memory": "2g", "cpus": "2", "pids": "512"},
+        proxy="http://proxy:8888", no_proxy="localhost,127.0.0.1",
+    )
+    s = " ".join(cmd)
+    assert "--network zeus-swarm-egress" in s
+    assert "HTTPS_PROXY=http://proxy:8888" in s and "https_proxy=http://proxy:8888" in s
+    assert "NO_PROXY=localhost,127.0.0.1" in s
+
+
+def test_build_docker_command_no_proxy_by_default():
+    cmd = build_docker_command(
+        ["claude"], workspace="/wt", image="img", network="bridge",
+        limits={"memory": "2g", "cpus": "2", "pids": "512"},
+    )
+    assert not any("PROXY" in x.upper() for x in cmd)
+
+
+def test_egress_config_modes(monkeypatch):
+    from zeus.orchestration.swarm import config
+
+    monkeypatch.delenv("ZEUS_SWARM_SANDBOX_EGRESS", raising=False)
+    assert config.sandbox_egress()["mode"] == "open"
+
+    monkeypatch.setenv("ZEUS_SWARM_SANDBOX_EGRESS", "none")
+    assert config.sandbox_egress()["network"] == "none"
+
+    monkeypatch.setenv("ZEUS_SWARM_SANDBOX_EGRESS", "proxy")
+    monkeypatch.setenv("ZEUS_SWARM_EGRESS_PROXY", "http://proxy:8888")
+    monkeypatch.setenv("ZEUS_SWARM_SANDBOX_NETWORK", "zeus-swarm-egress")
+    eg = config.sandbox_egress()
+    assert eg["mode"] == "proxy" and eg["network"] == "zeus-swarm-egress"
+    assert eg["proxy"] == "http://proxy:8888"
+
+
+def test_worker_proxy_mode_requires_proxy_url(monkeypatch):
+    monkeypatch.setattr(sandbox, "docker_available", lambda: True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("ZEUS_SWARM_SANDBOX_EGRESS", "proxy")
+    monkeypatch.delenv("ZEUS_SWARM_EGRESS_PROXY", raising=False)
+
+    async def scenario():
+        res = await SandboxedClaudeWorker().run(_node(), _run(), "/host/wt")
+        assert not res.success and "ZEUS_SWARM_EGRESS_PROXY" in (res.error or "")
+    asyncio.run(scenario())

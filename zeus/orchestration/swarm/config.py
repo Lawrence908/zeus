@@ -68,8 +68,36 @@ def sandbox_image() -> str:
 
 
 def sandbox_network() -> str:
-    # Needs egress to api.anthropic.com. Lock down to a dedicated network later.
+    # Open-egress default network. The egress policy (sandbox_egress) overrides
+    # this when a locked-down mode is selected.
     return os.getenv("ZEUS_SWARM_SANDBOX_NETWORK", "bridge")
+
+
+def sandbox_egress() -> dict[str, str]:
+    """Egress policy for the worker container.
+
+    An LLM-authored worker runs arbitrary code, so on the default bridge network
+    it could reach any host. This selects how its network is constrained:
+
+    - ``open`` (default, back-compat): the bridge network, unrestricted egress.
+    - ``proxy``: join an *internal* docker network (no direct route out) and send
+      all traffic through an allowlist HTTP(S) proxy (``ZEUS_SWARM_EGRESS_PROXY``,
+      e.g. the tinyproxy in ``docker/egress-proxy`` that only permits
+      ``*.anthropic.com``). This is the recommended hardened mode.
+    - ``none``: ``--network none``; no egress at all (offline/local workers).
+    """
+    mode = os.getenv("ZEUS_SWARM_SANDBOX_EGRESS", "open").strip().lower()
+    if mode == "none":
+        return {"mode": "none", "network": "none", "proxy": "", "no_proxy": ""}
+    if mode == "proxy":
+        return {
+            "mode": "proxy",
+            # Should be an --internal network so the proxy is the only way out.
+            "network": os.getenv("ZEUS_SWARM_SANDBOX_NETWORK", "zeus-swarm-egress"),
+            "proxy": os.getenv("ZEUS_SWARM_EGRESS_PROXY", "").strip(),
+            "no_proxy": os.getenv("ZEUS_SWARM_EGRESS_NO_PROXY", "localhost,127.0.0.1"),
+        }
+    return {"mode": "open", "network": sandbox_network(), "proxy": "", "no_proxy": ""}
 
 
 def model_default() -> str:

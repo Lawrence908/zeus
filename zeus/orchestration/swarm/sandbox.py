@@ -50,8 +50,15 @@ def build_docker_command(
     limits: dict[str, str],
     api_key_env: str = _API_KEY_ENV,
     run_as_host_user: bool = True,
+    proxy: str = "",
+    no_proxy: str = "",
 ) -> list[str]:
-    """Wrap a claude argv in an ephemeral, capped `docker run`."""
+    """Wrap a claude argv in an ephemeral, capped `docker run`.
+
+    When `proxy` is set (egress policy = proxy) the container's HTTP(S) traffic is
+    forced through it via the standard proxy env vars, so on an internal network
+    the allowlist proxy is its only route out.
+    """
     cmd = [
         "docker", "run", "--rm", "--init",
         "--network", network,
@@ -69,6 +76,10 @@ def build_docker_command(
         "--tmpfs", "/home/agent:rw,mode=1777",
         "-e", "HOME=/home/agent",
     ]
+    if proxy:
+        for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+            cmd += ["-e", f"{var}={proxy}"]
+        cmd += ["-e", f"NO_PROXY={no_proxy}", "-e", f"no_proxy={no_proxy}"]
     if run_as_host_user:
         cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
     cmd += [image, *claude_argv]
@@ -97,6 +108,13 @@ class SandboxedClaudeWorker:
                 error=f"{_API_KEY_ENV} must be set for the sandboxed worker (no host auth in the container)",
             )
 
+        egress = config.sandbox_egress()
+        if egress["mode"] == "proxy" and not egress["proxy"]:
+            return WorkerResult(
+                success=False,
+                error="egress policy 'proxy' requires ZEUS_SWARM_EGRESS_PROXY (the allowlist proxy URL)",
+            )
+
         claude_argv = build_command(
             build_prompt(node, run, feedback),
             allowed_tools=node.tool_scope or _DEFAULT_ALLOWED_TOOLS,
@@ -108,8 +126,10 @@ class SandboxedClaudeWorker:
             claude_argv,
             workspace=workspace,
             image=config.sandbox_image(),
-            network=config.sandbox_network(),
+            network=egress["network"],
             limits=config.sandbox_limits(),
+            proxy=egress["proxy"],
+            no_proxy=egress["no_proxy"],
         )
         try:
             proc = await asyncio.create_subprocess_exec(
