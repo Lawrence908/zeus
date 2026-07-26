@@ -82,6 +82,7 @@ class RunSpec(BaseModel):
     budget_usd: float = Field(default=10.0, ge=0)
     max_parallel: int = Field(default=3, ge=1, le=16)
     dry_run: bool = False  # execute the DAG against a stub (zero spend) to validate shape
+    planner_cost_usd: float = 0.0  # what Metis spent producing this DAG (set by /plan)
 
     @model_validator(mode="after")
     def _validate_dag(self) -> RunSpec:
@@ -142,6 +143,7 @@ class Run(BaseModel):
     budget_usd: float = 10.0
     max_parallel: int = 3
     dry_run: bool = False
+    planner_cost_usd: float = 0.0
     created_at: str = ""
     updated_at: str = ""
 

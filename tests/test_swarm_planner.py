@@ -1,5 +1,6 @@
 # tests/test_swarm_planner.py — Metis planner parsing + stub
 import asyncio
+import json
 
 import pytest
 
@@ -50,7 +51,40 @@ def test_build_prompt_has_goal_and_schema():
 
 def test_stub_planner():
     async def scenario():
-        specs = await StubPlanner().plan("ship X", "/repo")
-        assert [s.id for s in specs] == ["implement", "verify"]
-        assert specs[1].deps == ["implement"]
+        result = await StubPlanner().plan("ship X", "/repo")
+        assert [s.id for s in result.nodes] == ["implement", "verify"]
+        assert result.nodes[1].deps == ["implement"]
+        assert result.cost_usd == 0.0
+    asyncio.run(scenario())
+
+
+def test_claude_planner_captures_cost(monkeypatch):
+    import asyncio as _aio
+
+    from zeus.orchestration.swarm import planner as pl
+
+    class _FakeProc:
+        async def communicate(self):
+            envelope = {
+                "result": _RAW,  # the DAG JSON in the result field
+                "total_cost_usd": 0.042,
+                "session_id": "plan-1",
+            }
+            return (json.dumps(envelope).encode(), b"")
+
+    async def _fake_exec(*cmd, **kw):
+        # planner model + read-only plan mode are on the command
+        assert "--permission-mode" in cmd and "plan" in cmd
+        assert "--model" in cmd
+        return _FakeProc()
+
+    monkeypatch.setattr(pl.shutil, "which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(_aio, "create_subprocess_exec", _fake_exec)
+
+    async def scenario():
+        result = await pl.ClaudePlanner().plan("add a thing", "/repo")
+        assert [n.id for n in result.nodes] == ["a", "b"]
+        assert result.cost_usd == 0.042
+        assert result.session_id == "plan-1"
+
     asyncio.run(scenario())

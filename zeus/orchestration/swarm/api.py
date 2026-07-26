@@ -93,14 +93,15 @@ async def plan_run(body: PlanBody, request: Request) -> RunView:
     """Metis: scope a goal into a task DAG, then create a run awaiting plan approval."""
     repo = _validate_repo(body.repo)
     try:
-        specs = await _planner(request).plan(body.goal, repo)
+        result = await _planner(request).plan(body.goal, repo)
     except Exception as exc:  # noqa: BLE001 - planner (LLM) failures surface as 502
         raise HTTPException(502, detail=f"planner failed: {exc}") from exc
     try:
-        dag.assert_acyclic(specs)  # type: ignore[arg-type]
+        dag.assert_acyclic(result.nodes)  # type: ignore[arg-type]
         spec = RunSpec(
-            goal=body.goal, repo=repo, nodes=specs,
+            goal=body.goal, repo=repo, nodes=result.nodes,
             budget_usd=body.budget_usd, max_parallel=body.max_parallel, dry_run=body.dry_run,
+            planner_cost_usd=result.cost_usd,
         )
     except (ValueError, ValidationError) as exc:
         raise HTTPException(422, detail=f"planner produced an invalid DAG: {exc}") from exc

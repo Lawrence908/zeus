@@ -18,9 +18,18 @@ import re
 import shutil
 from typing import Protocol
 
+from pydantic import BaseModel
+
+from zeus.orchestration.swarm import config
 from zeus.orchestration.swarm.models import TaskNodeSpec
 
 logger = logging.getLogger("zeus.swarm.metis")
+
+
+class PlanResult(BaseModel):
+    nodes: list[TaskNodeSpec]
+    cost_usd: float = 0.0  # what Metis spent scoping (captured from the CLI result)
+    session_id: str | None = None
 
 _PLAN_INSTRUCTIONS = """\
 You are Metis, the planner for an autonomous software swarm. Analyse this
@@ -53,7 +62,7 @@ Goal: {goal}
 
 
 class Planner(Protocol):
-    async def plan(self, goal: str, repo: str) -> list[TaskNodeSpec]: ...
+    async def plan(self, goal: str, repo: str) -> PlanResult: ...
 
 
 def build_planner_prompt(goal: str) -> str:
@@ -88,23 +97,27 @@ def parse_plan(text: str) -> list[TaskNodeSpec]:
 class StubPlanner:
     """Fixed two-node plan; for tests and no-LLM environments."""
 
-    async def plan(self, goal: str, repo: str) -> list[TaskNodeSpec]:
-        return [
+    async def plan(self, goal: str, repo: str) -> PlanResult:
+        return PlanResult(nodes=[
             TaskNodeSpec(id="implement", title=f"Implement: {goal}", tool_scope=["Read", "Edit", "Write"]),
             TaskNodeSpec(id="verify", title="Add or run tests for the change", deps=["implement"],
                          tool_scope=["Read", "Bash"]),
-        ]
+        ])
 
 
 class ClaudePlanner:
-    """Metis via `claude -p --permission-mode plan` (read-only) in the repo."""
+    """Metis via `claude -p --permission-mode plan` (read-only) in the repo.
 
-    def __init__(self, *, max_turns: int = 20, model: str | None = None, timeout_s: float = 600) -> None:
+    Model + turn budget are configurable (ZEUS_SWARM_PLANNER_MODEL/MAX_TURNS) so
+    planning can be run on a cheaper model; the CLI result cost is captured.
+    """
+
+    def __init__(self, *, max_turns: int | None = None, model: str | None = None, timeout_s: float = 600) -> None:
         self._max_turns = max_turns
         self._model = model
         self._timeout_s = timeout_s
 
-    async def plan(self, goal: str, repo: str) -> list[TaskNodeSpec]:
+    async def plan(self, goal: str, repo: str) -> PlanResult:
         if shutil.which("claude") is None:
             raise RuntimeError("`claude` CLI not found on PATH")
         cmd = [
@@ -112,21 +125,26 @@ class ClaudePlanner:
             "--output-format", "json",
             "--permission-mode", "plan",  # read-only: explore, don't edit
             "--allowedTools", "Read,Grep,Glob",
-            "--max-turns", str(self._max_turns),
+            "--max-turns", str(self._max_turns or config.planner_max_turns()),
+            "--model", self._model or config.planner_model(),
         ]
-        if self._model:
-            cmd += ["--model", self._model]
         proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=repo,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env=os.environ.copy(),
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=self._timeout_s)
+        cost, session = 0.0, None
         try:
             envelope = json.loads(out.decode("utf-8", "replace"))
-            result_text = envelope.get("result", "") if isinstance(envelope, dict) else ""
+            if isinstance(envelope, dict):
+                result_text = envelope.get("result", "")
+                cost = float(envelope.get("total_cost_usd", 0.0) or 0.0)
+                session = envelope.get("session_id")
+            else:
+                result_text = ""
         except json.JSONDecodeError:
             result_text = out.decode("utf-8", "replace")
         if not result_text:
             raise RuntimeError(f"planner produced no output: {err.decode('utf-8','replace')[:300]}")
-        return parse_plan(result_text)
+        return PlanResult(nodes=parse_plan(result_text), cost_usd=cost, session_id=session)

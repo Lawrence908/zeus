@@ -82,6 +82,15 @@ def model_cheap() -> str:
     return os.getenv("ZEUS_SWARM_MODEL_CHEAP", "haiku")
 
 
+def planner_model() -> str:
+    """Model Metis uses to scope a goal into a DAG (set cheaper to save)."""
+    return os.getenv("ZEUS_SWARM_PLANNER_MODEL", model_default())
+
+
+def planner_max_turns() -> int:
+    return int(os.getenv("ZEUS_SWARM_PLANNER_MAX_TURNS", "20"))
+
+
 def sandbox_limits() -> dict[str, str]:
     return {
         "memory": os.getenv("ZEUS_SWARM_SANDBOX_MEMORY", "2g"),

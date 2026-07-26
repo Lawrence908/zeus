@@ -111,7 +111,9 @@
   }
 
   $: pending = selected ? selected.approvals.filter((a) => a.state === 'pending') : [];
-  $: spent = selected ? selected.nodes.reduce((s, n) => s + (n.cost_usd || 0), 0) : 0;
+  $: nodeSpent = selected ? selected.nodes.reduce((s, n) => s + (n.cost_usd || 0), 0) : 0;
+  $: planSpent = selected ? selected.run.planner_cost_usd || 0 : 0;
+  $: spent = nodeSpent + planSpent;
 
   onMount(async () => {
     try {
@@ -183,7 +185,7 @@
             <h3 class="text-accent text-sm truncate">{selected.run.goal}</h3>
             <p class="text-[10px] text-muted">
               {selected.run.status}{selected.run.dry_run ? ' · dry-run' : ''}
-              · spent ${spent.toFixed(2)}{selected.estimate ? ` / est $${selected.estimate.total_usd.toFixed(2)}` : ''} of ${selected.run.budget_usd.toFixed(2)}
+              · spent ${spent.toFixed(2)}{planSpent ? ` (plan $${planSpent.toFixed(2)})` : ''}{selected.estimate ? ` / est $${selected.estimate.total_usd.toFixed(2)}` : ''} of ${selected.run.budget_usd.toFixed(2)}
               · x{selected.run.max_parallel}
             </p>
           </div>

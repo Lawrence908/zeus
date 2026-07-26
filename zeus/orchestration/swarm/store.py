@@ -47,6 +47,7 @@ class SwarmStore:
                     budget_usd   REAL NOT NULL,
                     max_parallel INTEGER NOT NULL,
                     dry_run      INTEGER NOT NULL DEFAULT 0,
+                    planner_cost_usd REAL NOT NULL DEFAULT 0,
                     created_at   TEXT NOT NULL,
                     updated_at   TEXT NOT NULL
                 )
@@ -108,6 +109,7 @@ class SwarmStore:
             budget_usd=r["budget_usd"],
             max_parallel=r["max_parallel"],
             dry_run=bool(r["dry_run"]),
+            planner_cost_usd=r["planner_cost_usd"],
             created_at=r["created_at"],
             updated_at=r["updated_at"],
         )
@@ -166,10 +168,10 @@ class SwarmStore:
         )
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO swarm_runs (id, goal, repo, status, budget_usd, max_parallel, dry_run, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO swarm_runs (id, goal, repo, status, budget_usd, max_parallel, dry_run,"
+                " planner_cost_usd, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (run.id, run.goal, run.repo, run.status.value, run.budget_usd, run.max_parallel,
-                 int(spec.dry_run), now, now),
+                 int(spec.dry_run), spec.planner_cost_usd, now, now),
             )
             for n in spec.nodes:
                 # No deps -> ready immediately once the plan is approved; else blocked.

@@ -32,6 +32,7 @@ export interface Run {
   budget_usd: number;
   max_parallel: number;
   dry_run: boolean;
+  planner_cost_usd: number;
   created_at: string;
   updated_at: string;
 }
