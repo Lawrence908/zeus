@@ -200,16 +200,18 @@ async def lifespan(app: FastAPI):
 
         sw_kind = os.getenv("ZEUS_SWARM_WORKER", "stub").strip().lower()
         if sw_kind in ("claude", "sandbox"):
+            from zeus.orchestration.swarm import config as _swcfg
             from zeus.orchestration.swarm.worktree import CodeWorkspace
 
+            _default_model = _swcfg.model_default()  # per-node model overrides this (C1)
             if sw_kind == "sandbox":
                 from zeus.orchestration.swarm.sandbox import SandboxedClaudeWorker
 
-                sw_worker: object = SandboxedClaudeWorker()
+                sw_worker: object = SandboxedClaudeWorker(model=_default_model)
             else:
                 from zeus.orchestration.swarm.claude_worker import ClaudeCodeWorker
 
-                sw_worker = ClaudeCodeWorker()
+                sw_worker = ClaudeCodeWorker(model=_default_model)
             sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
             from zeus.orchestration.swarm.planner import ClaudePlanner
             from zeus.orchestration.swarm.verifier import CommandVerifier

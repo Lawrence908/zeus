@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 
 from zeus.orchestration.swarm import config, dag
 from zeus.orchestration.swarm.coordinator import Coordinator
+from zeus.orchestration.swarm.estimate import estimate_run
 from zeus.orchestration.swarm.models import Run, RunSpec, RunView
 from zeus.orchestration.swarm.store import SwarmStore
 
@@ -31,6 +32,12 @@ class PlanBody(BaseModel):
     repo: str
     budget_usd: float = 10.0
     max_parallel: int = 3
+    dry_run: bool = False
+
+
+def _with_estimate(view: RunView) -> RunView:
+    view.estimate = estimate_run(view.nodes)
+    return view
 
 
 def _store(request: Request) -> SwarmStore:
@@ -78,7 +85,7 @@ async def create_run(spec: RunSpec, request: Request) -> RunView:
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc)) from exc
     spec = spec.model_copy(update={"repo": _validate_repo(spec.repo)})
-    return await _store(request).create_run(spec)
+    return _with_estimate(await _store(request).create_run(spec))
 
 
 @router.post("/plan", response_model=RunView)
@@ -93,11 +100,11 @@ async def plan_run(body: PlanBody, request: Request) -> RunView:
         dag.assert_acyclic(specs)  # type: ignore[arg-type]
         spec = RunSpec(
             goal=body.goal, repo=repo, nodes=specs,
-            budget_usd=body.budget_usd, max_parallel=body.max_parallel,
+            budget_usd=body.budget_usd, max_parallel=body.max_parallel, dry_run=body.dry_run,
         )
     except (ValueError, ValidationError) as exc:
         raise HTTPException(422, detail=f"planner produced an invalid DAG: {exc}") from exc
-    return await _store(request).create_run(spec)
+    return _with_estimate(await _store(request).create_run(spec))
 
 
 @router.get("/runs", response_model=list[Run])
@@ -110,7 +117,7 @@ async def get_run(run_id: str, request: Request) -> RunView:
     view = await _store(request).get_view(run_id)
     if view is None:
         raise HTTPException(404, detail=f"run not found: {run_id!r}")
-    return view
+    return _with_estimate(view)
 
 
 @router.post("/runs/{run_id}/approve", response_model=RunView)

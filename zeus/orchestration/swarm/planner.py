@@ -32,8 +32,8 @@ Output ONLY a single JSON object, no prose, of the form:
   {"id": "kebab-id", "title": "imperative task", "deps": ["other-id"],
    "acceptance": "how to know it's done",
    "check": "shell command that exits 0 when this node is correct",
-   "tool_scope": ["Read","Edit","Write","Bash"], "requires_approval": false,
-   "max_attempts": 2}
+   "tool_scope": ["Read","Edit","Write","Bash"], "model": "haiku",
+   "requires_approval": false, "max_attempts": 2}
 ]}
 
 Rules:
@@ -41,6 +41,9 @@ Rules:
 - Keep it minimal: prefer 2-6 nodes. Order by dependency.
 - `check` is a real command runnable in the repo (e.g. `pytest -q tests/x.py`,
   `python -c 'import m'`, `ruff check path`). Omit or "" only if truly unverifiable.
+- `model`: "haiku" for trivial nodes (docs, config, a rename, a single small
+  file); "sonnet" for real logic, multi-file changes, or anything subtle. Bias
+  toward "haiku" to keep runs cheap.
 - Set requires_approval:true for a node that deletes files, changes CI/deploy,
   or touches security/auth. Set max_attempts:2-3 for nodes with a `check`.
 - tool_scope is the least privilege each node needs.

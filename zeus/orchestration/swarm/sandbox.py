@@ -102,7 +102,7 @@ class SandboxedClaudeWorker:
             allowed_tools=node.tool_scope or _DEFAULT_ALLOWED_TOOLS,
             permission_mode=self._permission_mode,
             max_turns=self._max_turns,
-            model=self._model,
+            model=node.model or self._model,  # per-node routing (C1)
         )
         cmd = build_docker_command(
             claude_argv,

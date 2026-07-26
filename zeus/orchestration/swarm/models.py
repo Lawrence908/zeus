@@ -61,6 +61,7 @@ class TaskNodeSpec(BaseModel):
     acceptance: str = ""  # human-readable acceptance note
     check: str = ""  # shell command run in the worktree to verify the node (exit 0 = pass)
     tool_scope: list[str] = Field(default_factory=list)  # min tools this node may use
+    model: str = ""  # model hint (e.g. "haiku" for trivial nodes); "" = worker default
     requires_approval: bool = False  # gate 2 before this node runs
     max_attempts: int = Field(default=1, ge=1, le=5)  # verify-retry budget
 
@@ -80,6 +81,7 @@ class RunSpec(BaseModel):
     nodes: list[TaskNodeSpec] = Field(..., min_length=1)
     budget_usd: float = Field(default=10.0, ge=0)
     max_parallel: int = Field(default=3, ge=1, le=16)
+    dry_run: bool = False  # execute the DAG against a stub (zero spend) to validate shape
 
     @model_validator(mode="after")
     def _validate_dag(self) -> RunSpec:
@@ -109,6 +111,7 @@ class TaskNode(BaseModel):
     acceptance: str = ""
     check: str = ""
     tool_scope: list[str] = Field(default_factory=list)
+    model: str = ""
     requires_approval: bool = False
     max_attempts: int = 1
     status: NodeStatus = NodeStatus.BLOCKED
@@ -138,8 +141,16 @@ class Run(BaseModel):
     status: RunStatus = RunStatus.PENDING_PLAN_APPROVAL
     budget_usd: float = 10.0
     max_parallel: int = 3
+    dry_run: bool = False
     created_at: str = ""
     updated_at: str = ""
+
+
+class RunEstimate(BaseModel):
+    """Projected cost, computed at request time (never stored)."""
+
+    total_usd: float
+    per_node: dict[str, float]
 
 
 class RunView(BaseModel):
@@ -148,6 +159,7 @@ class RunView(BaseModel):
     run: Run
     nodes: list[TaskNode]
     approvals: list[Approval]
+    estimate: RunEstimate | None = None  # populated by the API, not the store
 
     def pending_approval(self, kind: ApprovalKind, node_id: str | None = None) -> Approval | None:
         for a in self.approvals:

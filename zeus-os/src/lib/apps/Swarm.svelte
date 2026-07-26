@@ -30,6 +30,7 @@
 
   let goal = '';
   let repo = '/home/chris/zeus';
+  let dryRun = false;
 
   const NODE_COLOR: Record<NodeStatus, string> = {
     succeeded: 'text-ok',
@@ -72,9 +73,10 @@
     if (!goal.trim() || busy) return;
     busy = true;
     try {
-      const view = await planRun(goal.trim(), repo.trim());
+      const view = await planRun(goal.trim(), repo.trim(), dryRun);
       goal = '';
-      notify({ title: 'Planned', body: `${view.nodes.length} nodes — approve to run`, kind: 'ok' });
+      const est = view.estimate ? ` · est $${view.estimate.total_usd.toFixed(2)}` : '';
+      notify({ title: dryRun ? 'Planned (dry-run)' : 'Planned', body: `${view.nodes.length} nodes${est} — approve to run`, kind: 'ok' });
       await refresh();
       await pick(view.run.id);
     } catch (e) {
@@ -144,9 +146,13 @@
     />
     <input
       bind:value={repo}
-      class="w-48 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-muted"
+      class="w-44 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-muted"
       title="Target repo (must be on the swarm allowlist)"
     />
+    <label class="flex items-center gap-1 text-[10px] text-muted cursor-pointer" title="Run the DAG against a stub (zero spend) to validate its shape">
+      <input type="checkbox" bind:checked={dryRun} />
+      dry-run
+    </label>
     <button
       class="px-3 py-1 rounded bg-accent text-bg disabled:opacity-40"
       disabled={busy || !goal.trim()}
@@ -176,7 +182,8 @@
           <div class="min-w-0">
             <h3 class="text-accent text-sm truncate">{selected.run.goal}</h3>
             <p class="text-[10px] text-muted">
-              {selected.run.status} · ${spent.toFixed(2)} / ${selected.run.budget_usd.toFixed(2)}
+              {selected.run.status}{selected.run.dry_run ? ' · dry-run' : ''}
+              · spent ${spent.toFixed(2)}{selected.estimate ? ` / est $${selected.estimate.total_usd.toFixed(2)}` : ''} of ${selected.run.budget_usd.toFixed(2)}
               · x{selected.run.max_parallel}
             </p>
           </div>
@@ -208,7 +215,7 @@
                   <span class="text-muted"> · {n.title}</span>
                 </span>
                 <span class="shrink-0 {NODE_COLOR[n.status]}">
-                  {n.status}{n.cost_usd ? ` · $${n.cost_usd.toFixed(2)}` : ''}{n.attempts > 1 ? ` · ${n.attempts}x` : ''}
+                  {n.model ? `${n.model} · ` : ''}{n.status}{n.cost_usd ? ` · $${n.cost_usd.toFixed(2)}` : (selected.estimate ? ` · ~$${(selected.estimate.per_node[n.id] ?? 0).toFixed(2)}` : '')}{n.attempts > 1 ? ` · ${n.attempts}x` : ''}
                 </span>
               </div>
               {#if n.error}<p class="text-err text-[10px] whitespace-pre-wrap">{n.error}</p>{/if}

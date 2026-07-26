@@ -31,6 +31,7 @@ export interface Run {
   status: RunStatus;
   budget_usd: number;
   max_parallel: number;
+  dry_run: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -45,8 +46,14 @@ export interface TaskNode {
   cost_usd: number;
   requires_approval: boolean;
   check: string;
+  model: string;
   error?: string | null;
   output?: string | null;
+}
+
+export interface RunEstimate {
+  total_usd: number;
+  per_node: Record<string, number>;
 }
 
 export interface Approval {
@@ -61,6 +68,7 @@ export interface RunView {
   run: Run;
   nodes: TaskNode[];
   approvals: Approval[];
+  estimate?: RunEstimate | null;
 }
 
 export function swarmHealth(): Promise<{ enabled: boolean }> {
@@ -75,10 +83,10 @@ export function getRun(id: string): Promise<RunView> {
   return jsonFetch(`/swarm/runs/${encodeURIComponent(id)}`);
 }
 
-export function planRun(goal: string, repo: string): Promise<RunView> {
+export function planRun(goal: string, repo: string, dryRun = false): Promise<RunView> {
   return jsonFetch('/swarm/plan', {
     method: 'POST',
-    body: JSON.stringify({ goal, repo })
+    body: JSON.stringify({ goal, repo, dry_run: dryRun })
   });
 }
 

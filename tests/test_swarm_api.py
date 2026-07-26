@@ -95,6 +95,9 @@ def test_plan_scopes_goal_into_run(monkeypatch, tmp_path):
     assert view["run"]["status"] == "pending_plan_approval"
     # StubPlanner's fixed DAG
     assert [n["id"] for n in view["nodes"]] == ["implement", "verify"]
+    # cost estimate is attached at the plan gate (C2)
+    assert view["estimate"]["total_usd"] > 0
+    assert set(view["estimate"]["per_node"]) == {"implement", "verify"}
 
     # The Metis-proposed plan IS what you approve at gate 1; then it runs.
     plan = _pending(view, "plan")

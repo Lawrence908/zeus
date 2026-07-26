@@ -224,6 +224,29 @@ def test_budget_kill_switch_pauses_then_resumes():
     asyncio.run(scenario())
 
 
+def test_dry_run_zero_spend_no_workspace():
+    store, _, _ = _fresh()
+
+    def boom_factory(repo, rid):
+        raise AssertionError("dry run must not create a workspace")
+
+    # FailingWorker + boom_factory: if either is used, the test fails loudly.
+    coord = Coordinator(store, FailingWorker(), boom_factory)
+
+    async def scenario():
+        spec = RunSpec(goal="x", repo=os.path.expanduser("~"), dry_run=True,
+                       nodes=[_node("a"), _node("b", deps=["a"])])
+        view = await store.create_run(spec)
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)
+        assert all(n.status == NodeStatus.SUCCEEDED for n in view.nodes)  # stubbed, not run
+        assert all(n.cost_usd == 0 for n in view.nodes)
+        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.FINAL).id, True)
+        assert view.run.status == RunStatus.COMPLETED
+
+    asyncio.run(scenario())
+
+
 def test_kill_skips_open_nodes():
     store, coord, _ = _fresh()
 

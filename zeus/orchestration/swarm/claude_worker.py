@@ -128,7 +128,7 @@ class ClaudeCodeWorker:
             allowed_tools=allowed,
             permission_mode=self._permission_mode,
             max_turns=self._max_turns,
-            model=self._model,
+            model=node.model or self._model,  # per-node routing (C1)
         )
         try:
             proc = await asyncio.create_subprocess_exec(

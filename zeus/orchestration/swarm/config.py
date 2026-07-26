@@ -72,6 +72,16 @@ def sandbox_network() -> str:
     return os.getenv("ZEUS_SWARM_SANDBOX_NETWORK", "bridge")
 
 
+def model_default() -> str:
+    """Strong model for logic/multi-file nodes (claude CLI alias or full id)."""
+    return os.getenv("ZEUS_SWARM_MODEL_DEFAULT", "sonnet")
+
+
+def model_cheap() -> str:
+    """Cheap model for trivial nodes (docs, config, single-file, rename)."""
+    return os.getenv("ZEUS_SWARM_MODEL_CHEAP", "haiku")
+
+
 def sandbox_limits() -> dict[str, str]:
     return {
         "memory": os.getenv("ZEUS_SWARM_SANDBOX_MEMORY", "2g"),

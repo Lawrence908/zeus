@@ -46,6 +46,7 @@ class SwarmStore:
                     status       TEXT NOT NULL,
                     budget_usd   REAL NOT NULL,
                     max_parallel INTEGER NOT NULL,
+                    dry_run      INTEGER NOT NULL DEFAULT 0,
                     created_at   TEXT NOT NULL,
                     updated_at   TEXT NOT NULL
                 )
@@ -61,6 +62,7 @@ class SwarmStore:
                     acceptance        TEXT NOT NULL,
                     tool_scope        TEXT NOT NULL,
                     check_cmd         TEXT NOT NULL DEFAULT '',
+                    model             TEXT NOT NULL DEFAULT '',
                     requires_approval INTEGER NOT NULL,
                     max_attempts      INTEGER NOT NULL DEFAULT 1,
                     status            TEXT NOT NULL,
@@ -105,6 +107,7 @@ class SwarmStore:
             status=RunStatus(r["status"]),
             budget_usd=r["budget_usd"],
             max_parallel=r["max_parallel"],
+            dry_run=bool(r["dry_run"]),
             created_at=r["created_at"],
             updated_at=r["updated_at"],
         )
@@ -119,6 +122,7 @@ class SwarmStore:
             acceptance=r["acceptance"],
             check=r["check_cmd"],
             tool_scope=json.loads(r["tool_scope"]),
+            model=r["model"],
             requires_approval=bool(r["requires_approval"]),
             max_attempts=r["max_attempts"],
             status=NodeStatus(r["status"]),
@@ -162,22 +166,23 @@ class SwarmStore:
         )
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO swarm_runs (id, goal, repo, status, budget_usd, max_parallel, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?)",
-                (run.id, run.goal, run.repo, run.status.value, run.budget_usd, run.max_parallel, now, now),
+                "INSERT INTO swarm_runs (id, goal, repo, status, budget_usd, max_parallel, dry_run, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (run.id, run.goal, run.repo, run.status.value, run.budget_usd, run.max_parallel,
+                 int(spec.dry_run), now, now),
             )
             for n in spec.nodes:
                 # No deps -> ready immediately once the plan is approved; else blocked.
                 status = NodeStatus.READY if not n.deps else NodeStatus.BLOCKED
                 conn.execute(
                     "INSERT INTO swarm_nodes (run_id, id, title, deps, acceptance, tool_scope,"
-                    " check_cmd, requires_approval, max_attempts, status, attempts, worker_id,"
+                    " check_cmd, model, requires_approval, max_attempts, status, attempts, worker_id,"
                     " output, error, cost_usd, session_id, updated_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         run.id, n.id, n.title, json.dumps(n.deps), n.acceptance,
-                        json.dumps(n.tool_scope), n.check, int(n.requires_approval), n.max_attempts,
-                        status.value, 0, None, None, None, 0.0, None, now,
+                        json.dumps(n.tool_scope), n.check, n.model, int(n.requires_approval),
+                        n.max_attempts, status.value, 0, None, None, None, 0.0, None, now,
                     ),
                 )
             # Gate 1: the plan itself must be approved before anything runs.

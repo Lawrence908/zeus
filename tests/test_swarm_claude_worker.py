@@ -76,3 +76,33 @@ def test_worker_without_workspace_fails():
         res = await ClaudeCodeWorker().run(_node(), _run(), None)
         assert not res.success and "worktree" in (res.error or "")
     asyncio.run(scenario())
+
+
+def test_node_model_routes_to_claude_model_flag(monkeypatch):
+    # C1: a node's model must reach the spawned `claude --model <m>` argv.
+    import asyncio as _aio
+
+    from zeus.orchestration.swarm import claude_worker as cw
+
+    captured = {}
+
+    class _FakeProc:
+        async def communicate(self):
+            return (json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                "result": "ok", "session_id": "s", "total_cost_usd": 0.0}).encode(), b"")
+
+    async def _fake_exec(*cmd, **kw):
+        captured["cmd"] = list(cmd)
+        return _FakeProc()
+
+    monkeypatch.setattr(cw, "claude_available", lambda: True)
+    monkeypatch.setattr(_aio, "create_subprocess_exec", _fake_exec)
+
+    async def scenario():
+        # worker default is "sonnet"; the node overrides to "haiku"
+        res = await ClaudeCodeWorker(model="sonnet").run(_node(model="haiku"), _run(), "/tmp")
+        assert res.success
+        cmd = captured["cmd"]
+        assert cmd[cmd.index("--model") + 1] == "haiku"
+
+    asyncio.run(scenario())

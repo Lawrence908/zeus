@@ -167,6 +167,13 @@ class Coordinator:
         denylist, or merge conflict) fail the node fail-open. Retries up to
         n.max_attempts, feeding the failure back to the worker.
         """
+        if run.dry_run:
+            # C2: validate DAG shape + gates without spending; no worker, no worktree.
+            n.status = NodeStatus.SUCCEEDED
+            n.output = "[dry-run] would execute"
+            n.attempts = 1
+            await self._store.update_node(n)
+            return
         node_path = await ws.new_node_worktree(n.id) if ws else None
         try:
             feedback: str | None = None
@@ -307,8 +314,8 @@ class Coordinator:
     # ---- workspace lifecycle --------------------------------------------
 
     async def _setup_workspace(self, run: Run) -> None:
-        if self._workspace_factory is None:
-            return
+        if self._workspace_factory is None or run.dry_run:
+            return  # dry runs never touch git
         ws = self._workspace_factory(run.repo, run.id)
         await ws.setup()
         self._workspaces[run.id] = ws
