@@ -26,6 +26,7 @@ from typing import Callable
 
 from zeus.orchestration.swarm import dag
 from zeus.orchestration.swarm.models import (
+    Approval,
     ApprovalKind,
     ApprovalState,
     NodeStatus,
@@ -34,6 +35,7 @@ from zeus.orchestration.swarm.models import (
     RunView,
     TaskNode,
 )
+from zeus.orchestration.swarm.notifier import ApprovalNotifier, NullNotifier
 from zeus.orchestration.swarm.store import SwarmStore
 from zeus.orchestration.swarm.verifier import NoopVerifier, Verifier
 from zeus.orchestration.swarm.worker import Worker
@@ -54,12 +56,20 @@ class Coordinator:
         worker: Worker,
         workspace_factory: WorkspaceFactory | None = None,
         verifier: Verifier | None = None,
+        notifier: ApprovalNotifier | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
         self._workspace_factory = workspace_factory
         self._verifier = verifier or NoopVerifier()
+        self._notifier = notifier or NullNotifier()
         self._workspaces: dict[str, CodeWorkspace] = {}
+
+    async def _notify(self, run: Run, approval: Approval) -> None:
+        try:
+            await self._notifier.approval_opened(run, approval)
+        except Exception:  # noqa: BLE001 - notification is best-effort
+            logger.exception("swarm approval notify failed (run %s)", run.id)
 
     # ---- driver ----------------------------------------------------------
 
@@ -82,8 +92,9 @@ class Coordinator:
                 # work was all rejected away (nothing failed, nothing to deliver).
                 if dag.any_succeeded(view.nodes):
                     # Keep the workspace (integration branch) until the final gate.
-                    await self._store.create_approval(run_id, ApprovalKind.FINAL)
+                    ap = await self._store.create_approval(run_id, ApprovalKind.FINAL)
                     await self._store.set_run_status(run_id, RunStatus.PENDING_FINAL_APPROVAL)
+                    await self._notify(view.run, ap)
                 elif dag.has_failure(view.nodes):
                     await self._store.set_run_status(run_id, RunStatus.FAILED)
                     logger.warning("swarm run %s failed (no node succeeded)", run_id)
@@ -95,7 +106,8 @@ class Coordinator:
             if self._over_budget(view.run, view.nodes):
                 # Kill-switch: hold the run until the budget overrun is approved.
                 if view.pending_approval(ApprovalKind.BUDGET) is None:
-                    await self._store.create_approval(run_id, ApprovalKind.BUDGET)
+                    ap = await self._store.create_approval(run_id, ApprovalKind.BUDGET)
+                    await self._notify(view.run, ap)
                 await self._store.set_run_status(run_id, RunStatus.PAUSED_BUDGET)
                 logger.warning("swarm run %s paused: over budget ($%.2f)", run_id, view.run.budget_usd)
                 break
@@ -120,9 +132,10 @@ class Coordinator:
             if len(batch) >= run.max_parallel:
                 break
             if n.requires_approval:
-                await self._store.create_approval(run.id, ApprovalKind.NODE_WRITE, n.id)
+                ap = await self._store.create_approval(run.id, ApprovalKind.NODE_WRITE, n.id)
                 n.status = NodeStatus.PENDING_APPROVAL
                 await self._store.update_node(n)
+                await self._notify(run, ap)
                 progressed = True
                 continue
             n.status = NodeStatus.RUNNING

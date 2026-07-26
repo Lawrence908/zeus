@@ -224,7 +224,12 @@ async def lifespan(app: FastAPI):
 
             app.state.swarm_planner = StubPlanner()
             sw_verifier = NoopVerifier()
-        app.state.swarm_coordinator = Coordinator(sw_store, sw_worker, sw_factory, sw_verifier)  # type: ignore[arg-type]
+        from zeus.orchestration.swarm.notifier import NullNotifier, TelegramNotifier
+
+        sw_notifier = TelegramNotifier.from_env() or NullNotifier()
+        app.state.swarm_coordinator = Coordinator(  # type: ignore[arg-type]
+            sw_store, sw_worker, sw_factory, sw_verifier, sw_notifier
+        )
         _logging.getLogger("zeus.swarm").info(
             "Argo swarm enabled (worker=%s, db=%s)", sw_kind, sw_db_path
         )

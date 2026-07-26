@@ -1,0 +1,223 @@
+<!-- src/lib/apps/Swarm.svelte — Argo swarm: scope a goal into a DAG, watch it
+     run, and tap the approval gates. -->
+<script lang="ts">
+  import { onDestroy, onMount } from 'svelte';
+  import type { AppInstance } from '$lib/wm/tree';
+  import { notify } from '$lib/notify/store';
+  import {
+    approve,
+    getRun,
+    killRun,
+    listRuns,
+    planRun,
+    swarmHealth,
+    type ApprovalKind,
+    type NodeStatus,
+    type Run,
+    type RunView
+  } from '$lib/api/swarm';
+
+  export let app: AppInstance;
+  void app;
+
+  let enabled: boolean | null = null;
+  let runs: Run[] = [];
+  let selected: RunView | null = null;
+  let selectedId = '';
+  let error = '';
+  let busy = false;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  let goal = '';
+  let repo = '/home/chris/zeus';
+
+  const NODE_COLOR: Record<NodeStatus, string> = {
+    succeeded: 'text-ok',
+    failed: 'text-err',
+    unreachable: 'text-err',
+    skipped: 'text-muted',
+    running: 'text-warn',
+    ready: 'text-accent',
+    pending_approval: 'text-accent2',
+    blocked: 'text-muted'
+  };
+
+  const GATE_LABEL: Record<ApprovalKind, string> = {
+    plan: 'Approve plan',
+    node_write: 'Approve write',
+    budget: 'Over budget — continue',
+    final: 'Approve merge (final)'
+  };
+
+  async function refresh() {
+    try {
+      runs = await listRuns();
+      if (selectedId) selected = await getRun(selectedId);
+      error = '';
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function pick(id: string) {
+    selectedId = id;
+    try {
+      selected = await getRun(id);
+    } catch (e) {
+      notify({ title: 'Load failed', body: String(e).slice(0, 140), kind: 'err' });
+    }
+  }
+
+  async function submitPlan() {
+    if (!goal.trim() || busy) return;
+    busy = true;
+    try {
+      const view = await planRun(goal.trim(), repo.trim());
+      goal = '';
+      notify({ title: 'Planned', body: `${view.nodes.length} nodes — approve to run`, kind: 'ok' });
+      await refresh();
+      await pick(view.run.id);
+    } catch (e) {
+      notify({ title: 'Plan failed', body: String(e).slice(0, 180), kind: 'err' });
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function resolve(approvalId: string, ok: boolean) {
+    if (!selected) return;
+    busy = true;
+    try {
+      selected = await approve(selected.run.id, approvalId, ok);
+      await refresh();
+    } catch (e) {
+      notify({ title: 'Approve failed', body: String(e).slice(0, 160), kind: 'err' });
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function kill() {
+    if (!selected) return;
+    busy = true;
+    try {
+      selected = await killRun(selected.run.id);
+      await refresh();
+    } finally {
+      busy = false;
+    }
+  }
+
+  $: pending = selected ? selected.approvals.filter((a) => a.state === 'pending') : [];
+  $: spent = selected ? selected.nodes.reduce((s, n) => s + (n.cost_usd || 0), 0) : 0;
+
+  onMount(async () => {
+    try {
+      enabled = (await swarmHealth()).enabled;
+    } catch {
+      enabled = false;
+    }
+    await refresh();
+    timer = setInterval(refresh, 4000);
+  });
+  onDestroy(() => timer && clearInterval(timer));
+</script>
+
+<div class="h-full w-full flex flex-col font-mono text-xs">
+  {#if enabled === false}
+    <div class="bg-warn/20 border-b border-warn/40 px-3 py-2 text-warn">
+      Swarm is disabled. Set <span class="text-fg">ZEUS_SWARM_ENABLED=1</span> (and
+      <span class="text-fg">ZEUS_SWARM_WORKER=sandbox</span>) on zeus-core.
+    </div>
+  {/if}
+  {#if error}
+    <div class="bg-err/20 border-b border-err/40 px-3 py-2 text-err">{error}</div>
+  {/if}
+
+  <!-- submit -->
+  <header class="px-3 py-2 border-b border-border/40 flex items-center gap-2">
+    <input
+      bind:value={goal}
+      placeholder="Goal to scope + complete…"
+      class="flex-1 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-fg focus:border-accent/70"
+      on:keydown={(e) => e.key === 'Enter' && submitPlan()}
+    />
+    <input
+      bind:value={repo}
+      class="w-48 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-muted"
+      title="Target repo (must be on the swarm allowlist)"
+    />
+    <button
+      class="px-3 py-1 rounded bg-accent text-bg disabled:opacity-40"
+      disabled={busy || !goal.trim()}
+      on:click={submitPlan}
+    >{busy ? '…' : 'plan'}</button>
+  </header>
+
+  <div class="flex-1 flex min-h-0">
+    <!-- runs -->
+    <ul class="w-1/3 overflow-y-auto border-r border-border/40">
+      {#each runs as r (r.id)}
+        <li class="border-b border-border/20" class:bg-surface2={r.id === selectedId}>
+          <button class="w-full text-left px-3 py-2 hover:bg-surface2/60" on:click={() => pick(r.id)}>
+            <div class="text-fg truncate">{r.goal}</div>
+            <div class="text-[10px] text-muted mt-0.5">{r.status} · {r.id.slice(0, 8)}</div>
+          </button>
+        </li>
+      {:else}
+        <li class="px-3 py-6 text-muted text-center">No runs. Scope a goal above.</li>
+      {/each}
+    </ul>
+
+    <!-- detail -->
+    <section class="flex-1 overflow-y-auto p-3">
+      {#if selected}
+        <header class="flex items-center justify-between mb-2 gap-2">
+          <div class="min-w-0">
+            <h3 class="text-accent text-sm truncate">{selected.run.goal}</h3>
+            <p class="text-[10px] text-muted">
+              {selected.run.status} · ${spent.toFixed(2)} / ${selected.run.budget_usd.toFixed(2)}
+              · x{selected.run.max_parallel}
+            </p>
+          </div>
+          <button class="text-[10px] px-2 py-0.5 border border-err/60 text-err rounded shrink-0" on:click={kill}>kill</button>
+        </header>
+
+        {#if pending.length}
+          <div class="mb-3 space-y-1">
+            {#each pending as a (a.id)}
+              <div class="flex items-center justify-between gap-2 border border-accent/40 rounded px-2 py-1 bg-accent/5">
+                <span class="text-accent2">{GATE_LABEL[a.kind]}{a.node_id ? ` · ${a.node_id}` : ''}</span>
+                <span class="flex gap-1 shrink-0">
+                  <button class="text-[10px] px-2 py-0.5 rounded bg-accent text-bg" disabled={busy} on:click={() => resolve(a.id, true)}>approve</button>
+                  <button class="text-[10px] px-2 py-0.5 rounded border border-border/60 text-muted" disabled={busy} on:click={() => resolve(a.id, false)}>reject</button>
+                </span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <p class="text-[10px] text-muted uppercase tracking-widest mb-1">DAG</p>
+        <ul class="space-y-1">
+          {#each selected.nodes as n (n.id)}
+            <li class="border-b border-border/20 py-1">
+              <div class="flex items-center justify-between gap-2">
+                <span class="truncate">
+                  <span class="text-fg">{n.id}</span>
+                  {#if n.deps.length}<span class="text-muted/60"> ← {n.deps.join(',')}</span>{/if}
+                  <span class="text-muted"> · {n.title}</span>
+                </span>
+                <span class="shrink-0 {NODE_COLOR[n.status]}">
+                  {n.status}{n.cost_usd ? ` · $${n.cost_usd.toFixed(2)}` : ''}{n.attempts > 1 ? ` · ${n.attempts}x` : ''}
+                </span>
+              </div>
+              {#if n.error}<p class="text-err text-[10px] whitespace-pre-wrap">{n.error}</p>{/if}
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="text-muted text-center mt-12">Select a run, or scope a goal to start one.</p>
+      {/if}
+    </section>
+  </div>
+</div>

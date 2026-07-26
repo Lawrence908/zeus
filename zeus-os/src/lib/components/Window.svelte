@@ -18,6 +18,7 @@
   import Memories from '$lib/apps/Memories.svelte';
   import Knowledge from '$lib/apps/Knowledge.svelte';
   import Agents from '$lib/apps/Agents.svelte';
+  import Swarm from '$lib/apps/Swarm.svelte';
   import Ingest from '$lib/apps/Ingest.svelte';
   import Obsidian from '$lib/apps/Obsidian.svelte';
   import Editor from '$lib/apps/Editor.svelte';
@@ -57,6 +58,7 @@
     Memories,
     Knowledge,
     Agents,
+    Swarm,
     Ingest,
     Obsidian,
     Editor,

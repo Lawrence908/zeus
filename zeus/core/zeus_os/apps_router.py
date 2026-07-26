@@ -38,6 +38,7 @@ _DEFAULT_APPS: list[dict[str, Any]] = [
     {"id": "memories", "title": "Memories", "icon": "database", "kind": "Memories"},
     {"id": "knowledge", "title": "Knowledge", "icon": "library", "kind": "Knowledge"},
     {"id": "agents", "title": "Agents", "icon": "users", "kind": "Agents"},
+    {"id": "swarm", "title": "Swarm", "icon": "git-merge", "kind": "Swarm"},
     {"id": "ingest", "title": "Ingest", "icon": "download", "kind": "Ingest"},
     {"id": "images", "title": "Image Viewer", "icon": "image", "kind": "Images"},
     {"id": "procs", "title": "Process Manager", "icon": "cpu", "kind": "Processes"},
