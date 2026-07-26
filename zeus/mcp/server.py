@@ -10,6 +10,11 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from zeus.mcp.tools import (
+    capitolscope_active_tickers,
+    capitolscope_digest,
+    capitolscope_leaderboard,
+    capitolscope_sector_flow,
+    capitolscope_ticker,
     kronos_create_job,
     olympian_action_list,
     olympian_action_run,
@@ -145,6 +150,31 @@ async def kronos_create_job_tool(
         max_retries=max_retries,
         job_id=job_id,
     )
+
+
+@mcp.tool(name="capitolscope_digest")
+async def capitolscope_digest_tool(days: int = 7):
+    return await capitolscope_digest(days=days)
+
+
+@mcp.tool(name="capitolscope_active_tickers")
+async def capitolscope_active_tickers_tool(days: int = 90, limit: int = 25):
+    return await capitolscope_active_tickers(days=days, limit=limit)
+
+
+@mcp.tool(name="capitolscope_ticker")
+async def capitolscope_ticker_tool(ticker: str, days: int = 180, limit: int = 60):
+    return await capitolscope_ticker(ticker=ticker, days=days, limit=limit)
+
+
+@mcp.tool(name="capitolscope_sector_flow")
+async def capitolscope_sector_flow_tool(days: int = 90):
+    return await capitolscope_sector_flow(days=days)
+
+
+@mcp.tool(name="capitolscope_leaderboard")
+async def capitolscope_leaderboard_tool(limit: int = 20):
+    return await capitolscope_leaderboard(limit=limit)
 
 
 def main() -> None:
