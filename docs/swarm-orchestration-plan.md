@@ -89,6 +89,40 @@ Working name: **Argo** (the quest engine); workers are **argonauts**; the scoper
 
 **Naming:** `argo` collides with Argo Workflows / Argo CD (which may run on this homelab). `Argo` coordinator + `argonauts` workers is kept, but env/config are namespaced `ZEUS_SWARM_*` to avoid friction.
 
+## Future phases (post-P4 roadmap)
+
+P0-P4 make Argo functionally complete for sequential and parallel runs on `~/zeus`. These phases harden it for real, unattended, production use. Ordered by priority.
+
+- **P5 - Sandbox the verifier + egress lockdown + Aegis (security; do first).**
+  Gap: `CommandVerifier` runs `node.check` - an LLM-authored shell command - directly on the **host** in the worktree. P1b sandboxes the worker but not the check, so a planned `check` is an unsandboxed code-execution vector on zeus-core. The sandbox also uses the default docker network (unrestricted egress), and the swarm's denylist is separate from the existing `AegisPolicyEngine`.
+  Scope: run `check` inside the same container image as the worker (mount the worktree, restricted network); a dedicated egress policy (allow only `api.anthropic.com` + whatever package registries a run needs); route the worker's diff summary + check output through Aegis under a new `swarm` policy; guarantee `ANTHROPIC_API_KEY` is never logged.
+
+- **P6 - Durable resume + reapers (resilience).**
+  Gap: the coordinator's `_workspaces` dict and in-flight `asyncio` tasks are in-memory; a zeus-core restart mid-run orphans worktrees and leaves `running`/`pending_*` runs stuck. Node execution is not crash-safe (a node interrupted mid-run stays `running`).
+  Scope: on startup, scan the store for non-terminal runs, reconcile against on-disk git worktrees/branches, re-attach integration worktrees, and resume `running` runs (reset interrupted `running` nodes to `ready`, re-dispatch); a periodic reaper for orphaned worktrees/branches from dead runs.
+
+- **P7 - Auto-PR + project gate + CI (close the loop).**
+  Gap: the final gate leaves `swarm/run-<id>` for a manual PR; verification is per-node only; Metis's own `cost_usd`/`session` is never recorded.
+  Scope: at the final gate run a run-level `project_check` (full test suite / build) on the integration branch; on pass `gh pr create` from `swarm/run-<id>` and link the PR in the run/store/UI; optionally poll CI on the PR and reflect status; capture Metis cost into the run.
+
+- **P8 - Observability + streaming.**
+  Gap: the Swarm app polls every 4s; there is no metrics or audit surface.
+  Scope: `/swarm/metrics` (run counts, success/partial/fail + retry rates, cost per run/model) into `/admin`; a durable audit log (approvals: who + when, node transitions); an SSE/WS event stream to the Swarm app to replace polling; surface each argonaut's transcript (`~/.claude/projects/<escaped-repo>/`) per node.
+
+- **P9 - Smarter execution.**
+  Gap: a merge conflict fails the node outright; scheduling is FIFO; one model for all nodes; a stuck node has no escalation to re-planning.
+  Scope: on merge conflict, auto-rebase the node branch onto the new integration tip and re-run the worker once (recover both nodes' work) before failing; critical-path-aware scheduling; per-node model routing (cheap model for trivial nodes); adaptive re-planning - after repeated node failures, hand the failures back to Metis for a revised sub-DAG.
+
+- **P10 - Bidirectional Telegram + question gates.**
+  Gap: Telegram is notify-only, and a node that needs human clarification has nowhere to ask.
+  Scope: Telegram inline buttons (approve/reject) -> callback -> `/swarm/approve`; a `QUESTION` approval kind + node state where an argonaut writes a question file and the run pauses for a typed answer, fed back as `feedback`; plan and final-PR links in the messages.
+
+- **P11 - Reach.**
+  Gap: single-repo (`~/zeus`), human-initiated runs only.
+  Scope: multi-repo allowlist + cross-repo run coordination; Kairos-initiated swarm runs (the background daemon proposes and launches low-risk runs under tight budgets and mandatory gates, extending its read-only allowlist only with an Aegis review).
+
+**Cross-cutting (not phase-gated):** grow the test suite alongside each phase; keep the plan doc and `zeus/orchestration/CLAUDE.md` in sync; align terminology with Ruflo/olympians so the swarm reads as one subsystem; a `swarm` seed policy under `zeus/safety/policies/`.
+
 ## Resolved
 
 - **Repo scope:** an allowlist of absolute repo paths (`ZEUS_SWARM_REPO_ALLOWLIST`, `zeus/orchestration/swarm/config.py`), shipping with just `~/zeus`. "Anything under `~/`" is rejected: `~` holds non-repos, `.ssh`, and stray `.env` files, and a worktree needs a git repo anyway. Two things fall out of targeting the zeus repo:
