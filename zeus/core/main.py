@@ -74,6 +74,20 @@ async def check_service(client: httpx.AsyncClient, name: str, url: str) -> Servi
         return ServiceHealth(name=name, status="down")
 
 
+def _make_swarm_answer(app: FastAPI):
+    """Late-bound Telegram `/answer` handler: routes an answer to the swarm
+    coordinator (which may be created after the bot). Returns a status string."""
+    async def _answer(run_id: str, text: str) -> str:
+        coord = getattr(app.state, "swarm_coordinator", None)
+        if coord is None:
+            return "Swarm is not enabled."
+        view = await coord.answer(run_id, text)
+        if view is None:
+            return f"Run {run_id} not found."
+        return f"Answer recorded for run {run_id}."
+    return _answer
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.boot_time = BOOT_TIME
@@ -149,6 +163,7 @@ async def lifespan(app: FastAPI):
         tg_bot = build_telegram_bot(
             app.state.query_engine,
             overrides=app.state.runtime_settings.get_section("telegram"),
+            swarm_answer=_make_swarm_answer(app),
         )
         if tg_bot is not None:
             await tg_bot.start()
@@ -625,7 +640,9 @@ async def _restart_telegram_bot(app: FastAPI) -> None:
         app.state.telegram_bot = None
 
     overrides = app.state.runtime_settings.get_section("telegram")
-    tg_bot = build_telegram_bot(app.state.query_engine, overrides=overrides)
+    tg_bot = build_telegram_bot(
+        app.state.query_engine, overrides=overrides, swarm_answer=_make_swarm_answer(app)
+    )
     if tg_bot is None:
         return
     try:

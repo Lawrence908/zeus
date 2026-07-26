@@ -37,6 +37,11 @@ class ApproveBody(BaseModel):
     approve: bool = True
 
 
+class AnswerBody(BaseModel):
+    answer: str
+    approval_id: str | None = None  # optional; defaults to the oldest pending question
+
+
 class PlanBody(BaseModel):
     goal: str
     repo: str
@@ -181,6 +186,17 @@ async def get_run(run_id: str, request: Request) -> RunView:
 @router.post("/runs/{run_id}/approve", response_model=RunView)
 async def approve(run_id: str, body: ApproveBody, request: Request) -> RunView:
     view = await _coordinator(request).resolve(run_id, body.approval_id, body.approve)
+    if view is None:
+        raise HTTPException(404, detail=f"run not found: {run_id!r}")
+    return view
+
+
+@router.post("/runs/{run_id}/answer", response_model=RunView)
+async def answer(run_id: str, body: AnswerBody, request: Request) -> RunView:
+    """Answer a node's QUESTION gate (P10) and let the node run."""
+    if not body.answer.strip():
+        raise HTTPException(422, detail="answer must not be empty")
+    view = await _coordinator(request).answer(run_id, body.answer.strip(), approval_id=body.approval_id)
     if view is None:
         raise HTTPException(404, detail=f"run not found: {run_id!r}")
     return view

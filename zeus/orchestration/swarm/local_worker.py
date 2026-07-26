@@ -45,6 +45,8 @@ def build_local_prompt(node: TaskNode, run: Run, feedback: str | None = None) ->
     ]
     if node.acceptance:
         lines += [f"Acceptance: {node.acceptance}"]
+    if node.answer:  # P10: human clarification
+        lines += [f"Clarification - Q: {node.question}  A: {node.answer}"]
     if node.check:
         lines += [f"It will be verified by running: {node.check}"]
     if feedback:

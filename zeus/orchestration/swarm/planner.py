@@ -60,6 +60,9 @@ Rules:
   Bias toward "local" then "haiku" to keep runs cheap.
 - Set requires_approval:true for a node that deletes files, changes CI/deploy,
   or touches security/auth. Set max_attempts:2-3 for nodes with a `check`.
+- Add "question": "..." to a node ONLY when a genuine ambiguity would block a
+  coding agent (a design choice, a missing name/path); the run pauses for a human
+  answer before that node runs. Omit it when the task is clear.
 - tool_scope is the least privilege each node needs.
 
 Goal: {goal}

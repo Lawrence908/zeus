@@ -42,6 +42,8 @@ def build_prompt(node: TaskNode, run: Run, feedback: str | None = None) -> str:
     ]
     if node.acceptance:
         lines += ["", f"Acceptance criteria: {node.acceptance}"]
+    if node.answer:  # P10: human clarification carried into the worker
+        lines += ["", f"Clarification - Q: {node.question}  A: {node.answer}"]
     if node.check:
         lines += ["", f"Your work will be verified by running: {node.check}"]
     if feedback:

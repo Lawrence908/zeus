@@ -112,16 +112,27 @@ class SwarmStore:
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:
-        """Add columns to an existing db idempotently (P7 finalization fields)."""
-        have = {r["name"] for r in conn.execute("PRAGMA table_info(swarm_runs)")}
-        for col, ddl in (
-            ("project_check", "TEXT NOT NULL DEFAULT ''"),
-            ("project_check_passed", "INTEGER"),  # NULL = not run
-            ("project_check_output", "TEXT"),
-            ("pr_url", "TEXT"),
-        ):
-            if col not in have:
-                conn.execute(f"ALTER TABLE swarm_runs ADD COLUMN {col} {ddl}")
+        """Add columns to an existing db idempotently (P7/P10 fields)."""
+        additions = {
+            "swarm_runs": (
+                ("project_check", "TEXT NOT NULL DEFAULT ''"),
+                ("project_check_passed", "INTEGER"),  # NULL = not run
+                ("project_check_output", "TEXT"),
+                ("pr_url", "TEXT"),
+            ),
+            "swarm_nodes": (
+                ("question", "TEXT NOT NULL DEFAULT ''"),  # P10 clarification
+                ("answer", "TEXT"),  # NULL = unanswered
+            ),
+            "swarm_approvals": (
+                ("detail", "TEXT"),  # question text for QUESTION gates (P10)
+            ),
+        }
+        for table, cols in additions.items():
+            have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for col, ddl in cols:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)
@@ -162,6 +173,8 @@ class SwarmStore:
             tool_scope=json.loads(r["tool_scope"]),
             model=r["model"],
             requires_approval=bool(r["requires_approval"]),
+            question=r["question"],
+            answer=r["answer"],
             max_attempts=r["max_attempts"],
             status=NodeStatus(r["status"]),
             attempts=r["attempts"],
@@ -181,6 +194,7 @@ class SwarmStore:
             kind=ApprovalKind(r["kind"]),
             node_id=r["node_id"],
             state=ApprovalState(r["state"]),
+            detail=r["detail"],
             created_at=r["created_at"],
             resolved_at=r["resolved_at"],
         )
@@ -214,13 +228,13 @@ class SwarmStore:
                 status = NodeStatus.READY if not n.deps else NodeStatus.BLOCKED
                 conn.execute(
                     "INSERT INTO swarm_nodes (run_id, id, title, deps, acceptance, tool_scope,"
-                    " check_cmd, model, requires_approval, max_attempts, status, attempts, worker_id,"
-                    " output, error, cost_usd, session_id, updated_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " check_cmd, model, requires_approval, question, max_attempts, status, attempts,"
+                    " worker_id, output, error, cost_usd, session_id, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         run.id, n.id, n.title, json.dumps(n.deps), n.acceptance,
                         json.dumps(n.tool_scope), n.check, n.model, int(n.requires_approval),
-                        n.max_attempts, status.value, 0, None, None, None, 0.0, None, now,
+                        n.question, n.max_attempts, status.value, 0, None, None, None, 0.0, None, now,
                     ),
                 )
             # Gate 1: the plan itself must be approved before anything runs.
@@ -323,30 +337,31 @@ class SwarmStore:
         with self._connect() as conn:
             conn.execute(
                 "UPDATE swarm_nodes SET status = ?, attempts = ?, worker_id = ?, output = ?,"
-                " error = ?, requires_approval = ?, cost_usd = ?, session_id = ?, updated_at = ?"
-                " WHERE run_id = ? AND id = ?",
+                " error = ?, requires_approval = ?, answer = ?, cost_usd = ?, session_id = ?,"
+                " updated_at = ? WHERE run_id = ? AND id = ?",
                 (node.status.value, node.attempts, node.worker_id, node.output,
-                 node.error, int(node.requires_approval), node.cost_usd, node.session_id,
-                 _now_iso(), node.run_id, node.id),
+                 node.error, int(node.requires_approval), node.answer, node.cost_usd,
+                 node.session_id, _now_iso(), node.run_id, node.id),
             )
 
     async def create_approval(
-        self, run_id: str, kind: ApprovalKind, node_id: str | None = None
+        self, run_id: str, kind: ApprovalKind, node_id: str | None = None,
+        detail: str | None = None,
     ) -> Approval:
-        return await asyncio.to_thread(self._create_approval_sync, run_id, kind, node_id)
+        return await asyncio.to_thread(self._create_approval_sync, run_id, kind, node_id, detail)
 
     def _create_approval_sync(
-        self, run_id: str, kind: ApprovalKind, node_id: str | None
+        self, run_id: str, kind: ApprovalKind, node_id: str | None, detail: str | None = None,
     ) -> Approval:
         ap = Approval(
             id=uuid.uuid4().hex[:12], run_id=run_id, kind=kind, node_id=node_id,
-            state=ApprovalState.PENDING, created_at=_now_iso(), resolved_at=None,
+            detail=detail, state=ApprovalState.PENDING, created_at=_now_iso(), resolved_at=None,
         )
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO swarm_approvals (id, run_id, kind, node_id, state, created_at, resolved_at)"
-                " VALUES (?,?,?,?,?,?,?)",
-                (ap.id, ap.run_id, ap.kind.value, ap.node_id, ap.state.value, ap.created_at, None),
+                "INSERT INTO swarm_approvals (id, run_id, kind, node_id, state, detail, created_at, resolved_at)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (ap.id, ap.run_id, ap.kind.value, ap.node_id, ap.state.value, ap.detail, ap.created_at, None),
             )
             self._append_event(conn, run_id, "approval", f"{kind.value} opened", node_id, ap.created_at)
         return ap

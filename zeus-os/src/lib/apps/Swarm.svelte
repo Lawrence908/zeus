@@ -5,6 +5,7 @@
   import type { AppInstance } from '$lib/wm/tree';
   import { notify } from '$lib/notify/store';
   import {
+    answerQuestion,
     approve,
     getRun,
     killRun,
@@ -55,8 +56,11 @@
     plan: 'Approve plan',
     node_write: 'Approve write',
     budget: 'Over budget — continue',
-    final: 'Approve merge (final)'
+    final: 'Approve merge (final)',
+    question: 'Clarification needed'
   };
+
+  let answers: Record<string, string> = {}; // approval_id -> draft answer
 
   async function refresh() {
     try {
@@ -118,6 +122,22 @@
       await refresh();
     } catch (e) {
       notify({ title: 'Approve failed', body: String(e).slice(0, 160), kind: 'err' });
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function sendAnswer(approvalId: string) {
+    if (!selected) return;
+    const text = (answers[approvalId] || '').trim();
+    if (!text) return;
+    busy = true;
+    try {
+      selected = await answerQuestion(selected.run.id, text, approvalId);
+      answers[approvalId] = '';
+      await refresh();
+    } catch (e) {
+      notify({ title: 'Answer failed', body: String(e).slice(0, 160), kind: 'err' });
     } finally {
       busy = false;
     }
@@ -252,13 +272,30 @@
         {#if pending.length}
           <div class="mb-3 space-y-1">
             {#each pending as a (a.id)}
-              <div class="flex items-center justify-between gap-2 border border-accent/40 rounded px-2 py-1 bg-accent/5">
-                <span class="text-accent2">{GATE_LABEL[a.kind]}{a.node_id ? ` · ${a.node_id}` : ''}</span>
-                <span class="flex gap-1 shrink-0">
-                  <button class="text-[10px] px-2 py-0.5 rounded bg-accent text-bg" disabled={busy} on:click={() => resolve(a.id, true)}>approve</button>
-                  <button class="text-[10px] px-2 py-0.5 rounded border border-border/60 text-muted" disabled={busy} on:click={() => resolve(a.id, false)}>reject</button>
-                </span>
-              </div>
+              {#if a.kind === 'question'}
+                <div class="border border-accent2/50 rounded px-2 py-1.5 bg-accent2/5">
+                  <div class="text-accent2 mb-1">{GATE_LABEL[a.kind]}{a.node_id ? ` · ${a.node_id}` : ''}</div>
+                  {#if a.detail}<p class="text-fg mb-1 whitespace-pre-wrap">{a.detail}</p>{/if}
+                  <div class="flex items-center gap-1">
+                    <input
+                      bind:value={answers[a.id]}
+                      placeholder="Your answer…"
+                      class="flex-1 bg-surface rounded border border-border/50 px-2 py-1 outline-none text-fg focus:border-accent2/70"
+                      on:keydown={(e) => e.key === 'Enter' && sendAnswer(a.id)}
+                    />
+                    <button class="text-[10px] px-2 py-0.5 rounded bg-accent2 text-bg" disabled={busy || !(answers[a.id] || '').trim()} on:click={() => sendAnswer(a.id)}>answer</button>
+                    <button class="text-[10px] px-2 py-0.5 rounded border border-border/60 text-muted" disabled={busy} on:click={() => resolve(a.id, false)}>skip</button>
+                  </div>
+                </div>
+              {:else}
+                <div class="flex items-center justify-between gap-2 border border-accent/40 rounded px-2 py-1 bg-accent/5">
+                  <span class="text-accent2">{GATE_LABEL[a.kind]}{a.node_id ? ` · ${a.node_id}` : ''}</span>
+                  <span class="flex gap-1 shrink-0">
+                    <button class="text-[10px] px-2 py-0.5 rounded bg-accent text-bg" disabled={busy} on:click={() => resolve(a.id, true)}>approve</button>
+                    <button class="text-[10px] px-2 py-0.5 rounded border border-border/60 text-muted" disabled={busy} on:click={() => resolve(a.id, false)}>reject</button>
+                  </span>
+                </div>
+              {/if}
             {/each}
           </div>
         {/if}

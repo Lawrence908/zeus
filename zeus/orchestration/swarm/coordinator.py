@@ -212,6 +212,15 @@ class Coordinator:
         for n in dag.dispatchable(nodes):
             if len(batch) >= run.max_parallel:
                 break
+            if n.question and not n.answer:
+                # P10: pause for human clarification before this node runs.
+                ap = await self._store.create_approval(
+                    run.id, ApprovalKind.QUESTION, n.id, detail=n.question)
+                n.status = NodeStatus.PENDING_APPROVAL
+                await self._store.update_node(n)
+                await self._notify(run, ap)
+                progressed = True
+                continue
             if n.requires_approval:
                 ap = await self._store.create_approval(run.id, ApprovalKind.NODE_WRITE, n.id)
                 n.status = NodeStatus.PENDING_APPROVAL
@@ -382,6 +391,16 @@ class Coordinator:
             await self._store.set_run_status(run_id, RunStatus.CANCELLED)
             await self._teardown_workspace(run_id)
 
+        elif ap.kind == ApprovalKind.QUESTION:
+            # Approve-with-text goes through answer(); resolve() handles reject only.
+            if not approve:
+                view = await self._store.get_view(run_id)
+                node = next((n for n in (view.nodes if view else []) if n.id == ap.node_id), None)
+                if node is not None:
+                    await self._skip_cascade(node, view.nodes)
+            await self._publish(run_id)
+            return await self.advance(run_id)
+
         elif ap.kind == ApprovalKind.FINAL:
             if approve:
                 await self._finalize(run_id)
@@ -435,6 +454,32 @@ class Coordinator:
             run_id, status, pr_url=pr_url,
             project_check_passed=passed, project_check_output=output,
         )
+
+    async def answer(
+        self, run_id: str, answer_text: str, *, approval_id: str | None = None
+    ) -> RunView | None:
+        """Answer a node's QUESTION gate (P10): store the answer on the node, clear
+        the gate, and let the node run. `approval_id` optional - defaults to the
+        run's oldest pending question (so a Telegram reply need not know the id)."""
+        view = await self._store.get_view(run_id)
+        if view is None:
+            return None
+        ap = next(
+            (a for a in view.approvals
+             if a.kind == ApprovalKind.QUESTION and a.state == ApprovalState.PENDING
+             and (approval_id is None or a.id == approval_id)),
+            None,
+        )
+        if ap is None:
+            return view  # nothing pending to answer
+        await self._store.resolve_approval(ap.id, ApprovalState.APPROVED)
+        node = next((n for n in view.nodes if n.id == ap.node_id), None)
+        if node is not None:
+            node.answer = answer_text
+            node.status = NodeStatus.READY
+            await self._store.update_node(node)
+            await self._store.append_event(run_id, "node_status", "question answered", node.id)
+        return await self.advance(run_id)
 
     async def kill(self, run_id: str) -> RunView | None:
         view = await self._store.get_view(run_id)

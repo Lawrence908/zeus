@@ -24,6 +24,7 @@ _GATE_TEXT: dict[ApprovalKind, str] = {
     ApprovalKind.NODE_WRITE: "node awaiting write approval",
     ApprovalKind.BUDGET: "run is over budget",
     ApprovalKind.FINAL: "run finished, awaiting final merge approval",
+    ApprovalKind.QUESTION: "a node needs clarification",
 }
 
 
@@ -39,6 +40,14 @@ class NullNotifier:
 def build_message(run: Run, approval: Approval) -> str:
     what = _GATE_TEXT.get(approval.kind, approval.kind.value)
     node = f" ({approval.node_id})" if approval.node_id else ""
+    if approval.kind == ApprovalKind.QUESTION:
+        return (
+            f"\U0001f916 Argo swarm: {what}{node}\n"
+            f"goal: {run.goal[:120]}\n"
+            f"Q: {(approval.detail or '').strip()[:300]}\n"
+            f"run: {run.id}\n"
+            f"answer in the Swarm app, or reply:  /answer {run.id} <your answer>"
+        )
     return (
         f"\U0001f916 Argo swarm: {what}{node}\n"
         f"goal: {run.goal[:160]}\n"

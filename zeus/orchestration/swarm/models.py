@@ -39,6 +39,7 @@ class ApprovalKind(str, Enum):
     NODE_WRITE = "node_write"
     BUDGET = "budget"  # run exceeded budget_usd; approve to continue
     FINAL = "final"
+    QUESTION = "question"  # a node needs human clarification before it can run (P10)
 
 
 class ApprovalState(str, Enum):
@@ -63,6 +64,7 @@ class TaskNodeSpec(BaseModel):
     tool_scope: list[str] = Field(default_factory=list)  # min tools this node may use
     model: str = ""  # model hint (e.g. "haiku" for trivial nodes); "" = worker default
     requires_approval: bool = False  # gate 2 before this node runs
+    question: str = ""  # a clarification the human must answer before this node runs (P10)
     max_attempts: int = Field(default=1, ge=1, le=5)  # verify-retry budget
 
     @field_validator("id")
@@ -115,6 +117,8 @@ class TaskNode(BaseModel):
     tool_scope: list[str] = Field(default_factory=list)
     model: str = ""
     requires_approval: bool = False
+    question: str = ""  # clarification needed before this node runs (P10)
+    answer: str | None = None  # the human's answer, injected into the worker prompt
     max_attempts: int = 1
     status: NodeStatus = NodeStatus.BLOCKED
     attempts: int = 0
@@ -132,6 +136,7 @@ class Approval(BaseModel):
     kind: ApprovalKind
     node_id: str | None = None
     state: ApprovalState = ApprovalState.PENDING
+    detail: str | None = None  # question text for QUESTION gates (P10)
     created_at: str = ""
     resolved_at: str | None = None
 

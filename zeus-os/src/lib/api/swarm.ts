@@ -21,7 +21,7 @@ export type NodeStatus =
   | 'skipped'
   | 'unreachable';
 
-export type ApprovalKind = 'plan' | 'node_write' | 'budget' | 'final';
+export type ApprovalKind = 'plan' | 'node_write' | 'budget' | 'final' | 'question';
 export type ApprovalState = 'pending' | 'approved' | 'rejected';
 
 export interface Run {
@@ -52,6 +52,8 @@ export interface TaskNode {
   requires_approval: boolean;
   check: string;
   model: string;
+  question: string;
+  answer?: string | null;
   error?: string | null;
   output?: string | null;
 }
@@ -88,6 +90,7 @@ export interface Approval {
   kind: ApprovalKind;
   node_id?: string | null;
   state: ApprovalState;
+  detail?: string | null; // question text for QUESTION gates
 }
 
 export interface RunView {
@@ -125,6 +128,13 @@ export function approve(runId: string, approvalId: string, approve: boolean): Pr
 
 export function killRun(runId: string): Promise<RunView> {
   return jsonFetch(`/swarm/runs/${encodeURIComponent(runId)}/kill`, { method: 'POST' });
+}
+
+export function answerQuestion(runId: string, answer: string, approvalId?: string): Promise<RunView> {
+  return jsonFetch(`/swarm/runs/${encodeURIComponent(runId)}/answer`, {
+    method: 'POST',
+    body: JSON.stringify({ answer, approval_id: approvalId ?? null })
+  });
 }
 
 export function swarmMetrics(): Promise<SwarmMetrics> {
