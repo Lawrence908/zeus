@@ -1,4 +1,4 @@
-# tests/test_swarm_worktree.py — CodeWorkspace git worktree + denylist commit
+# tests/test_swarm_worktree.py — per-node worktrees + integration merge
 import asyncio
 import os
 import subprocess
@@ -16,7 +16,7 @@ def _init_repo(path):
     _run(["git", "config", "user.email", "t@t"], path)
     _run(["git", "config", "user.name", "t"], path)
     with open(os.path.join(path, "README.md"), "w") as f:
-        f.write("# repo\n")
+        f.write("base\n")
     _run(["git", "add", "-A"], path)
     _run(["git", "commit", "-qm", "init"], path)
 
@@ -25,106 +25,114 @@ def _node(nid, title="t"):
     return TaskNode(run_id="r", id=nid, title=title, status=NodeStatus.RUNNING)
 
 
-def test_worktree_setup_commit_teardown(tmp_path):
+def _write(path, rel, content):
+    full = os.path.join(path, rel)
+    os.makedirs(os.path.dirname(full) or path, exist_ok=True)
+    with open(full, "w") as f:
+        f.write(content)
+
+
+def _mkrepo(tmp_path):
     repo = str(tmp_path / "repo")
     os.makedirs(repo)
     _init_repo(repo)
-    wt_root = str(tmp_path / "wt")
+    return repo
+
+
+def _ls(repo, branch):
+    return subprocess.run(["git", "ls-tree", "-r", "--name-only", branch],
+                          cwd=repo, capture_output=True, text=True).stdout
+
+
+def test_node_commit_and_merge(tmp_path):
+    repo = _mkrepo(tmp_path)
 
     async def scenario():
-        ws = CodeWorkspace(repo, "run1", base_dir=wt_root)
-        path = await ws.setup()
-        assert os.path.isdir(path)
-
-        # Worker writes a legit source file.
-        os.makedirs(os.path.join(path, "zeus", "core"), exist_ok=True)
-        with open(os.path.join(path, "zeus", "core", "new.py"), "w") as f:
-            f.write("x = 1\n")
-
-        res = await ws.commit_node(_node("a"))
-        assert res.committed and not res.denied and res.commit
-
-        # The commit is on the integration branch.
-        log = subprocess.run(
-            ["git", "log", "--oneline", "swarm/run-run1"],
-            cwd=repo, capture_output=True, text=True,
-        ).stdout
-        assert "swarm node a" in log
-
-        await ws.teardown()
-        assert not os.path.isdir(path)
-
-    asyncio.run(scenario())
-
-
-def test_denied_path_is_rejected_and_discarded(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.makedirs(repo)
-    _init_repo(repo)
-    wt_root = str(tmp_path / "wt")
-
-    async def scenario():
-        ws = CodeWorkspace(repo, "run2", base_dir=wt_root)
-        path = await ws.setup()
-
-        # Worker tries to weaken its own supervision + drop a secret.
-        os.makedirs(os.path.join(path, "zeus", "orchestration"), exist_ok=True)
-        with open(os.path.join(path, "zeus", "orchestration", "bus.py"), "w") as f:
-            f.write("# tampered\n")
-        with open(os.path.join(path, ".env"), "w") as f:
-            f.write("SECRET=1\n")
-
-        res = await ws.commit_node(_node("evil"))
-        assert not res.committed
-        assert "zeus/orchestration/bus.py" in res.denied
-        assert ".env" in res.denied
-
-        # Changes were discarded, nothing committed on the branch.
-        assert await ws.changed_paths() == []
-        log = subprocess.run(
-            ["git", "log", "--oneline", "swarm/run-run2"],
-            cwd=repo, capture_output=True, text=True,
-        ).stdout.strip()
-        assert log.count("\n") == 0  # only the initial commit
-
+        ws = CodeWorkspace(repo, "run1", base_dir=str(tmp_path / "wt"))
+        await ws.setup()
+        p = await ws.new_node_worktree("a")
+        _write(p, "zeus/core/new.py", "x = 1\n")
+        c = await ws.commit_in(_node("a"), p)
+        assert c.committed and not c.denied
+        m = await ws.merge_node("a")
+        assert m.merged
+        assert "zeus/core/new.py" in _ls(repo, "swarm/run-run1")
         await ws.teardown()
 
     asyncio.run(scenario())
 
 
-def test_commit_bypasses_repo_precommit_hook(tmp_path):
-    # A repo pre-commit hook (e.g. a docs-index check) must not stall the swarm's
-    # mechanical per-node commits; the final PR is where hooks/CI run.
-    repo = str(tmp_path / "repo")
-    os.makedirs(repo)
-    _init_repo(repo)
+def test_denied_path_rejected(tmp_path):
+    repo = _mkrepo(tmp_path)
+
+    async def scenario():
+        ws = CodeWorkspace(repo, "run2", base_dir=str(tmp_path / "wt"))
+        await ws.setup()
+        p = await ws.new_node_worktree("evil")
+        _write(p, "zeus/orchestration/bus.py", "# tamper\n")
+        _write(p, ".env", "SECRET=1\n")
+        c = await ws.commit_in(_node("evil"), p)
+        assert not c.committed
+        assert "zeus/orchestration/bus.py" in c.denied and ".env" in c.denied
+        assert await ws.changed_paths(p) == []  # discarded
+        await ws.teardown()
+
+    asyncio.run(scenario())
+
+
+def test_commit_bypasses_precommit_hook(tmp_path):
+    repo = _mkrepo(tmp_path)
     hook = os.path.join(repo, ".git", "hooks", "pre-commit")
     with open(hook, "w") as f:
-        f.write("#!/bin/sh\necho blocked >&2\nexit 1\n")
+        f.write("#!/bin/sh\nexit 1\n")
     os.chmod(hook, 0o755)
 
     async def scenario():
-        ws = CodeWorkspace(repo, "hooked", base_dir=str(tmp_path / "wt"))
-        path = await ws.setup()
-        with open(os.path.join(path, "note.txt"), "w") as f:
-            f.write("hi\n")
-        res = await ws.commit_node(_node("a"))
-        assert res.committed and res.commit  # --no-verify bypassed the failing hook
+        ws = CodeWorkspace(repo, "run3", base_dir=str(tmp_path / "wt"))
+        await ws.setup()
+        p = await ws.new_node_worktree("a")
+        _write(p, "note.txt", "hi\n")
+        assert (await ws.commit_in(_node("a"), p)).committed
+        await ws.teardown()
+
+    asyncio.run(scenario())
+
+
+def test_merge_conflict_fails_open(tmp_path):
+    repo = _mkrepo(tmp_path)
+
+    async def scenario():
+        ws = CodeWorkspace(repo, "run4", base_dir=str(tmp_path / "wt"))
+        await ws.setup()
+        # Two nodes edit the same line of README.md from the same base tip.
+        pa = await ws.new_node_worktree("a")
+        _write(pa, "README.md", "from a\n")
+        await ws.commit_in(_node("a"), pa)
+        pb = await ws.new_node_worktree("b")
+        _write(pb, "README.md", "from b\n")
+        await ws.commit_in(_node("b"), pb)
+
+        assert (await ws.merge_node("a")).merged  # first lands
+        mb = await ws.merge_node("b")             # second conflicts
+        assert not mb.merged and "README.md" in mb.conflicts
+
+        # Integration branch is intact with a's change (merge aborted cleanly).
+        head = subprocess.run(["git", "show", "swarm/run-run4:README.md"],
+                              cwd=repo, capture_output=True, text=True).stdout
+        assert head == "from a\n"
         await ws.teardown()
 
     asyncio.run(scenario())
 
 
 def test_noop_node_commits_nothing(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.makedirs(repo)
-    _init_repo(repo)
+    repo = _mkrepo(tmp_path)
 
     async def scenario():
-        ws = CodeWorkspace(repo, "run3", base_dir=str(tmp_path / "wt"))
+        ws = CodeWorkspace(repo, "run5", base_dir=str(tmp_path / "wt"))
         await ws.setup()
-        res = await ws.commit_node(_node("noop"))
-        assert not res.committed and not res.denied
+        p = await ws.new_node_worktree("noop")
+        assert not (await ws.commit_in(_node("noop"), p)).committed
         await ws.teardown()
 
     asyncio.run(scenario())

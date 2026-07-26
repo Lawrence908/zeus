@@ -20,6 +20,7 @@ deterministic and easy to test.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Callable
 
@@ -104,7 +105,7 @@ class Coordinator:
         return await self._store.get_view(run_id)
 
     async def _step(self, run: Run, nodes: list[TaskNode]) -> bool:
-        """One scheduling pass. Returns True if it changed any state."""
+        """One scheduling pass: unblock, gate, and dispatch a ready batch in parallel."""
         progressed = False
 
         # 1. Unblock nodes whose deps have all succeeded.
@@ -113,26 +114,28 @@ class Coordinator:
             await self._store.update_node(n)
             progressed = True
 
-        # 2. Dispatch READY nodes up to the parallelism budget.
-        capacity = run.max_parallel - dag.running_count(nodes)
+        # 2. Select a batch of READY nodes up to max_parallel; gate the rest.
+        batch: list[TaskNode] = []
         for n in dag.dispatchable(nodes):
-            if capacity <= 0:
+            if len(batch) >= run.max_parallel:
                 break
             if n.requires_approval:
-                # Gate 2: hold this node until a NODE_WRITE approval is granted.
                 await self._store.create_approval(run.id, ApprovalKind.NODE_WRITE, n.id)
                 n.status = NodeStatus.PENDING_APPROVAL
                 await self._store.update_node(n)
                 progressed = True
                 continue
-
             n.status = NodeStatus.RUNNING
             await self._store.update_node(n)
-            capacity -= 1
+            batch.append(n)
+
+        # 3. Run the batch concurrently. Each node works in its own worktree; the
+        #    denylist commit + merge into the integration branch are serialized by
+        #    the workspace lock.
+        if batch:
             progressed = True
-            await self._execute_node(n, run, self._workspaces.get(run.id), nodes)
-            if self._over_budget(run, nodes):
-                break  # stop dispatching; advance() pauses for a budget approval
+            await asyncio.gather(*(self._execute_node(n, run, self._workspaces.get(run.id), nodes)
+                                   for n in batch))
 
         return progressed
 
@@ -143,54 +146,64 @@ class Coordinator:
     async def _execute_node(
         self, n: TaskNode, run: Run, ws: CodeWorkspace | None, nodes: list[TaskNode]
     ) -> None:
-        """Run the worker, verify, and commit - retrying up to n.max_attempts.
+        """Run the worker in a per-node worktree, verify, commit, and merge.
 
-        Verification happens in the worktree *before* the commit, so only work
-        that passes its `check` ever lands on the integration branch. Failures
-        feed back into the next attempt.
+        Verification happens in the node worktree *before* the commit, and the
+        commit is merged into the integration branch only if it applies cleanly,
+        so only passing, conflict-free work lands. Failures (worker, verify,
+        denylist, or merge conflict) fail the node fail-open. Retries up to
+        n.max_attempts, feeding the failure back to the worker.
         """
-        feedback: str | None = None
-        for attempt in range(1, n.max_attempts + 1):
-            n.attempts = attempt
-            result = await self._worker.run(n, run, ws.path if ws else None, feedback=feedback)
-            n.cost_usd += result.cost_usd  # accumulate across retries
-            n.session_id = result.session_id or n.session_id
+        node_path = await ws.new_node_worktree(n.id) if ws else None
+        try:
+            feedback: str | None = None
+            for attempt in range(1, n.max_attempts + 1):
+                n.attempts = attempt
+                result = await self._worker.run(n, run, node_path, feedback=feedback)
+                n.cost_usd += result.cost_usd  # accumulate across retries
+                n.session_id = result.session_id or n.session_id
 
-            if not result.success:
-                feedback = f"Worker error: {result.error}"
-                if attempt < n.max_attempts:
-                    await self._store.update_node(n)
-                    continue
-                await self._fail(n, nodes, result.error or "worker reported failure")
-                return
-
-            vres = await self._verifier.verify(n, ws.path) if ws else None
-            if vres is not None and not vres.passed:
-                feedback = f"Verification (`{n.check}`) failed:\n{vres.output}"
-                if attempt < n.max_attempts:
-                    if ws is not None:
-                        await ws.discard()  # drop the failed attempt, retry clean
-                    await self._store.update_node(n)
-                    continue
-                if ws is not None:
-                    await ws.discard()
-                await self._fail(n, nodes, f"verification failed after {attempt} attempt(s)")
-                return
-
-            # Passed (or no check): commit onto the run branch.
-            if ws is not None:
-                try:
-                    commit = await ws.commit_node(n)
-                except Exception as exc:  # noqa: BLE001 - surface as a node failure
-                    await self._fail(n, nodes, f"commit failed: {exc}")
+                if not result.success:
+                    feedback = f"Worker error: {result.error}"
+                    if attempt < n.max_attempts:
+                        await self._store.update_node(n)
+                        continue
+                    await self._fail(n, nodes, result.error or "worker reported failure")
                     return
-                if commit.denied:
-                    await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
+
+                vres = await self._verifier.verify(n, node_path) if node_path else None
+                if vres is not None and not vres.passed:
+                    feedback = f"Verification (`{n.check}`) failed:\n{vres.output}"
+                    if node_path is not None:
+                        await ws.discard_in(node_path)  # drop the failed attempt
+                    if attempt < n.max_attempts:
+                        await self._store.update_node(n)
+                        continue
+                    await self._fail(n, nodes, f"verification failed after {attempt} attempt(s)")
                     return
-            n.status = NodeStatus.SUCCEEDED
-            n.output = result.output
-            await self._store.update_node(n)
-            return
+
+                # Passed (or no check): commit in the node worktree, then merge.
+                if ws is not None and node_path is not None:
+                    try:
+                        commit = await ws.commit_in(n, node_path)
+                    except Exception as exc:  # noqa: BLE001
+                        await self._fail(n, nodes, f"commit failed: {exc}")
+                        return
+                    if commit.denied:
+                        await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
+                        return
+                    if commit.committed:
+                        merge = await ws.merge_node(n.id)
+                        if not merge.merged:
+                            await self._fail(n, nodes, f"merge conflict: {merge.conflicts}")
+                            return
+                n.status = NodeStatus.SUCCEEDED
+                n.output = result.output
+                await self._store.update_node(n)
+                return
+        finally:
+            if ws is not None and node_path is not None:
+                await ws.teardown_node(node_path)
 
     async def _fail(self, node: TaskNode, nodes: list[TaskNode], error: str) -> None:
         node.status = NodeStatus.FAILED

@@ -1,16 +1,18 @@
 # zeus/orchestration/swarm/worktree.py
-"""Per-run git worktree + integration branch for code argonauts.
+"""Per-run integration branch + per-node git worktrees for parallel argonauts.
 
-Each run gets a worktree of the target repo on branch `swarm/run-<id>`, cut
-from the repo's current HEAD. A single sequential worker accumulates one commit
-per node on that branch (dependent nodes see prior nodes' changes for free,
-since it is the same working tree). Before each commit the coordinator checks
-the diff against the self-edit denylist; a node that touched a denied path is
-rejected and its changes discarded, never committed.
+Model (P3b):
+  - A run owns branch `swarm/run-<id>` (the integration branch) and one
+    integration worktree used only for merges.
+  - Each node gets its own ephemeral worktree on `swarm/run-<id>/n-<node>`,
+    branched from the *current* integration tip, so it sees prior merged work.
+  - Independent nodes run concurrently in separate worktrees. When a node passes
+    verification its work is committed on its node branch and then merged into
+    the integration branch under a per-run lock (git can only merge one thing at
+    a time). A merge conflict aborts and fails the node fail-open.
 
-Worktrees check out tracked files only, so `zeus/data/` (gitignored) never
-enters a worker's workspace - a privacy boundary for free.
-
+Before each commit the node's diff is checked against the self-edit denylist.
+Worktrees check out tracked files only, so `zeus/data/` never enters a workspace.
 Git runs as a subprocess in asyncio.to_thread (no libgit2 dependency).
 """
 
@@ -34,12 +36,7 @@ class GitError(RuntimeError):
 
 
 def _git_sync(args: list[str], cwd: str) -> str:
-    proc = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed ({proc.returncode}): {proc.stderr.strip()}")
     return proc.stdout
@@ -50,98 +47,138 @@ async def _git(args: list[str], cwd: str) -> str:
 
 
 class CommitResult:
-    """Outcome of committing a node's work onto the integration branch."""
-
     def __init__(self, committed: bool, denied: list[str], commit: str | None = None) -> None:
         self.committed = committed
         self.denied = denied  # denylisted paths the node touched (non-empty -> rejected)
         self.commit = commit
 
 
+class MergeResult:
+    def __init__(self, merged: bool, conflicts: list[str] | None = None) -> None:
+        self.merged = merged
+        self.conflicts = conflicts or []
+
+
 class CodeWorkspace:
-    """A git worktree of `repo` on `swarm/run-<run_id>`, one commit per node."""
+    """Owns a run's integration branch and mints per-node worktrees off its tip."""
 
     def __init__(self, repo: str, run_id: str, *, base_dir: str | None = None) -> None:
         self.repo = os.path.realpath(os.path.expanduser(repo))
         self.run_id = run_id
         self.branch = f"swarm/run-{run_id}"
         self._base_dir = base_dir
-        self.path: str | None = None  # worktree checkout path, set by setup()
+        self.integration_path: str | None = None
+        self._merge_lock = asyncio.Lock()
+        self._node_branches: list[str] = []
 
-    async def setup(self) -> str:
-        """Create the integration branch + worktree; return the worktree path."""
-        base = (await _git(["rev-parse", "HEAD"], self.repo)).strip()
-        root = self._base_dir or os.path.join(
-            os.path.expanduser(os.getenv("ZEUS_SWARM_WORKTREE_DIR", "~/.zeus/swarm/worktrees"))
+    # ---- lifecycle -------------------------------------------------------
+
+    def _root(self) -> str:
+        root = self._base_dir or os.path.expanduser(
+            os.getenv("ZEUS_SWARM_WORKTREE_DIR", "~/.zeus/swarm/worktrees")
         )
         os.makedirs(root, exist_ok=True)
-        self.path = tempfile.mkdtemp(prefix=f"{self.run_id}-", dir=root)
-        # Fresh branch from base; -B so a re-run reuses the path cleanly.
-        await _git(["worktree", "add", "-B", self.branch, self.path, base], self.repo)
-        logger.info("swarm workspace %s: worktree %s on %s", self.run_id, self.path, self.branch)
-        return self.path
+        return root
 
-    async def changed_paths(self) -> list[str]:
-        assert self.path is not None
-        # -uall expands untracked directories to individual files, so the denylist
-        # sees `zeus/orchestration/bus.py`, not a collapsed `zeus/`.
-        out = await _git(["status", "--porcelain=1", "-z", "-uall"], self.path)
-        paths: list[str] = []
-        for entry in out.split("\0"):
-            if not entry:
-                continue
-            # porcelain: "XY <path>" (renames use "XY <old>\0<new>" but -z splits those;
-            # good enough for the denylist check, which only needs the touched paths).
-            paths.append(entry[3:] if len(entry) > 3 else entry)
-        return paths
+    async def setup(self) -> str:
+        base = (await _git(["rev-parse", "HEAD"], self.repo)).strip()
+        self.integration_path = tempfile.mkdtemp(prefix=f"{self.run_id}-int-", dir=self._root())
+        await _git(["worktree", "add", "-B", self.branch, self.integration_path, base], self.repo)
+        logger.info("swarm %s: integration worktree %s on %s", self.run_id, self.integration_path, self.branch)
+        return self.integration_path
 
-    async def commit_node(self, node: TaskNode) -> CommitResult:
-        """Denylist-check the node's diff, then commit it (or reject + discard)."""
-        assert self.path is not None
-        changed = await self.changed_paths()
+    async def new_node_worktree(self, node_id: str) -> str:
+        """A worktree on a node branch cut from the current integration tip.
+
+        Serialized with merges: `git worktree add` takes a repo lock, and we want
+        a consistent tip read even while another node is merging.
+        """
+        assert self.integration_path is not None
+        node_branch = f"{self.branch}-n-{node_id}"
+        path = tempfile.mkdtemp(prefix=f"{self.run_id}-{node_id}-", dir=self._root())
+        async with self._merge_lock:
+            tip = (await _git(["rev-parse", self.branch], self.repo)).strip()
+            await _git(["worktree", "add", "-B", node_branch, path, tip], self.repo)
+        self._node_branches.append(node_branch)
+        return path
+
+    # ---- per-node commit + merge ----------------------------------------
+
+    async def changed_paths(self, node_path: str) -> list[str]:
+        out = await _git(["status", "--porcelain=1", "-z", "-uall"], node_path)
+        return [e[3:] if len(e) > 3 else e for e in out.split("\0") if e]
+
+    async def commit_in(self, node: TaskNode, node_path: str) -> CommitResult:
+        changed = await self.changed_paths(node_path)
         if not changed:
-            return CommitResult(committed=False, denied=[])  # no-op node
-
+            return CommitResult(committed=False, denied=[])
         denied = config.denied_paths(changed)
         if denied:
-            # An argonaut touched supervisory / secret paths: discard, do not commit.
-            await self._discard()
-            logger.warning("swarm %s node %s rejected: denied paths %s", self.run_id, node.id, denied)
+            await self.discard_in(node_path)
+            logger.warning("swarm %s node %s rejected: denied %s", self.run_id, node.id, denied)
             return CommitResult(committed=False, denied=denied)
-
-        await _git(["add", "-A"], self.path)
-        # --no-verify: swarm integration commits are mechanical; the repo's own
-        # pre-commit hooks (e.g. docs-index checks) run on the final PR / CI, not
-        # on every per-node commit, so a hook must not stall or crash a run.
+        await _git(["add", "-A"], node_path)
+        # --no-verify: swarm commits are mechanical; repo hooks run on the final PR.
         await _git(
             ["-c", "user.name=zeus-swarm", "-c", "user.email=swarm@zeus.local",
              "commit", "--no-verify", "-m", f"swarm node {node.id}: {node.title}"],
-            self.path,
+            node_path,
         )
-        sha = (await _git(["rev-parse", "HEAD"], self.path)).strip()
+        sha = (await _git(["rev-parse", "HEAD"], node_path)).strip()
         return CommitResult(committed=True, denied=[], commit=sha)
 
-    async def discard(self) -> None:
-        """Throw away uncommitted changes in the worktree (e.g. a failed attempt)."""
-        await self._discard()
+    async def merge_node(self, node_id: str) -> MergeResult:
+        """Merge the node branch into the integration branch (serialized)."""
+        assert self.integration_path is not None
+        node_branch = f"{self.branch}-n-{node_id}"
+        async with self._merge_lock:
+            try:
+                await _git(
+                    ["-c", "user.name=zeus-swarm", "-c", "user.email=swarm@zeus.local",
+                     "merge", "--no-ff", "-m", f"merge node {node_id}", node_branch],
+                    self.integration_path,
+                )
+                return MergeResult(merged=True)
+            except GitError:
+                conflicts: list[str] = []
+                try:
+                    out = await _git(["diff", "--name-only", "--diff-filter=U"], self.integration_path)
+                    conflicts = [p for p in out.splitlines() if p]
+                    await _git(["merge", "--abort"], self.integration_path)
+                except GitError:
+                    pass
+                logger.warning("swarm %s node %s merge conflict: %s", self.run_id, node_id, conflicts)
+                return MergeResult(merged=False, conflicts=conflicts)
 
-    async def _discard(self) -> None:
-        assert self.path is not None
-        await _git(["reset", "--hard", "HEAD"], self.path)
-        await _git(["clean", "-fd"], self.path)
+    async def discard_in(self, node_path: str) -> None:
+        await _git(["reset", "--hard", "HEAD"], node_path)
+        await _git(["clean", "-fd"], node_path)
+
+    async def teardown_node(self, node_path: str) -> None:
+        try:
+            await _git(["worktree", "remove", "--force", node_path], self.repo)
+        except GitError:
+            shutil.rmtree(node_path, ignore_errors=True)
+            await _git(["worktree", "prune"], self.repo)
 
     async def teardown(self, *, keep_branch: bool = True) -> None:
-        """Remove the worktree. The integration branch is kept for the PR."""
-        if self.path is None:
+        """Remove all worktrees. The integration branch is kept for the PR."""
+        if self.integration_path is None:
             return
         try:
-            await _git(["worktree", "remove", "--force", self.path], self.repo)
+            await _git(["worktree", "remove", "--force", self.integration_path], self.repo)
         except GitError:
-            shutil.rmtree(self.path, ignore_errors=True)
-            await _git(["worktree", "prune"], self.repo)
+            shutil.rmtree(self.integration_path, ignore_errors=True)
+        await _git(["worktree", "prune"], self.repo)
+        # Node branches are throwaway; the integration branch carries the merges.
+        for nb in self._node_branches:
+            try:
+                await _git(["branch", "-D", nb], self.repo)
+            except GitError:
+                pass
         if not keep_branch:
             try:
                 await _git(["branch", "-D", self.branch], self.repo)
             except GitError:
                 pass
-        self.path = None
+        self.integration_path = None

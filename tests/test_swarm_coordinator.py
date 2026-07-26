@@ -204,7 +204,8 @@ def test_budget_kill_switch_pauses_then_resumes():
     coord = Coordinator(store, CostWorker(0.6))  # 3 nodes x $0.60 vs $1.00 budget
 
     async def scenario():
-        spec = RunSpec(goal="x", repo=os.path.expanduser("~"), budget_usd=1.0,
+        # max_parallel=1 so the budget is checked between nodes, not after a batch.
+        spec = RunSpec(goal="x", repo=os.path.expanduser("~"), budget_usd=1.0, max_parallel=1,
                        nodes=[_node("a"), _node("b"), _node("c")])
         view = await store.create_run(spec)
         view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)

@@ -78,6 +78,45 @@ def _mk(tmp_path, worker, verifier=None):
     return repo, store, Coordinator(store, worker, factory, verifier)
 
 
+def test_parallel_independent_nodes_both_land(tmp_path):
+    repo, store, coord = _mk(
+        tmp_path, FileWorker({"a": ("out/a.txt", "A\n"), "b": ("out/b.txt", "B\n")}))
+
+    async def scenario():
+        spec = RunSpec(goal="g", repo=repo, max_parallel=2,
+                       nodes=[TaskNodeSpec(id="a", title="a"), TaskNodeSpec(id="b", title="b")])
+        view = await store.create_run(spec)
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)
+        assert _status(view, "a") == NodeStatus.SUCCEEDED
+        assert _status(view, "b") == NodeStatus.SUCCEEDED
+        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+        files = subprocess.run(["git", "ls-tree", "-r", "--name-only", f"swarm/run-{view.run.id}"],
+                               cwd=repo, capture_output=True, text=True).stdout
+        assert "out/a.txt" in files and "out/b.txt" in files  # both merges landed
+
+    asyncio.run(scenario())
+
+
+def test_parallel_merge_conflict_fails_one_open(tmp_path):
+    # Both nodes edit README.md from the same base tip -> one merges, one conflicts.
+    repo, store, coord = _mk(
+        tmp_path, FileWorker({"a": ("README.md", "from a\n"), "b": ("README.md", "from b\n")}))
+
+    async def scenario():
+        spec = RunSpec(goal="g", repo=repo, max_parallel=2,
+                       nodes=[TaskNodeSpec(id="a", title="a"), TaskNodeSpec(id="b", title="b")])
+        view = await store.create_run(spec)
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)
+        statuses = sorted(n.status.value for n in view.nodes)
+        assert statuses == ["failed", "succeeded"]  # exactly one lost the merge race
+        failed = next(n for n in view.nodes if n.status == NodeStatus.FAILED)
+        assert "merge conflict" in (failed.error or "")
+        # fail-open: the winner is still delivered
+        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+
+    asyncio.run(scenario())
+
+
 def test_verify_retry_then_succeed(tmp_path):
     repo, store, coord = _mk(tmp_path, FlakyWorker(), CommandVerifier())
 
