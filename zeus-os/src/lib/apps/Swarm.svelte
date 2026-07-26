@@ -10,18 +10,22 @@
     getRun,
     killRun,
     listRuns,
+    nodeTranscript,
     openEventStream,
     planRun,
+    runCi,
     runEvents,
     swarmHealth,
     swarmMetrics,
     swarmRepos,
     type ApprovalKind,
     type NodeStatus,
+    type CiStatus,
     type Run,
     type RunView,
     type SwarmEvent,
-    type SwarmMetrics
+    type SwarmMetrics,
+    type TranscriptEvent
   } from '$lib/api/swarm';
 
   export let app: AppInstance;
@@ -37,6 +41,37 @@
   let stream: EventSource | null = null;
   let metrics: SwarmMetrics | null = null;
   let events: SwarmEvent[] = [];
+  let ci: CiStatus | null = null;
+  let openNode = '';
+  let transcript: { exists: boolean; events: TranscriptEvent[] } | null = null;
+
+  async function loadCi() {
+    if (!selected?.run.pr_url) {
+      ci = null;
+      return;
+    }
+    try {
+      ci = await runCi(selected.run.id);
+    } catch {
+      ci = null;
+    }
+  }
+
+  async function toggleTranscript(nodeId: string) {
+    if (openNode === nodeId) {
+      openNode = '';
+      transcript = null;
+      return;
+    }
+    openNode = nodeId;
+    transcript = null;
+    if (!selected) return;
+    try {
+      transcript = await nodeTranscript(selected.run.id, nodeId);
+    } catch {
+      transcript = null;
+    }
+  }
 
   let goal = '';
   let repo = '';
@@ -77,9 +112,12 @@
 
   async function pick(id: string) {
     selectedId = id;
+    openNode = '';
+    transcript = null;
     try {
       selected = await getRun(id);
       events = await runEvents(id);
+      await loadCi();
     } catch (e) {
       notify({ title: 'Load failed', body: String(e).slice(0, 140), kind: 'err' });
     }
@@ -92,6 +130,7 @@
       if (runId === selectedId) {
         selected = await getRun(runId);
         events = await runEvents(runId);
+        await loadCi();
       }
       metrics = await swarmMetrics();
     } catch {
@@ -285,6 +324,15 @@
             {/if}
             {#if selected.run.pr_url}
               <a class="text-accent underline" href={selected.run.pr_url} target="_blank" rel="noopener">open PR ↗</a>
+              {#if ci && ci.status !== 'no_pr'}
+                <span
+                  class:text-ok={ci.status === 'passing'}
+                  class:text-err={ci.status === 'failing'}
+                  class:text-warn={ci.status === 'pending'}
+                  class:text-muted={!['passing', 'failing', 'pending'].includes(ci.status)}
+                  title={ci.checks.map((c) => `${c.name}: ${c.state}`).join('\n')}
+                >CI {ci.status}</span>
+              {/if}
             {/if}
           </div>
         {/if}
@@ -330,11 +378,27 @@
                   {#if n.deps.length}<span class="text-muted/60"> ← {n.deps.join(',')}</span>{/if}
                   <span class="text-muted"> · {n.title}</span>
                 </span>
-                <span class="shrink-0 {NODE_COLOR[n.status]}">
+                <span class="shrink-0 flex items-center gap-1 {NODE_COLOR[n.status]}">
                   {n.model ? `${n.model} · ` : ''}{n.status}{n.cost_usd ? ` · $${n.cost_usd.toFixed(2)}` : (selected.estimate ? ` · ~$${(selected.estimate.per_node[n.id] ?? 0).toFixed(2)}` : '')}{n.attempts > 1 ? ` · ${n.attempts}x` : ''}
+                  {#if n.session_id}
+                    <button class="text-[9px] px-1 rounded border border-border/50 text-muted hover:text-fg" on:click={() => toggleTranscript(n.id)}>log</button>
+                  {/if}
                 </span>
               </div>
               {#if n.error}<p class="text-err text-[10px] whitespace-pre-wrap">{n.error}</p>{/if}
+              {#if openNode === n.id}
+                <div class="mt-1 ml-2 border-l border-border/40 pl-2 max-h-40 overflow-y-auto">
+                  {#if transcript === null}
+                    <p class="text-[10px] text-muted">loading…</p>
+                  {:else if !transcript.exists}
+                    <p class="text-[10px] text-muted">No transcript on disk (sandbox workers write theirs inside the container).</p>
+                  {:else}
+                    {#each transcript.events as ev}
+                      <p class="text-[10px] whitespace-pre-wrap"><span class="text-muted/70">{ev.role}:</span> {ev.text}</p>
+                    {/each}
+                  {/if}
+                </div>
+              {/if}
             </li>
           {/each}
         </ul>

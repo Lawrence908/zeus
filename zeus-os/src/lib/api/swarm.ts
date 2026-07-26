@@ -54,6 +54,7 @@ export interface TaskNode {
   model: string;
   question: string;
   answer?: string | null;
+  session_id?: string | null;
   error?: string | null;
   output?: string | null;
 }
@@ -143,6 +144,25 @@ export function answerQuestion(runId: string, answer: string, approvalId?: strin
 
 export function swarmMetrics(): Promise<SwarmMetrics> {
   return jsonFetch('/swarm/metrics');
+}
+
+export interface TranscriptEvent {
+  type: string;
+  role: string;
+  text: string;
+}
+
+export function nodeTranscript(runId: string, nodeId: string): Promise<{ exists: boolean; events: TranscriptEvent[] }> {
+  return jsonFetch(`/swarm/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/transcript`);
+}
+
+export interface CiStatus {
+  status: string;
+  checks: { name: string; state: string }[];
+}
+
+export function runCi(runId: string): Promise<CiStatus> {
+  return jsonFetch(`/swarm/runs/${encodeURIComponent(runId)}/ci`);
 }
 
 export function runEvents(runId: string, limit = 100): Promise<SwarmEvent[]> {

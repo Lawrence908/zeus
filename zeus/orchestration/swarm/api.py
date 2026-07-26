@@ -17,9 +17,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from zeus.orchestration.swarm import config, dag
+from zeus.orchestration.swarm.ci import CiStatus, pr_ci_status
 from zeus.orchestration.swarm.coordinator import Coordinator
 from zeus.orchestration.swarm.estimate import estimate_run
 from zeus.orchestration.swarm.events import SwarmEventBus
+from zeus.orchestration.swarm.transcript import read_transcript
 from zeus.orchestration.swarm.models import (
     Run,
     RunSpec,
@@ -217,6 +219,27 @@ async def list_runs(request: Request, limit: int = 50) -> list[Run]:
 @router.get("/runs/{run_id}/events", response_model=list[SwarmEvent])
 async def run_events(run_id: str, request: Request, limit: int = 200) -> list[SwarmEvent]:
     return await _store(request).list_events(run_id, limit=limit)
+
+
+@router.get("/runs/{run_id}/ci", response_model=CiStatus)
+async def run_ci(run_id: str, request: Request) -> CiStatus:
+    """CI status on the run's auto-opened PR (P8b), polled on demand via gh."""
+    view = await _store(request).get_view(run_id)
+    if view is None:
+        raise HTTPException(404, detail=f"run not found: {run_id!r}")
+    return await pr_ci_status(view.run.pr_url)
+
+
+@router.get("/runs/{run_id}/nodes/{node_id}/transcript")
+async def node_transcript(run_id: str, node_id: str, request: Request, limit: int = 200) -> dict:
+    """The argonaut's Claude Code transcript for a node (P8b), if one is on disk."""
+    view = await _store(request).get_view(run_id)
+    if view is None:
+        raise HTTPException(404, detail=f"run not found: {run_id!r}")
+    node = next((n for n in view.nodes if n.id == node_id), None)
+    if node is None:
+        raise HTTPException(404, detail=f"node not found: {node_id!r}")
+    return await asyncio.to_thread(read_transcript, node.session_id or "", limit=limit)
 
 
 @router.get("/runs/{run_id}", response_model=RunView)
