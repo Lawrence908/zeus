@@ -23,6 +23,8 @@ def _is_cheap(model: str) -> bool:
 
 
 def estimate_node(node: TaskNode) -> float:
+    if config.is_local_model(node.model):
+        return 0.0  # C4: runs on the homelab GPU, no API spend
     base = _CHEAP_BASE if _is_cheap(node.model) else _STRONG_BASE
     # More tools / shelling out -> more turns -> more tokens.
     scope = node.tool_scope or ["Edit", "Write", "Read", "Bash"]

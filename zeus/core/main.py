@@ -199,7 +199,7 @@ async def lifespan(app: FastAPI):
         app.state.swarm_store = sw_store
 
         sw_kind = os.getenv("ZEUS_SWARM_WORKER", "stub").strip().lower()
-        if sw_kind in ("claude", "sandbox"):
+        if sw_kind in ("claude", "sandbox", "local"):
             from zeus.orchestration.swarm import config as _swcfg
             from zeus.orchestration.swarm.worktree import CodeWorkspace
 
@@ -208,10 +208,19 @@ async def lifespan(app: FastAPI):
                 from zeus.orchestration.swarm.sandbox import SandboxedClaudeWorker
 
                 sw_worker: object = SandboxedClaudeWorker(model=_default_model)
+            elif sw_kind == "local":
+                from zeus.orchestration.swarm.local_worker import LocalWorker
+
+                sw_worker = LocalWorker()  # every node runs free on the homelab GPU
             else:
                 from zeus.orchestration.swarm.claude_worker import ClaudeCodeWorker
 
                 sw_worker = ClaudeCodeWorker(model=_default_model)
+            # Hybrid (C4): let a paid run route local-tagged nodes to the free tier.
+            if sw_kind in ("claude", "sandbox") and _swcfg.hybrid_local():
+                from zeus.orchestration.swarm.local_worker import RoutingWorker
+
+                sw_worker = RoutingWorker(sw_worker)  # type: ignore[arg-type]
             sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
             from zeus.orchestration.swarm.planner import ClaudePlanner
             from zeus.orchestration.swarm.verifier import CommandVerifier

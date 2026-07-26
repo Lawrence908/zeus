@@ -91,6 +91,47 @@ def planner_max_turns() -> int:
     return int(os.getenv("ZEUS_SWARM_PLANNER_MAX_TURNS", "20"))
 
 
+# ---------------------------------------------------------------------------
+# Local worker tier (C4) - trivial nodes on the homelab Ollama GPU, $0.
+# ---------------------------------------------------------------------------
+
+_LOCAL_ALIASES = ("local", "ollama")
+
+
+def ollama_url() -> str:
+    """Base URL for the local Ollama the LocalWorker calls (reuses OLLAMA_URL)."""
+    raw = os.getenv("ZEUS_SWARM_OLLAMA_URL") or os.getenv("OLLAMA_URL", "http://localhost:11435")
+    return raw.rstrip("/")
+
+
+def local_model() -> str:
+    """Ollama tag the LocalWorker runs (must be pulled on the host)."""
+    return os.getenv("ZEUS_SWARM_LOCAL_MODEL", "qwen2.5:7b-instruct")
+
+
+def is_local_model(model: str) -> bool:
+    """True if a node's model hint routes to the free local tier.
+
+    Matches the aliases "local"/"ollama" and any concrete Ollama tag (which carry
+    a ":" size suffix, e.g. "qwen2.5:7b-instruct"), so the planner can name either.
+    """
+    m = (model or "").strip().lower()
+    if not m:
+        return False
+    return m in _LOCAL_ALIASES or ":" in m
+
+
+def resolve_local_model(model: str) -> str:
+    """Concrete Ollama tag for a node routed local (aliases -> configured default)."""
+    m = (model or "").strip().lower()
+    return local_model() if m in _LOCAL_ALIASES or not m else model.strip()
+
+
+def hybrid_local() -> bool:
+    """Whether a paid run also routes local-tagged nodes to the free tier."""
+    return os.getenv("ZEUS_SWARM_HYBRID_LOCAL", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
 def sandbox_limits() -> dict[str, str]:
     return {
         "memory": os.getenv("ZEUS_SWARM_SANDBOX_MEMORY", "2g"),

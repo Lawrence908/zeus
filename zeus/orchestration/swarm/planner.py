@@ -50,9 +50,12 @@ Rules:
 - Keep it minimal: prefer 2-6 nodes. Order by dependency.
 - `check` is a real command runnable in the repo (e.g. `pytest -q tests/x.py`,
   `python -c 'import m'`, `ruff check path`). Omit or "" only if truly unverifiable.
-- `model`: "haiku" for trivial nodes (docs, config, a rename, a single small
-  file); "sonnet" for real logic, multi-file changes, or anything subtle. Bias
-  toward "haiku" to keep runs cheap.
+- `model`: "local" for a node that just writes ONE small self-contained file
+  from the task description alone (a doc, a config, a template) - it runs free on
+  a local model with no code exploration, so only use it when no context is
+  needed; "haiku" for trivial nodes that still need to read the repo (a rename, a
+  small edit); "sonnet" for real logic, multi-file changes, or anything subtle.
+  Bias toward "local" then "haiku" to keep runs cheap.
 - Set requires_approval:true for a node that deletes files, changes CI/deploy,
   or touches security/auth. Set max_attempts:2-3 for nodes with a `check`.
 - tool_scope is the least privilege each node needs.
