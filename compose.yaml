@@ -124,6 +124,15 @@ services:
       # listens on 8000, NOT the host-published 8203. Without this override
       # every olympian_* call dies with "connection refused".
       - ZEUS_CORE_URL=http://127.0.0.1:8000
+      # Written .md artifacts (briefings, research reports) must land on the
+      # writable, host-persisted mount. /app/zeus itself is bind-mounted
+      # read-only (dev hot-edit), so only /app/zeus/data (rw, = host
+      # zeus/zeus/data) can be written. The code defaults
+      # (/home/chris/zeus/docs/...) are container-internal and ephemeral. The
+      # knowledge-store ingest is durable either way.
+      - ZEUS_BRIEFINGS_DIR=/app/zeus/data/briefings
+      - ZEUS_DEEP_RESEARCH_DIR=/app/zeus/data/research
+      - ZEUS_SCRUTINY_WATCH_DB=/app/zeus/data/scrutiny_watch.db
     volumes:
       - zeus_data:/app/zeus/data
     depends_on:

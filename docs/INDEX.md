@@ -51,6 +51,8 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [deployment.md](../zeus/docs/deployment.md) | ops | Deployment runbook (daedalus today, Olympus target): compose, first ingest, monitoring. |
 | [ingest-guide.md](../zeus/docs/ingest-guide.md) | product | Priority order for feeding Iris; memory vs knowledge routing; retrieval eval. |
 | [kronos-job-guide.md](../zeus/docs/kronos-job-guide.md) | product | How to create a Kronos job: every field explained, three creation surfaces, recipes, troubleshooting. Use this as agent context when authoring jobs. |
+| [congressional-scrutiny-job.md](../zeus/docs/congressional-scrutiny-job.md) | product | Weekly CapitolScope congressional-trading brief job: context-pack synthesis + news digest on local Ollama, inbox + knowledge writeback. |
+| [scrutiny-watch-job.md](../zeus/docs/scrutiny-watch-job.md) | product | Daily CapitolScope scrutiny-watch job: catch/dedup/triage signals, threshold-gated auto-escalation into deep_research, durable-path deploy notes. |
 | [ingest-paths.md](../zeus/docs/ingest-paths.md) | ops | `zeus/data/raw/` layout, symlink table, cron patterns. |
 | [mcp-server-spec.md](../zeus/docs/mcp-server-spec.md) | product | MCP tool catalog (`zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_memory_search`, `zeus_ingest_trigger`). |
 | [meshtastic-bridge.md](../zeus/docs/meshtastic-bridge.md) | product | LoRa mesh into `/chat/message` via MQTT uplink + Node-RED + TCP sender sidecar. Topics, session id, allowlist, Aegis wiring. |

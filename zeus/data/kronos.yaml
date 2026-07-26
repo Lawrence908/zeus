@@ -95,3 +95,38 @@ jobs:
     max_retries: 0
     tags: [research, weekly, example]
     enabled: false
+
+  - id: daily-scrutiny-watch
+    name: Daily Scrutiny Watch
+    description: |
+      Catches CapitolScope scrutiny + herding-cluster signals each morning,
+      dedups against zeus/data/scrutiny_watch.db, LLM-triages new/intensifying
+      signals, and auto-escalates only standouts (triage score >= threshold)
+      into one-off deep_research jobs. Everything below the bar is flagged with
+      a ready-to-run topic. Writes zeus/docs/briefings/<date>-scrutiny-watch.md
+      plus inbox + knowledge writeback.
+
+      Auto-escalation spawns web-research runs that spend search-API + small_llm
+      budget, threshold-gated (score >= escalate_threshold) and hard-capped at
+      max_escalations per cycle. Requires ZEUS_KRONOS_ALLOW_WRITE=1 so
+      escalations can POST deep_research jobs. Reviewed + validated end-to-end
+      2026-07-26; enabled.
+    category: research
+    schedule:
+      cron: "0 8 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.scrutiny_watch.run_scrutiny_watch
+    params:
+      days: 7
+      escalate_threshold: 8
+      max_escalations: 2
+      cooldown_days: 14
+      depth: standard
+      only_new: true
+      providers: [ollama]   # hard-pin triage to local Ollama (free); null = DEFAULT_CHAIN
+      model_hint: ollama
+    safety_policy: standard
+    timeout_seconds: 120
+    max_retries: 1
+    tags: [research, capitolscope, scrutiny, daily]
+    enabled: true

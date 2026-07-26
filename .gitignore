@@ -255,3 +255,7 @@ compose.override.yaml
 
 # Claude Code per-repo settings (local to each developer)
 .claude/
+
+# Zeus - generated brief/report artifacts (runtime output, not docs)
+zeus/data/briefings/
+zeus/data/research/
