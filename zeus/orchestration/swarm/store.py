@@ -23,6 +23,8 @@ from zeus.orchestration.swarm.models import (
     RunSpec,
     RunStatus,
     RunView,
+    SwarmEvent,
+    SwarmMetrics,
     TaskNode,
 )
 
@@ -90,6 +92,21 @@ class SwarmStore:
                     resolved_at TEXT
                 )
                 """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS swarm_events (
+                    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id  TEXT NOT NULL,
+                    ts      TEXT NOT NULL,
+                    kind    TEXT NOT NULL,
+                    node_id TEXT,
+                    detail  TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_swarm_events_run ON swarm_events(run_id, id)"
             )
             self._migrate(conn)
 
@@ -213,6 +230,8 @@ class SwarmStore:
                 (uuid.uuid4().hex[:12], run.id, ApprovalKind.PLAN.value, None,
                  ApprovalState.PENDING.value, now, None),
             )
+            self._append_event(conn, run.id, "run_status", run.status.value, None, now)
+            self._append_event(conn, run.id, "approval", "plan opened", None, now)
         return self._get_view_sync(run.id)  # type: ignore[return-value]
 
     # ---- read ------------------------------------------------------------
@@ -255,11 +274,13 @@ class SwarmStore:
         await asyncio.to_thread(self._set_run_status_sync, run_id, status)
 
     def _set_run_status_sync(self, run_id: str, status: RunStatus) -> None:
+        now = _now_iso()
         with self._connect() as conn:
             conn.execute(
                 "UPDATE swarm_runs SET status = ?, updated_at = ? WHERE id = ?",
-                (status.value, _now_iso(), run_id),
+                (status.value, now, run_id),
             )
+            self._append_event(conn, run_id, "run_status", status.value, None, now)
 
     async def set_run_budget(self, run_id: str, budget_usd: float) -> None:
         await asyncio.to_thread(self._set_run_budget_sync, run_id, budget_usd)
@@ -327,6 +348,7 @@ class SwarmStore:
                 " VALUES (?,?,?,?,?,?,?)",
                 (ap.id, ap.run_id, ap.kind.value, ap.node_id, ap.state.value, ap.created_at, None),
             )
+            self._append_event(conn, run_id, "approval", f"{kind.value} opened", node_id, ap.created_at)
         return ap
 
     async def resolve_approval(self, approval_id: str, state: ApprovalState) -> Approval | None:
@@ -343,4 +365,77 @@ class SwarmStore:
             if cur.rowcount == 0:
                 return None
             row = conn.execute("SELECT * FROM swarm_approvals WHERE id = ?", (approval_id,)).fetchone()
+            if row is not None:
+                self._append_event(conn, row["run_id"], "approval",
+                                   f"{row['kind']} {state.value}", row["node_id"], now)
         return self._approval_from_row(row) if row else None
+
+    # ---- audit events + metrics (P8) ------------------------------------
+
+    @staticmethod
+    def _append_event(
+        conn: sqlite3.Connection, run_id: str, kind: str, detail: str,
+        node_id: str | None, ts: str,
+    ) -> None:
+        conn.execute(
+            "INSERT INTO swarm_events (run_id, ts, kind, node_id, detail) VALUES (?,?,?,?,?)",
+            (run_id, ts, kind, node_id, detail),
+        )
+
+    async def append_event(
+        self, run_id: str, kind: str, detail: str, node_id: str | None = None
+    ) -> None:
+        await asyncio.to_thread(self._append_event_sync, run_id, kind, detail, node_id)
+
+    def _append_event_sync(self, run_id: str, kind: str, detail: str, node_id: str | None) -> None:
+        with self._connect() as conn:
+            self._append_event(conn, run_id, kind, detail, node_id, _now_iso())
+
+    async def list_events(self, run_id: str, *, limit: int = 200) -> list[SwarmEvent]:
+        return await asyncio.to_thread(self._list_events_sync, run_id, limit)
+
+    def _list_events_sync(self, run_id: str, limit: int) -> list[SwarmEvent]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM swarm_events WHERE run_id = ? ORDER BY id DESC LIMIT ?",
+                (run_id, limit),
+            ).fetchall()
+        return [
+            SwarmEvent(id=r["id"], run_id=r["run_id"], ts=r["ts"], kind=r["kind"],
+                       node_id=r["node_id"], detail=r["detail"])
+            for r in rows
+        ]
+
+    async def metrics(self) -> SwarmMetrics:
+        return await asyncio.to_thread(self._metrics_sync)
+
+    def _metrics_sync(self) -> SwarmMetrics:
+        with self._connect() as conn:
+            runs_by = {r["status"]: r["n"] for r in conn.execute(
+                "SELECT status, COUNT(*) n FROM swarm_runs GROUP BY status")}
+            runs_total = sum(runs_by.values())
+            nodes_by = {r["status"]: r["n"] for r in conn.execute(
+                "SELECT status, COUNT(*) n FROM swarm_nodes GROUP BY status")}
+            nodes_total = sum(nodes_by.values())
+            executed = conn.execute(
+                "SELECT COUNT(*) n FROM swarm_nodes WHERE attempts >= 1").fetchone()["n"]
+            retried = conn.execute(
+                "SELECT COUNT(*) n FROM swarm_nodes WHERE attempts > 1").fetchone()["n"]
+            node_cost = conn.execute("SELECT COALESCE(SUM(cost_usd),0) c FROM swarm_nodes").fetchone()["c"]
+            planner_cost = conn.execute(
+                "SELECT COALESCE(SUM(planner_cost_usd),0) c FROM swarm_runs").fetchone()["c"]
+            by_model = {
+                (r["model"] or "default"): r["c"]
+                for r in conn.execute(
+                    "SELECT model, COALESCE(SUM(cost_usd),0) c FROM swarm_nodes GROUP BY model")
+                if r["c"]
+            }
+        total = round(node_cost + planner_cost, 4)
+        return SwarmMetrics(
+            runs_total=runs_total, runs_by_status=runs_by,
+            nodes_total=nodes_total, nodes_by_status=nodes_by,
+            retry_rate=round(retried / executed, 3) if executed else 0.0,
+            cost_total_usd=total, planner_cost_usd=round(planner_cost, 4),
+            cost_by_model={k: round(v, 4) for k, v in by_model.items()},
+            avg_cost_per_run_usd=round(total / runs_total, 4) if runs_total else 0.0,
+        )

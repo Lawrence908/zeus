@@ -160,6 +160,31 @@ class RunEstimate(BaseModel):
     per_node: dict[str, float]
 
 
+class SwarmEvent(BaseModel):
+    """One durable audit entry: a run/node/approval transition (P8)."""
+
+    id: int
+    run_id: str
+    ts: str
+    kind: str  # run_status | node_status | approval
+    node_id: str | None = None
+    detail: str = ""
+
+
+class SwarmMetrics(BaseModel):
+    """Aggregate observability surface for GET /swarm/metrics (P8)."""
+
+    runs_total: int
+    runs_by_status: dict[str, int]
+    nodes_total: int
+    nodes_by_status: dict[str, int]
+    retry_rate: float  # fraction of executed nodes that took >1 attempt
+    cost_total_usd: float  # node + planner spend across all runs
+    planner_cost_usd: float
+    cost_by_model: dict[str, float]
+    avg_cost_per_run_usd: float
+
+
 class RunView(BaseModel):
     """Full run snapshot for GET /swarm/runs/{id}."""
 

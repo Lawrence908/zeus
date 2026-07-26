@@ -9,12 +9,17 @@
     getRun,
     killRun,
     listRuns,
+    openEventStream,
     planRun,
+    runEvents,
     swarmHealth,
+    swarmMetrics,
     type ApprovalKind,
     type NodeStatus,
     type Run,
-    type RunView
+    type RunView,
+    type SwarmEvent,
+    type SwarmMetrics
   } from '$lib/api/swarm';
 
   export let app: AppInstance;
@@ -27,6 +32,9 @@
   let error = '';
   let busy = false;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let stream: EventSource | null = null;
+  let metrics: SwarmMetrics | null = null;
+  let events: SwarmEvent[] = [];
 
   let goal = '';
   let repo = '/home/chris/zeus';
@@ -54,6 +62,7 @@
     try {
       runs = await listRuns();
       if (selectedId) selected = await getRun(selectedId);
+      metrics = await swarmMetrics();
       error = '';
     } catch (e) {
       error = String(e);
@@ -64,8 +73,23 @@
     selectedId = id;
     try {
       selected = await getRun(id);
+      events = await runEvents(id);
     } catch (e) {
       notify({ title: 'Load failed', body: String(e).slice(0, 140), kind: 'err' });
+    }
+  }
+
+  // SSE push (P8): refresh the list, and the open run + its events, on change.
+  async function onStreamUpdate(runId: string) {
+    try {
+      runs = await listRuns();
+      if (runId === selectedId) {
+        selected = await getRun(runId);
+        events = await runEvents(runId);
+      }
+      metrics = await swarmMetrics();
+    } catch {
+      /* transient; the fallback poll will catch up */
     }
   }
 
@@ -122,9 +146,14 @@
       enabled = false;
     }
     await refresh();
-    timer = setInterval(refresh, 4000);
+    // Live updates via SSE; keep a slow poll as a fallback if the stream drops.
+    stream = openEventStream(onStreamUpdate);
+    timer = setInterval(refresh, stream ? 20000 : 4000);
   });
-  onDestroy(() => timer && clearInterval(timer));
+  onDestroy(() => {
+    if (timer) clearInterval(timer);
+    stream?.close();
+  });
 </script>
 
 <div class="h-full w-full flex flex-col font-mono text-xs">
@@ -161,6 +190,18 @@
       on:click={submitPlan}
     >{busy ? '…' : 'plan'}</button>
   </header>
+
+  {#if metrics && metrics.runs_total > 0}
+    <div class="px-3 py-1 border-b border-border/30 text-[10px] text-muted flex items-center gap-3 flex-wrap">
+      <span>{metrics.runs_total} runs</span>
+      <span class="text-ok">{metrics.runs_by_status.completed ?? 0} done</span>
+      <span class="text-warn">{metrics.runs_by_status.completed_partial ?? 0} partial</span>
+      <span class="text-err">{metrics.runs_by_status.failed ?? 0} failed</span>
+      <span>retry {(metrics.retry_rate * 100).toFixed(0)}%</span>
+      <span class="text-fg">${metrics.cost_total_usd.toFixed(2)} total</span>
+      <span>~${metrics.avg_cost_per_run_usd.toFixed(2)}/run</span>
+    </div>
+  {/if}
 
   <div class="flex-1 flex min-h-0">
     <!-- runs -->
@@ -240,6 +281,19 @@
             </li>
           {/each}
         </ul>
+
+        {#if events.length}
+          <p class="text-[10px] text-muted uppercase tracking-widest mt-3 mb-1">Activity</p>
+          <ul class="space-y-0.5">
+            {#each events.slice(0, 40) as ev (ev.id)}
+              <li class="text-[10px] flex gap-2">
+                <span class="text-muted/60 shrink-0">{ev.ts.slice(11, 19)}</span>
+                <span class="text-muted/80 shrink-0">{ev.kind}</span>
+                <span class="truncate">{ev.node_id ? `${ev.node_id}: ` : ''}{ev.detail}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {:else}
         <p class="text-muted text-center mt-12">Select a run, or scope a goal to start one.</p>
       {/if}

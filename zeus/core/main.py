@@ -186,6 +186,7 @@ async def lifespan(app: FastAPI):
     app.state.swarm_store = None
     app.state.swarm_coordinator = None
     app.state.swarm_planner = None
+    app.state.swarm_bus = None
     if os.getenv("ZEUS_SWARM_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
         import logging as _logging
 
@@ -263,8 +264,12 @@ async def lifespan(app: FastAPI):
         from zeus.orchestration.swarm.notifier import NullNotifier, TelegramNotifier
 
         sw_notifier = TelegramNotifier.from_env() or NullNotifier()
+        from zeus.orchestration.swarm.events import SwarmEventBus
+
+        sw_bus = SwarmEventBus()
+        app.state.swarm_bus = sw_bus
         sw_coordinator = Coordinator(  # type: ignore[arg-type]
-            sw_store, sw_worker, sw_factory, sw_verifier, sw_notifier
+            sw_store, sw_worker, sw_factory, sw_verifier, sw_notifier, event_bus=sw_bus
         )
         app.state.swarm_coordinator = sw_coordinator
         _logging.getLogger("zeus.swarm").info(

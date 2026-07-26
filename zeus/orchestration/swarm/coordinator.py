@@ -26,6 +26,7 @@ import os
 from typing import Callable
 
 from zeus.orchestration.swarm import config, dag
+from zeus.orchestration.swarm.events import SwarmEventBus
 from zeus.orchestration.swarm.models import (
     Approval,
     ApprovalKind,
@@ -60,6 +61,7 @@ class Coordinator:
         verifier: Verifier | None = None,
         notifier: ApprovalNotifier | None = None,
         pr_opener: PullRequestOpener | None = None,
+        event_bus: SwarmEventBus | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
@@ -67,7 +69,12 @@ class Coordinator:
         self._verifier = verifier or NoopVerifier()
         self._notifier = notifier or NullNotifier()
         self._pr_opener = pr_opener or PullRequestOpener()
+        self._bus = event_bus
         self._workspaces: dict[str, CodeWorkspace] = {}
+
+    async def _publish(self, run_id: str) -> None:
+        if self._bus is not None:
+            await self._bus.publish({"run_id": run_id, "type": "update"})
 
     async def _notify(self, run: Run, approval: Approval) -> None:
         try:
@@ -187,6 +194,7 @@ class Coordinator:
             if not progressed:
                 break  # waiting on an approval gate (nothing else dispatchable)
 
+        await self._publish(run_id)
         return await self._store.get_view(run_id)
 
     async def _step(self, run: Run, nodes: list[TaskNode]) -> bool:
@@ -293,6 +301,9 @@ class Coordinator:
                 n.status = NodeStatus.SUCCEEDED
                 n.output = result.output
                 await self._store.update_node(n)
+                await self._store.append_event(
+                    n.run_id, "node_status",
+                    f"succeeded (attempt {n.attempts}, ${n.cost_usd:.2f})", n.id)
                 return
         finally:
             if ws is not None and node_path is not None:
@@ -302,6 +313,7 @@ class Coordinator:
         node.status = NodeStatus.FAILED
         node.error = error
         await self._store.update_node(node)
+        await self._store.append_event(node.run_id, "node_status", f"failed: {error[:120]}", node.id)
         # Fail-open: strand everything downstream, keep the rest running.
         await self._mark_unreachable(node, nodes)
 
@@ -357,6 +369,7 @@ class Coordinator:
             # Integration branch stays for review; only the worktree is removed.
             await self._teardown_workspace(run_id)
 
+        await self._publish(run_id)
         return await self._store.get_view(run_id)
 
     async def _finalize(self, run_id: str) -> None:
@@ -412,6 +425,7 @@ class Coordinator:
                 await self._store.update_node(n)
         await self._store.set_run_status(run_id, RunStatus.CANCELLED)
         await self._teardown_workspace(run_id)
+        await self._publish(run_id)
         return await self._store.get_view(run_id)
 
     _TERMINAL = (
@@ -442,6 +456,7 @@ class Coordinator:
         """Reject a node: skip it and every node that (transitively) depends on it."""
         node.status = NodeStatus.SKIPPED
         await self._store.update_node(node)
+        await self._store.append_event(node.run_id, "node_status", "skipped (write gate rejected)", node.id)
         for d in dag.descendants(node.id, nodes):
             if d.status not in self._TERMINAL:
                 d.status = NodeStatus.SKIPPED

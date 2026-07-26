@@ -61,6 +61,27 @@ export interface RunEstimate {
   per_node: Record<string, number>;
 }
 
+export interface SwarmEvent {
+  id: number;
+  run_id: string;
+  ts: string;
+  kind: string;
+  node_id?: string | null;
+  detail: string;
+}
+
+export interface SwarmMetrics {
+  runs_total: number;
+  runs_by_status: Record<string, number>;
+  nodes_total: number;
+  nodes_by_status: Record<string, number>;
+  retry_rate: number;
+  cost_total_usd: number;
+  planner_cost_usd: number;
+  cost_by_model: Record<string, number>;
+  avg_cost_per_run_usd: number;
+}
+
 export interface Approval {
   id: string;
   run_id: string;
@@ -104,4 +125,27 @@ export function approve(runId: string, approvalId: string, approve: boolean): Pr
 
 export function killRun(runId: string): Promise<RunView> {
   return jsonFetch(`/swarm/runs/${encodeURIComponent(runId)}/kill`, { method: 'POST' });
+}
+
+export function swarmMetrics(): Promise<SwarmMetrics> {
+  return jsonFetch('/swarm/metrics');
+}
+
+export function runEvents(runId: string, limit = 100): Promise<SwarmEvent[]> {
+  return jsonFetch(`/swarm/runs/${encodeURIComponent(runId)}/events?limit=${limit}`);
+}
+
+// SSE stream of run updates (P8). Returns the EventSource so the caller can close it.
+export function openEventStream(onUpdate: (runId: string) => void): EventSource | null {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return null;
+  const es = new EventSource('/swarm/events');
+  es.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data && data.run_id) onUpdate(data.run_id as string);
+    } catch {
+      /* keepalive / non-JSON comment */
+    }
+  };
+  return es;
 }

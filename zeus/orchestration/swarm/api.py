@@ -8,15 +8,25 @@ validated to be under the home directory to lock the contract in early.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from zeus.orchestration.swarm import config, dag
 from zeus.orchestration.swarm.coordinator import Coordinator
 from zeus.orchestration.swarm.estimate import estimate_run
-from zeus.orchestration.swarm.models import Run, RunSpec, RunView
+from zeus.orchestration.swarm.events import SwarmEventBus
+from zeus.orchestration.swarm.models import (
+    Run,
+    RunSpec,
+    RunView,
+    SwarmEvent,
+    SwarmMetrics,
+)
 from zeus.orchestration.swarm.store import SwarmStore
 
 router = APIRouter(prefix="/swarm", tags=["swarm"])
@@ -60,6 +70,13 @@ def _planner(request: Request):
     if p is None:
         raise HTTPException(503, detail="Swarm planner is not configured")
     return p
+
+
+def _bus(request: Request) -> SwarmEventBus:
+    b: SwarmEventBus | None = getattr(request.app.state, "swarm_bus", None)
+    if b is None:
+        raise HTTPException(503, detail="Swarm is not enabled (ZEUS_SWARM_ENABLED)")
+    return b
 
 
 def _validate_repo(repo: str) -> str:
@@ -114,9 +131,43 @@ async def plan_run(body: PlanBody, request: Request) -> RunView:
     return _with_estimate(await _store(request).create_run(spec))
 
 
+@router.get("/metrics", response_model=SwarmMetrics)
+async def metrics(request: Request) -> SwarmMetrics:
+    return await _store(request).metrics()
+
+
+@router.get("/events", include_in_schema=False)
+async def events_stream(request: Request) -> StreamingResponse:
+    """SSE stream of run updates (P8), so the Swarm app refreshes on change."""
+    bus = _bus(request)
+    queue = bus.subscribe()
+
+    async def gen():
+        try:
+            yield ": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"data: {json.dumps(evt)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"  # keep the connection warm through proxies
+        finally:
+            bus.unsubscribe(queue)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.get("/runs", response_model=list[Run])
 async def list_runs(request: Request, limit: int = 50) -> list[Run]:
     return await _store(request).list_runs(limit=limit)
+
+
+@router.get("/runs/{run_id}/events", response_model=list[SwarmEvent])
+async def run_events(run_id: str, request: Request, limit: int = 200) -> list[SwarmEvent]:
+    return await _store(request).list_events(run_id, limit=limit)
 
 
 @router.get("/runs/{run_id}", response_model=RunView)
