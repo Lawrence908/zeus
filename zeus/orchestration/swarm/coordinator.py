@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Callable
 
 from zeus.orchestration.swarm import dag
@@ -70,6 +71,75 @@ class Coordinator:
             await self._notifier.approval_opened(run, approval)
         except Exception:  # noqa: BLE001 - notification is best-effort
             logger.exception("swarm approval notify failed (run %s)", run.id)
+
+    _TERMINAL_RUN_STATUSES = (
+        RunStatus.COMPLETED,
+        RunStatus.COMPLETED_PARTIAL,
+        RunStatus.FAILED,
+        RunStatus.CANCELLED,
+    )
+
+    # ---- durable resume (P6) --------------------------------------------
+
+    async def recover(self, *, resume: bool = True) -> dict[str, int]:
+        """Reconcile persisted runs with on-disk git state after a restart.
+
+        The coordinator's workspaces and in-flight asyncio tasks are in-memory, so
+        a zeus-core restart mid-run orphans worktrees and strands non-terminal
+        runs. On startup: reset interrupted RUNNING nodes to READY, re-attach the
+        integration workspace for runs that had one, reap worktrees/branches whose
+        run is no longer live, then (resume=True) re-drive RUNNING runs.
+        """
+        runs = await self._store.list_runs(limit=100_000)
+        live = [r for r in runs if r.status not in self._TERMINAL_RUN_STATUSES]
+        reattached = reset_nodes = resumed = 0
+
+        for r in live:
+            if r.status == RunStatus.RUNNING:
+                view = await self._store.get_view(r.id)
+                for n in (view.nodes if view else []):
+                    if n.status == NodeStatus.RUNNING:  # interrupted mid-execution
+                        n.status = NodeStatus.READY
+                        n.error = None
+                        await self._store.update_node(n)
+                        reset_nodes += 1
+            had_workspace = r.status in (
+                RunStatus.RUNNING, RunStatus.PENDING_FINAL_APPROVAL, RunStatus.PAUSED_BUDGET
+            )
+            if (self._workspace_factory is not None and not r.dry_run
+                    and had_workspace and r.id not in self._workspaces):
+                try:
+                    self._workspaces[r.id] = await CodeWorkspace.attach(r.repo, r.id)
+                    reattached += 1
+                except Exception:  # noqa: BLE001 - a run we can't re-attach still resolves
+                    logger.exception("swarm recover: attach failed for run %s", r.id)
+
+        # Reap debris per repo: worktrees/branches whose run is not live.
+        live_by_repo: dict[str, set[str]] = {}
+        for r in live:
+            live_by_repo.setdefault(os.path.realpath(os.path.expanduser(r.repo)), set()).add(r.id)
+        for repo in {os.path.realpath(os.path.expanduser(r.repo)) for r in runs}:
+            try:
+                await CodeWorkspace.reap_orphans(repo, live_by_repo.get(repo, set()))
+            except Exception:  # noqa: BLE001 - reaping is best-effort
+                logger.exception("swarm reaper failed for repo %s", repo)
+
+        if resume:
+            for r in live:
+                if r.status == RunStatus.RUNNING:
+                    try:
+                        await self.advance(r.id)
+                        resumed += 1
+                    except Exception:  # noqa: BLE001
+                        logger.exception("swarm resume failed for run %s", r.id)
+
+        if live:
+            logger.info(
+                "swarm recover: %d live runs, re-attached %d, reset %d nodes, resumed %d",
+                len(live), reattached, reset_nodes, resumed,
+            )
+        return {"live": len(live), "reattached": reattached,
+                "reset_nodes": reset_nodes, "resumed": resumed}
 
     # ---- driver ----------------------------------------------------------
 

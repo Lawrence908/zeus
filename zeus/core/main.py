@@ -263,12 +263,18 @@ async def lifespan(app: FastAPI):
         from zeus.orchestration.swarm.notifier import NullNotifier, TelegramNotifier
 
         sw_notifier = TelegramNotifier.from_env() or NullNotifier()
-        app.state.swarm_coordinator = Coordinator(  # type: ignore[arg-type]
+        sw_coordinator = Coordinator(  # type: ignore[arg-type]
             sw_store, sw_worker, sw_factory, sw_verifier, sw_notifier
         )
+        app.state.swarm_coordinator = sw_coordinator
         _logging.getLogger("zeus.swarm").info(
             "Argo swarm enabled (worker=%s, db=%s)", sw_kind, sw_db_path
         )
+        # P6: reconcile persisted runs with on-disk git after a restart - reset
+        # interrupted nodes, re-attach workspaces, reap orphan worktrees, and
+        # (unless disabled) resume RUNNING runs. Backgrounded so boot isn't blocked.
+        _resume = os.getenv("ZEUS_SWARM_RESUME_ON_START", "1").strip().lower() in ("1", "true", "yes", "on")
+        app.state.swarm_recover_task = asyncio.create_task(sw_coordinator.recover(resume=_resume))
     if os.getenv("ZEUS_KRONOS_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on"):
         try:
             from collections import deque as _deque

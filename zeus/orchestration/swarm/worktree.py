@@ -87,6 +87,34 @@ class CodeWorkspace:
         logger.info("swarm %s: integration worktree %s on %s", self.run_id, self.integration_path, self.branch)
         return self.integration_path
 
+    @classmethod
+    async def attach(cls, repo: str, run_id: str, *, base_dir: str | None = None) -> "CodeWorkspace":
+        """Re-bind to a run's existing integration branch/worktree after a restart.
+
+        Never resets the branch (that would discard merged work): re-uses the
+        on-disk integration worktree if present, else re-checks-out the surviving
+        branch into a fresh worktree, else falls back to a clean setup(). Node
+        branches are re-listed so teardown still cleans them.
+        """
+        ws = cls(repo, run_id, base_dir=base_dir)
+        path = await ws._find_worktree(ws.branch)
+        if path and os.path.isdir(path):
+            ws.integration_path = path
+            logger.info("swarm %s: re-attached integration worktree %s", run_id, path)
+        elif await ws._branch_exists(ws.branch):
+            ip = tempfile.mkdtemp(prefix=f"{run_id}-int-", dir=ws._root())
+            try:
+                await _git(["worktree", "add", ip, ws.branch], ws.repo)  # existing branch, no -B
+                ws.integration_path = ip
+                logger.info("swarm %s: re-checked-out branch %s into %s", run_id, ws.branch, ip)
+            except GitError:
+                shutil.rmtree(ip, ignore_errors=True)
+                await ws.setup()
+        else:
+            await ws.setup()  # nothing survived; start the integration branch clean
+        ws._node_branches = await ws._list_node_branches()
+        return ws
+
     async def new_node_worktree(self, node_id: str) -> str:
         """A worktree on a node branch cut from the current integration tip.
 
@@ -182,3 +210,92 @@ class CodeWorkspace:
             except GitError:
                 pass
         self.integration_path = None
+
+    # ---- introspection + reaping (P6) -----------------------------------
+
+    async def _worktree_list(self) -> list[tuple[str, str | None]]:
+        """(path, branch-name-or-None) for every worktree registered in the repo."""
+        out = await _git(["worktree", "list", "--porcelain"], self.repo)
+        entries: list[tuple[str, str | None]] = []
+        path: str | None = None
+        branch: str | None = None
+        for line in out.splitlines() + [""]:
+            if line.startswith("worktree "):
+                if path is not None:
+                    entries.append((path, branch))
+                path, branch = line[len("worktree "):], None
+            elif line.startswith("branch "):
+                ref = line[len("branch "):]
+                branch = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+            elif line == "" and path is not None:
+                entries.append((path, branch))
+                path, branch = None, None
+        return entries
+
+    async def _find_worktree(self, branch: str) -> str | None:
+        for path, br in await self._worktree_list():
+            if br == branch:
+                return path
+        return None
+
+    async def _branch_exists(self, branch: str) -> bool:
+        try:
+            await _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], self.repo)
+            return True
+        except GitError:
+            return False
+
+    async def _list_node_branches(self) -> list[str]:
+        out = await _git(
+            ["for-each-ref", "--format=%(refname:short)", f"refs/heads/{self.branch}-n-*"],
+            self.repo,
+        )
+        return [b for b in out.splitlines() if b]
+
+    @staticmethod
+    def run_id_from_branch(branch: str | None) -> str | None:
+        """`swarm/run-<id>` and `swarm/run-<id>-n-<node>` -> `<id>` (12 hex, no '-')."""
+        if not branch or not branch.startswith("swarm/run-"):
+            return None
+        return branch[len("swarm/run-"):].split("-n-", 1)[0] or None
+
+    @classmethod
+    async def reap_orphans(
+        cls, repo: str, live_run_ids: set[str], *, base_dir: str | None = None
+    ) -> dict[str, list[str]]:
+        """Remove swarm worktrees/branches whose run is no longer live.
+
+        A run is live iff it is still non-terminal in the store. Everything else
+        under `swarm/run-*` is debris from a completed/failed/dead run and is
+        pruned so the repo doesn't accumulate stale worktrees and branches.
+        """
+        ws = cls(repo, "reaper", base_dir=base_dir)
+        repo = ws.repo  # resolved
+        removed_worktrees: list[str] = []
+        deleted_branches: list[str] = []
+        for path, branch in await ws._worktree_list():
+            rid = cls.run_id_from_branch(branch)
+            if rid is not None and rid not in live_run_ids:
+                try:
+                    await _git(["worktree", "remove", "--force", path], repo)
+                except GitError:
+                    shutil.rmtree(path, ignore_errors=True)
+                removed_worktrees.append(path)
+        await _git(["worktree", "prune"], repo)
+        out = await _git(
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads/swarm/run-*"], repo
+        )
+        for branch in (b for b in out.splitlines() if b):
+            rid = cls.run_id_from_branch(branch)
+            if rid is not None and rid not in live_run_ids:
+                try:
+                    await _git(["branch", "-D", branch], repo)
+                    deleted_branches.append(branch)
+                except GitError:
+                    pass
+        if removed_worktrees or deleted_branches:
+            logger.info(
+                "swarm reaper (%s): removed %d worktrees, %d branches",
+                repo, len(removed_worktrees), len(deleted_branches),
+            )
+        return {"worktrees": removed_worktrees, "branches": deleted_branches}
