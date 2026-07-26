@@ -34,7 +34,7 @@ def claude_available() -> bool:
     return shutil.which("claude") is not None
 
 
-def build_prompt(node: TaskNode, run: Run) -> str:
+def build_prompt(node: TaskNode, run: Run, feedback: str | None = None) -> str:
     lines = [
         f"You are completing one task in a larger project: {run.goal}",
         "",
@@ -42,6 +42,10 @@ def build_prompt(node: TaskNode, run: Run) -> str:
     ]
     if node.acceptance:
         lines += ["", f"Acceptance criteria: {node.acceptance}"]
+    if node.check:
+        lines += ["", f"Your work will be verified by running: {node.check}"]
+    if feedback:
+        lines += ["", "## A previous attempt did not pass. Fix it:", feedback]
     lines += [
         "",
         "Work only within this repository worktree. Make the change, keep it focused,",
@@ -111,7 +115,8 @@ class ClaudeCodeWorker:
         self._model = model
         self._timeout_s = timeout_s
 
-    async def run(self, node: TaskNode, run: Run, workspace: str | None) -> WorkerResult:
+    async def run(self, node: TaskNode, run: Run, workspace: str | None,
+                  feedback: str | None = None) -> WorkerResult:
         if workspace is None:
             return WorkerResult(success=False, error="claude worker requires a worktree")
         if not claude_available():
@@ -119,7 +124,7 @@ class ClaudeCodeWorker:
 
         allowed = node.tool_scope or _DEFAULT_ALLOWED_TOOLS
         cmd = build_command(
-            build_prompt(node, run),
+            build_prompt(node, run, feedback),
             allowed_tools=allowed,
             permission_mode=self._permission_mode,
             max_turns=self._max_turns,

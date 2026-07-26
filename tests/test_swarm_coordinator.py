@@ -32,7 +32,7 @@ def _status(view, nid):
 
 
 class FailingWorker:
-    async def run(self, node, run, workspace=None) -> WorkerResult:
+    async def run(self, node, run, workspace=None, feedback=None) -> WorkerResult:
         return WorkerResult(success=False, error="boom")
 
 
@@ -40,7 +40,7 @@ class SelectiveFailWorker:
     def __init__(self, fail_ids):
         self.fail_ids = set(fail_ids)
 
-    async def run(self, node, run, workspace=None) -> WorkerResult:
+    async def run(self, node, run, workspace=None, feedback=None) -> WorkerResult:
         if node.id in self.fail_ids:
             return WorkerResult(success=False, error=f"{node.id} boom")
         return WorkerResult(success=True, output="ok")
@@ -187,6 +187,38 @@ def test_fail_open_delivers_passing_subgraph():
         final = view.pending_approval(ApprovalKind.FINAL)
         view = await coord.resolve(view.run.id, final.id, approve=True)
         assert view.run.status == RunStatus.COMPLETED_PARTIAL
+
+    asyncio.run(scenario())
+
+
+class CostWorker:
+    def __init__(self, per_node=0.6):
+        self.per = per_node
+
+    async def run(self, node, run, workspace=None, feedback=None) -> WorkerResult:
+        return WorkerResult(success=True, output="ok", cost_usd=self.per)
+
+
+def test_budget_kill_switch_pauses_then_resumes():
+    store, _, _ = _fresh()
+    coord = Coordinator(store, CostWorker(0.6))  # 3 nodes x $0.60 vs $1.00 budget
+
+    async def scenario():
+        spec = RunSpec(goal="x", repo=os.path.expanduser("~"), budget_usd=1.0,
+                       nodes=[_node("a"), _node("b"), _node("c")])
+        view = await store.create_run(spec)
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)
+
+        # a ($0.60) ok; b takes it to $1.20 > $1.00 -> paused before c runs.
+        assert view.run.status == RunStatus.PAUSED_BUDGET
+        assert _status(view, "c") == NodeStatus.READY
+        budget = view.pending_approval(ApprovalKind.BUDGET)
+        assert budget is not None
+
+        # Approve the overrun -> headroom granted, c runs, run settles.
+        view = await coord.resolve(view.run.id, budget.id, approve=True)
+        assert view.run.status == RunStatus.PENDING_FINAL_APPROVAL
+        assert _status(view, "c") == NodeStatus.SUCCEEDED
 
     asyncio.run(scenario())
 

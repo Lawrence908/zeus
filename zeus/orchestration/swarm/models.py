@@ -37,6 +37,7 @@ class NodeStatus(str, Enum):
 class ApprovalKind(str, Enum):
     PLAN = "plan"
     NODE_WRITE = "node_write"
+    BUDGET = "budget"  # run exceeded budget_usd; approve to continue
     FINAL = "final"
 
 
@@ -57,10 +58,11 @@ class TaskNodeSpec(BaseModel):
     id: str = Field(..., min_length=1, max_length=64)
     title: str = Field(..., min_length=1, max_length=300)
     deps: list[str] = Field(default_factory=list)
-    acceptance: str = ""  # human/verifier acceptance note (verifier lands in P3)
+    acceptance: str = ""  # human-readable acceptance note
+    check: str = ""  # shell command run in the worktree to verify the node (exit 0 = pass)
     tool_scope: list[str] = Field(default_factory=list)  # min tools this node may use
     requires_approval: bool = False  # gate 2 before this node runs
-    max_attempts: int = Field(default=1, ge=1, le=5)  # retry budget (loop lands in P1)
+    max_attempts: int = Field(default=1, ge=1, le=5)  # verify-retry budget
 
     @field_validator("id")
     @classmethod
@@ -105,6 +107,7 @@ class TaskNode(BaseModel):
     title: str
     deps: list[str] = Field(default_factory=list)
     acceptance: str = ""
+    check: str = ""
     tool_scope: list[str] = Field(default_factory=list)
     requires_approval: bool = False
     max_attempts: int = 1

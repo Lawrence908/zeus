@@ -212,15 +212,19 @@ async def lifespan(app: FastAPI):
                 sw_worker = ClaudeCodeWorker()
             sw_factory = lambda repo, run_id: CodeWorkspace(repo, run_id)  # noqa: E731
             from zeus.orchestration.swarm.planner import ClaudePlanner
+            from zeus.orchestration.swarm.verifier import CommandVerifier
 
             app.state.swarm_planner = ClaudePlanner()
+            sw_verifier: object = CommandVerifier()
         else:
             sw_worker = StubWorker()
             sw_factory = None
             from zeus.orchestration.swarm.planner import StubPlanner
+            from zeus.orchestration.swarm.verifier import NoopVerifier
 
             app.state.swarm_planner = StubPlanner()
-        app.state.swarm_coordinator = Coordinator(sw_store, sw_worker, sw_factory)  # type: ignore[arg-type]
+            sw_verifier = NoopVerifier()
+        app.state.swarm_coordinator = Coordinator(sw_store, sw_worker, sw_factory, sw_verifier)  # type: ignore[arg-type]
         _logging.getLogger("zeus.swarm").info(
             "Argo swarm enabled (worker=%s, db=%s)", sw_kind, sw_db_path
         )

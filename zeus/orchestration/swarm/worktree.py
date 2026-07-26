@@ -121,6 +121,10 @@ class CodeWorkspace:
         sha = (await _git(["rev-parse", "HEAD"], self.path)).strip()
         return CommitResult(committed=True, denied=[], commit=sha)
 
+    async def discard(self) -> None:
+        """Throw away uncommitted changes in the worktree (e.g. a failed attempt)."""
+        await self._discard()
+
     async def _discard(self) -> None:
         assert self.path is not None
         await _git(["reset", "--hard", "HEAD"], self.path)

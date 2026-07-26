@@ -85,7 +85,8 @@ class SandboxedClaudeWorker:
         self._model = model
         self._timeout_s = timeout_s
 
-    async def run(self, node: TaskNode, run: Run, workspace: str | None) -> WorkerResult:
+    async def run(self, node: TaskNode, run: Run, workspace: str | None,
+                  feedback: str | None = None) -> WorkerResult:
         if workspace is None:
             return WorkerResult(success=False, error="sandbox worker requires a worktree")
         if not docker_available():
@@ -97,7 +98,7 @@ class SandboxedClaudeWorker:
             )
 
         claude_argv = build_command(
-            build_prompt(node, run),
+            build_prompt(node, run, feedback),
             allowed_tools=node.tool_scope or _DEFAULT_ALLOWED_TOOLS,
             permission_mode=self._permission_mode,
             max_turns=self._max_turns,

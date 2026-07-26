@@ -34,6 +34,7 @@ from zeus.orchestration.swarm.models import (
     TaskNode,
 )
 from zeus.orchestration.swarm.store import SwarmStore
+from zeus.orchestration.swarm.verifier import NoopVerifier, Verifier
 from zeus.orchestration.swarm.worker import Worker
 from zeus.orchestration.swarm.worktree import CodeWorkspace
 
@@ -51,10 +52,12 @@ class Coordinator:
         store: SwarmStore,
         worker: Worker,
         workspace_factory: WorkspaceFactory | None = None,
+        verifier: Verifier | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
         self._workspace_factory = workspace_factory
+        self._verifier = verifier or NoopVerifier()
         self._workspaces: dict[str, CodeWorkspace] = {}
 
     # ---- driver ----------------------------------------------------------
@@ -88,6 +91,13 @@ class Coordinator:
                     await self._store.set_run_status(run_id, RunStatus.CANCELLED)
                     await self._teardown_workspace(run_id)
                 break
+            if self._over_budget(view.run, view.nodes):
+                # Kill-switch: hold the run until the budget overrun is approved.
+                if view.pending_approval(ApprovalKind.BUDGET) is None:
+                    await self._store.create_approval(run_id, ApprovalKind.BUDGET)
+                await self._store.set_run_status(run_id, RunStatus.PAUSED_BUDGET)
+                logger.warning("swarm run %s paused: over budget ($%.2f)", run_id, view.run.budget_usd)
+                break
             if not progressed:
                 break  # waiting on an approval gate (nothing else dispatchable)
 
@@ -117,40 +127,70 @@ class Coordinator:
                 continue
 
             n.status = NodeStatus.RUNNING
-            n.attempts += 1
             await self._store.update_node(n)
             capacity -= 1
             progressed = True
+            await self._execute_node(n, run, self._workspaces.get(run.id), nodes)
+            if self._over_budget(run, nodes):
+                break  # stop dispatching; advance() pauses for a budget approval
 
-            ws = self._workspaces.get(run.id)
-            result = await self._worker.run(n, run, ws.path if ws else None)
-            n.cost_usd = result.cost_usd
-            n.session_id = result.session_id
+        return progressed
+
+    @staticmethod
+    def _over_budget(run: Run, nodes: list[TaskNode]) -> bool:
+        return run.budget_usd > 0 and sum(n.cost_usd for n in nodes) > run.budget_usd
+
+    async def _execute_node(
+        self, n: TaskNode, run: Run, ws: CodeWorkspace | None, nodes: list[TaskNode]
+    ) -> None:
+        """Run the worker, verify, and commit - retrying up to n.max_attempts.
+
+        Verification happens in the worktree *before* the commit, so only work
+        that passes its `check` ever lands on the integration branch. Failures
+        feed back into the next attempt.
+        """
+        feedback: str | None = None
+        for attempt in range(1, n.max_attempts + 1):
+            n.attempts = attempt
+            result = await self._worker.run(n, run, ws.path if ws else None, feedback=feedback)
+            n.cost_usd += result.cost_usd  # accumulate across retries
+            n.session_id = result.session_id or n.session_id
 
             if not result.success:
-                # TODO(P1b): retry up to n.max_attempts before giving up.
+                feedback = f"Worker error: {result.error}"
+                if attempt < n.max_attempts:
+                    await self._store.update_node(n)
+                    continue
                 await self._fail(n, nodes, result.error or "worker reported failure")
-            elif ws is not None:
-                # Denylist-check the diff, then commit the node onto the run branch.
-                # Any git failure (hook, lock, conflict) fails the node fail-open
-                # rather than crashing the coordinator.
+                return
+
+            vres = await self._verifier.verify(n, ws.path) if ws else None
+            if vres is not None and not vres.passed:
+                feedback = f"Verification (`{n.check}`) failed:\n{vres.output}"
+                if attempt < n.max_attempts:
+                    if ws is not None:
+                        await ws.discard()  # drop the failed attempt, retry clean
+                    await self._store.update_node(n)
+                    continue
+                if ws is not None:
+                    await ws.discard()
+                await self._fail(n, nodes, f"verification failed after {attempt} attempt(s)")
+                return
+
+            # Passed (or no check): commit onto the run branch.
+            if ws is not None:
                 try:
                     commit = await ws.commit_node(n)
                 except Exception as exc:  # noqa: BLE001 - surface as a node failure
                     await self._fail(n, nodes, f"commit failed: {exc}")
-                else:
-                    if commit.denied:
-                        await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
-                    else:
-                        n.status = NodeStatus.SUCCEEDED
-                        n.output = result.output
-                        await self._store.update_node(n)
-            else:
-                n.status = NodeStatus.SUCCEEDED
-                n.output = result.output
-                await self._store.update_node(n)
-
-        return progressed
+                    return
+                if commit.denied:
+                    await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
+                    return
+            n.status = NodeStatus.SUCCEEDED
+            n.output = result.output
+            await self._store.update_node(n)
+            return
 
     async def _fail(self, node: TaskNode, nodes: list[TaskNode], error: str) -> None:
         node.status = NodeStatus.FAILED
@@ -189,6 +229,19 @@ class Coordinator:
                 else:
                     await self._skip_cascade(node, view.nodes)
             return await self.advance(run_id)
+
+        elif ap.kind == ApprovalKind.BUDGET:
+            if approve:
+                # Grant another budget's worth of headroom above current spend so
+                # the run makes real progress instead of re-pausing immediately.
+                view = await self._store.get_view(run_id)
+                if view is not None:
+                    spent = sum(n.cost_usd for n in view.nodes)
+                    await self._store.set_run_budget(run_id, spent + view.run.budget_usd)
+                await self._store.set_run_status(run_id, RunStatus.RUNNING)
+                return await self.advance(run_id)
+            await self._store.set_run_status(run_id, RunStatus.CANCELLED)
+            await self._teardown_workspace(run_id)
 
         elif ap.kind == ApprovalKind.FINAL:
             if approve:

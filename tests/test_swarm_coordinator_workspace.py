@@ -13,6 +13,7 @@ from zeus.orchestration.swarm.models import (
     TaskNodeSpec,
 )
 from zeus.orchestration.swarm.store import SwarmStore
+from zeus.orchestration.swarm.verifier import CommandVerifier
 from zeus.orchestration.swarm.worker import WorkerResult
 from zeus.orchestration.swarm.worktree import CodeWorkspace
 
@@ -37,7 +38,7 @@ class FileWorker:
     def __init__(self, files):
         self.files = files  # node_id -> (relpath, content)
 
-    async def run(self, node, run, workspace) -> WorkerResult:
+    async def run(self, node, run, workspace, feedback=None) -> WorkerResult:
         rel, content = self.files[node.id]
         full = os.path.join(workspace, rel)
         os.makedirs(os.path.dirname(full) or workspace, exist_ok=True)
@@ -46,8 +47,79 @@ class FileWorker:
         return WorkerResult(success=True, output=f"wrote {rel}", cost_usd=0.01, session_id=f"s-{node.id}")
 
 
+class FlakyWorker:
+    """Writes ok.txt only from the 2nd attempt on; always writes attempt.txt."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def run(self, node, run, workspace, feedback=None) -> WorkerResult:
+        self.calls += 1
+        with open(os.path.join(workspace, "attempt.txt"), "w") as f:
+            f.write(str(self.calls))
+        if self.calls >= 2:
+            with open(os.path.join(workspace, "ok.txt"), "w") as f:
+                f.write("ok\n")
+        return WorkerResult(success=True, output=f"attempt {self.calls}", cost_usd=0.01)
+
+
 def _status(view, nid):
     return next(n for n in view.nodes if n.id == nid).status
+
+
+def _mk(tmp_path, worker, verifier=None):
+    repo = str(tmp_path / "repo")
+    os.makedirs(repo)
+    _init_repo(repo)
+    fd, db = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    store = SwarmStore(db)
+    factory = lambda r, rid: CodeWorkspace(r, rid, base_dir=str(tmp_path / "wt"))  # noqa: E731
+    return repo, store, Coordinator(store, worker, factory, verifier)
+
+
+def test_verify_retry_then_succeed(tmp_path):
+    repo, store, coord = _mk(tmp_path, FlakyWorker(), CommandVerifier())
+
+    async def scenario():
+        spec = RunSpec(goal="g", repo=repo, nodes=[
+            TaskNodeSpec(id="a", title="make ok", check="test -f ok.txt", max_attempts=2)])
+        view = await store.create_run(spec)
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)
+        a = next(n for n in view.nodes if n.id == "a")
+        assert a.status == NodeStatus.SUCCEEDED
+        assert a.attempts == 2  # first attempt failed the check, second passed
+        # committed the passing attempt only
+        files = subprocess.run(["git", "ls-tree", "-r", "--name-only", f"swarm/run-{view.run.id}"],
+                               cwd=repo, capture_output=True, text=True).stdout
+        assert "ok.txt" in files
+
+    asyncio.run(scenario())
+
+
+def test_verify_exhausted_fails_node(tmp_path):
+    class NeverPasses:
+        async def run(self, node, run, workspace, feedback=None):
+            with open(os.path.join(workspace, "junk.txt"), "w") as f:
+                f.write("x")
+            return WorkerResult(success=True, output="wrote junk")
+
+    repo, store, coord = _mk(tmp_path, NeverPasses(), CommandVerifier())
+
+    async def scenario():
+        spec = RunSpec(goal="g", repo=repo, nodes=[
+            TaskNodeSpec(id="a", title="never", check="test -f ok.txt", max_attempts=2)])
+        view = await store.create_run(spec)
+        view = await coord.resolve(view.run.id, view.pending_approval(ApprovalKind.PLAN).id, True)
+        a = next(n for n in view.nodes if n.id == "a")
+        assert a.status == NodeStatus.FAILED
+        assert "verification failed" in (a.error or "")
+        # nothing committed; the failed attempt was discarded
+        files = subprocess.run(["git", "ls-tree", "-r", "--name-only", f"swarm/run-{view.run.id}"],
+                               cwd=repo, capture_output=True, text=True).stdout
+        assert "junk.txt" not in files
+
+    asyncio.run(scenario())
 
 
 def test_commit_per_node_and_denylist_rejection(tmp_path):

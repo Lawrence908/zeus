@@ -26,14 +26,19 @@ class WorkerResult(BaseModel):
 
 
 class Worker(Protocol):
-    # `workspace` is the git worktree path a code worker acts in (None for the stub).
-    async def run(self, node: TaskNode, run: Run, workspace: str | None) -> WorkerResult: ...
+    # `workspace` is the git worktree path a code worker acts in (None for the stub);
+    # `feedback` carries a prior verify/worker failure on a retry.
+    async def run(
+        self, node: TaskNode, run: Run, workspace: str | None, feedback: str | None = None
+    ) -> WorkerResult: ...
 
 
 class StubWorker:
     """No-op worker: marks every node succeeded. For P0 state-machine tests."""
 
-    async def run(self, node: TaskNode, run: Run, workspace: str | None = None) -> WorkerResult:
+    async def run(
+        self, node: TaskNode, run: Run, workspace: str | None = None, feedback: str | None = None
+    ) -> WorkerResult:
         return WorkerResult(
             success=True,
             output=f"[stub] would complete {node.id!r}: {node.title}",

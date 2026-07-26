@@ -60,6 +60,7 @@ class SwarmStore:
                     deps              TEXT NOT NULL,
                     acceptance        TEXT NOT NULL,
                     tool_scope        TEXT NOT NULL,
+                    check_cmd         TEXT NOT NULL DEFAULT '',
                     requires_approval INTEGER NOT NULL,
                     max_attempts      INTEGER NOT NULL DEFAULT 1,
                     status            TEXT NOT NULL,
@@ -116,6 +117,7 @@ class SwarmStore:
             title=r["title"],
             deps=json.loads(r["deps"]),
             acceptance=r["acceptance"],
+            check=r["check_cmd"],
             tool_scope=json.loads(r["tool_scope"]),
             requires_approval=bool(r["requires_approval"]),
             max_attempts=r["max_attempts"],
@@ -169,12 +171,12 @@ class SwarmStore:
                 status = NodeStatus.READY if not n.deps else NodeStatus.BLOCKED
                 conn.execute(
                     "INSERT INTO swarm_nodes (run_id, id, title, deps, acceptance, tool_scope,"
-                    " requires_approval, max_attempts, status, attempts, worker_id, output, error,"
-                    " cost_usd, session_id, updated_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " check_cmd, requires_approval, max_attempts, status, attempts, worker_id,"
+                    " output, error, cost_usd, session_id, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         run.id, n.id, n.title, json.dumps(n.deps), n.acceptance,
-                        json.dumps(n.tool_scope), int(n.requires_approval), n.max_attempts,
+                        json.dumps(n.tool_scope), n.check, int(n.requires_approval), n.max_attempts,
                         status.value, 0, None, None, None, 0.0, None, now,
                     ),
                 )
@@ -231,6 +233,16 @@ class SwarmStore:
             conn.execute(
                 "UPDATE swarm_runs SET status = ?, updated_at = ? WHERE id = ?",
                 (status.value, _now_iso(), run_id),
+            )
+
+    async def set_run_budget(self, run_id: str, budget_usd: float) -> None:
+        await asyncio.to_thread(self._set_run_budget_sync, run_id, budget_usd)
+
+    def _set_run_budget_sync(self, run_id: str, budget_usd: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE swarm_runs SET budget_usd = ?, updated_at = ? WHERE id = ?",
+                (budget_usd, _now_iso(), run_id),
             )
 
     async def update_node(self, node: TaskNode) -> None:
