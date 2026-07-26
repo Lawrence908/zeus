@@ -43,6 +43,19 @@ def test_parse_no_nodes_raises():
         parse_plan("no json here")
 
 
+def test_parse_malformed_fence_raises_valueerror_not_decodeerror():
+    # A fenced block that matches but is unparseable must not leak mid-parse; every
+    # candidate is tried and a consistent ValueError is raised when none parse.
+    with pytest.raises(ValueError):
+        parse_plan('```json\n{"nodes": [oops]}\n```')
+
+
+def test_parse_prose_prefixed_json_still_parses():
+    # Prose before a valid JSON object: the brace span recovers it.
+    specs = parse_plan("Here you go: " + _RAW)
+    assert [s.id for s in specs] == ["a", "b"]
+
+
 def test_build_prompt_has_goal_and_schema():
     p = build_planner_prompt("add a health endpoint")
     assert "add a health endpoint" in p

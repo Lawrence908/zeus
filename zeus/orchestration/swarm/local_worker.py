@@ -137,6 +137,8 @@ class LocalWorker:
         written: list[str] = []
         try:
             for f in files:
+                if not isinstance(f, dict):
+                    raise ValueError("local worker: each 'files' entry must be an object")
                 rel = f.get("path", "")
                 dest = _safe_join(workspace, rel)
                 os.makedirs(os.path.dirname(dest) or workspace, exist_ok=True)

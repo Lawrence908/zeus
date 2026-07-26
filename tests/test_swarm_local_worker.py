@@ -114,6 +114,17 @@ def test_local_worker_rejects_path_escape(monkeypatch, tmp_path):
     asyncio.run(scenario())
 
 
+def test_local_worker_malformed_files_entries_fail_cleanly(monkeypatch, tmp_path):
+    # Model returns files as a list of strings, not objects -> clean failure, no crash.
+    _patch_ollama(monkeypatch, json.dumps({"files": ["a.txt", "b.txt"]}))
+
+    async def scenario():
+        res = await lw.LocalWorker().run(_node(), _run(), str(tmp_path))
+        assert not res.success and "object" in (res.error or "")
+
+    asyncio.run(scenario())
+
+
 def test_local_worker_bad_json_fails(monkeypatch, tmp_path):
     _patch_ollama(monkeypatch, "I could not do that.")
 

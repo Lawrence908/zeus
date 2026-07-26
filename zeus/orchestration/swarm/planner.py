@@ -78,19 +78,25 @@ def build_planner_prompt(goal: str) -> str:
 
 
 def _extract_json(text: str) -> dict:
-    """Pull a JSON object out of an LLM answer (raw, fenced, or prose-wrapped)."""
+    """Pull a JSON object out of an LLM answer (raw, fenced, or prose-wrapped).
+
+    Each candidate is tried tolerantly: a malformed fenced block falls through to
+    the outermost-brace span rather than raising, and total failure always raises
+    a consistent ValueError.
+    """
     text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    candidates = [text]
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence:
-        return json.loads(fence.group(1))
-    # Fall back to the outermost brace span.
+        candidates.append(fence.group(1))
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
-        return json.loads(text[start : end + 1])
+        candidates.append(text[start : end + 1])
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
     raise ValueError("no JSON object found in planner output")
 
 

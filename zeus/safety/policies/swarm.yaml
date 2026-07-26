@@ -12,8 +12,10 @@ rules:
     action: reject
     message: "Worker output contained a prompt-injection pattern."
   - name: data_exfiltration
-    # Shipping data out to an arbitrary host from the worker's own output.
-    pattern: '(?i)(curl|wget)\s+[^\n]*\bhttps?://(?!(\S*\.)?anthropic\.com)\S+|(\||;)\s*(nc|netcat)\s+\S+\s+\d+'
+    # Shipping data out to an arbitrary host from the worker's own output. The
+    # anthropic.com allowlist enforces a host boundary - `anthropic\.com(?![\w.-])`
+    # - so a look-alike host like anthropic.com.evil.com does NOT slip through.
+    pattern: '(?i)(curl|wget)\s+[^\n]*\bhttps?://(?!([\w-]+\.)*anthropic\.com(?![\w.-]))\S+|(\||;)\s*(nc|netcat)\s+\S+\s+\d+'
     action: reject
     message: "Worker output described network exfiltration to a non-allowlisted host."
   - name: private_key_material
