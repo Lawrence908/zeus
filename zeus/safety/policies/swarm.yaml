@@ -1,0 +1,36 @@
+name: swarm
+description: >
+  Screens an Argo swarm worker's reported output (diff summary + check/verify
+  output) before the node's work is committed and merged. Catches unsafe content
+  in what an LLM-authored worker produces - exfiltration, leaked secrets,
+  prompt-injection, sensitive-file access - so it never lands on the integration
+  branch. Runs on the worker's summary text, not the raw code diff, to avoid
+  false positives on ordinary source.
+rules:
+  - name: prompt_injection
+    pattern: '(?i)(ignore (all )?previous instructions|disregard your system prompt|act as .{0,40} without restrictions)'
+    action: reject
+    message: "Worker output contained a prompt-injection pattern."
+  - name: data_exfiltration
+    # Shipping data out to an arbitrary host from the worker's own output.
+    pattern: '(?i)(curl|wget)\s+[^\n]*\bhttps?://(?!(\S*\.)?anthropic\.com)\S+|(\||;)\s*(nc|netcat)\s+\S+\s+\d+'
+    action: reject
+    message: "Worker output described network exfiltration to a non-allowlisted host."
+  - name: private_key_material
+    pattern: '-----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----'
+    action: reject
+    message: "Worker output contained private key material."
+  - name: cloud_credential
+    # Concrete provider secret shapes (not generic identifiers).
+    pattern: '(AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})'
+    action: reject
+    message: "Worker output contained a credential/token."
+  - name: sensitive_file_access
+    pattern: '/etc/(passwd|shadow)\b|(\.\./){3,}'
+    action: reject
+    message: "Worker output referenced sensitive-file access or deep path traversal."
+  - name: secret_assignment
+    # Generic key=value secrets: flag for review, don't hard-reject (noisy).
+    pattern: '(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*\S{8,}'
+    action: flag_for_review
+    message: ""

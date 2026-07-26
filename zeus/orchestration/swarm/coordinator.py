@@ -43,6 +43,7 @@ from zeus.orchestration.swarm.store import SwarmStore
 from zeus.orchestration.swarm.verifier import NoopVerifier, Verifier
 from zeus.orchestration.swarm.worker import Worker
 from zeus.orchestration.swarm.worktree import CodeWorkspace
+from zeus.safety.policy_engine import evaluate_text
 
 logger = logging.getLogger("zeus.swarm.coordinator")
 
@@ -308,6 +309,13 @@ class Coordinator:
                     await self._fail(n, nodes, f"verification failed after {work_attempt} attempt(s)")
                     return
 
+                # Aegis (swarm policy): screen the worker summary + check output
+                # before it lands, so unsafe output never reaches the branch.
+                aegis_reason = self._aegis_screen(result.output, vres.output if vres else "")
+                if aegis_reason is not None:
+                    await self._fail(n, nodes, aegis_reason)
+                    return
+
                 # Passed (or no check): commit in the node worktree, then merge.
                 if ws is not None and node_path is not None:
                     try:
@@ -351,6 +359,21 @@ class Coordinator:
         finally:
             if ws is not None and node_path is not None:
                 await ws.teardown_node(node_path)
+
+    def _aegis_screen(self, worker_output: str, check_output: str) -> str | None:
+        """Run the worker's reported output through the Aegis swarm policy.
+
+        Returns a rejection reason if the output is unsafe (so the node fails
+        fail-open and nothing lands), else None. No-ops unless both the swarm
+        toggle and Aegis itself are enabled.
+        """
+        if not config.aegis_enabled():
+            return None
+        combined = f"{worker_output or ''}\n{check_output or ''}"
+        outcome = evaluate_text(combined, config.aegis_policy())
+        if outcome.status == "rejected":
+            return f"Aegis ({config.aegis_policy()} policy) blocked worker output: {outcome.message}"
+        return None
 
     async def _fail(self, node: TaskNode, nodes: list[TaskNode], error: str) -> None:
         node.status = NodeStatus.FAILED

@@ -160,6 +160,18 @@ def hybrid_local() -> bool:
     return os.getenv("ZEUS_SWARM_HYBRID_LOCAL", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
+def aegis_enabled() -> bool:
+    """Screen worker output through the Aegis `swarm` policy before it lands.
+
+    On by default, but only takes effect when Aegis itself is enabled globally
+    (ZEUS_AEGIS_ENABLED); this is the swarm-specific opt-out."""
+    return os.getenv("ZEUS_SWARM_AEGIS_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
+def aegis_policy() -> str:
+    return os.getenv("ZEUS_SWARM_AEGIS_POLICY", "swarm").strip() or "swarm"
+
+
 def merge_conflict_retries() -> int:
     """Extra worker redos (auto-rebase, P9a) when a node's merge conflicts with
     concurrently-merged work, before the node fails. Separate from verify retries."""
