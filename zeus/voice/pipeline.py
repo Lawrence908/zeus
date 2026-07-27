@@ -13,7 +13,6 @@ from io import BytesIO
 import httpx
 import pyaudio
 
-from zeus.core.prompts import render as render_prompt
 from zeus.voice.state import VoiceStateEmitter
 from zeus.voice.stt import WhisperSTT
 from zeus.voice.tts import VoiceboxTTS
@@ -33,61 +32,50 @@ class OrpheusPipeline:
         self.wake = WakeWordDetector()
         self.stt = WhisperSTT()
         self.tts = VoiceboxTTS()
+        # Persisted across turns so spoken conversation shares one session with
+        # text chat (updated from each /chat/stream `done` event).
+        self.session_id: str | None = None
 
-    async def get_context(self, query: str) -> str:
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.post(
-                    f"{self.core_url}/context/query",
-                    json={"query": query, "top_k": 5, "max_tokens": 1024},
-                    timeout=10,
-                )
-                r.raise_for_status()
-                return str((r.json() or {}).get("context") or "")
-        except Exception as e:
-            logger.warning(f"orpheus: context fetch failed — {e}")
-            return ""
+    async def llm_stream(self, prompt: str) -> AsyncIterator[str]:
+        """Stream a spoken reply from Core's /chat/stream.
 
-    async def llm_stream(self, prompt: str, context: str) -> AsyncIterator[str]:
-        # Resolve the currently-active model/provider at call time so runtime
-        # model switches (POST /models/active) flow through the voice path too.
-        from zeus.core.query import _active_model_name, _chat_use_claude
-        model = _active_model_name()
-        provider = "Anthropic Claude" if _chat_use_claude() else "Ollama (local)"
-
-        system = render_prompt(
-            "voice_system",
-            context=context.strip() or "(No retrieved context for this query.)",
-            model_name=model,
-            provider=provider,
-        )
-
-        base = os.getenv("OLLAMA_URL", "http://localhost:11435").rstrip("/")
+        Routing through Core (rather than calling Ollama directly) gives the
+        voice path the full tool loop, Aegis output filtering, retrieval, and
+        session continuity. ``voice=True`` makes Core render the terse
+        voice_system prompt, and runtime model switches flow through for free.
+        """
         payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ],
-            "stream": True,
-            "options": {"num_predict": 512},
+            "message": prompt,
+            "session_id": self.session_id,
+            "voice": True,
+            "max_tokens": 512,
         }
         async with httpx.AsyncClient() as client:
-            async with client.stream("POST", f"{base}/api/chat", json=payload, timeout=120.0) as r:
+            async with client.stream(
+                "POST", f"{self.core_url}/chat/stream", json=payload, timeout=180.0
+            ) as r:
                 r.raise_for_status()
                 async for line in r.aiter_lines():
-                    if not line.strip():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[len("data:"):].strip()
+                    if not raw:
                         continue
                     try:
-                        data = json.loads(line)
+                        evt = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
-                    msg = data.get("message") or {}
-                    piece = msg.get("content")
-                    if piece:
-                        yield str(piece)
-                    if data.get("done"):
-                        break
+                    etype = evt.get("type")
+                    if etype == "token":
+                        piece = evt.get("content")
+                        if piece:
+                            yield str(piece)
+                    elif etype == "done":
+                        sid = evt.get("session_id")
+                        if sid:
+                            self.session_id = str(sid)
+                    elif etype == "error":
+                        logger.warning("orpheus: chat/stream error — %s", evt.get("detail"))
 
     def play_audio_wav(self, audio_bytes: bytes) -> None:
         wf = wave.open(BytesIO(audio_bytes), "rb")
@@ -156,9 +144,7 @@ class OrpheusPipeline:
                 continue
 
             await self.emitter.emit("processing", metadata={"final_transcript": transcript})
-            context = await self.get_context(transcript)
-
-            token_stream = self.llm_stream(transcript, context)
+            token_stream = self.llm_stream(transcript)
 
             await self.emitter.emit("speaking")
             async for wav_bytes in self.tts.speak_streaming(token_stream):

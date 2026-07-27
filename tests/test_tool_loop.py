@@ -952,3 +952,35 @@ class TestToolMetrics:
         assert recorder.metrics_summary(window_seconds=-1.0)["total"] == 0
         assert recorder.metrics_summary(window_seconds=3600)["total"] == 1
         recorder.clear_invocations()
+
+
+class TestVoiceSystemPrompt:
+    """_build_voice_system_prompt gives voice tone + retrieval + tools context."""
+
+    def test_folds_context_and_appends_tools(self) -> None:
+        from zeus.core.query import _build_voice_system_prompt
+
+        p = _build_voice_system_prompt(
+            profile_section="User likes tea.",
+            memory_section="",
+            conversation_section="Earlier: hi",
+            knowledge_section="",
+            reference_section="",
+            tools_section="- `current_time` — the time.",
+        )
+        assert "User likes tea." in p          # profile folded into CONTEXT
+        assert "Earlier: hi" in p               # conversation folded in
+        assert "## Tools" in p                  # tools appended
+        assert "current_time" in p
+
+    def test_no_tools_section_when_empty(self) -> None:
+        from zeus.core.query import _build_voice_system_prompt
+
+        p = _build_voice_system_prompt(
+            profile_section="",
+            memory_section="",
+            conversation_section="",
+            tools_section="",
+        )
+        assert "## Tools" not in p
+        assert "(No retrieved context for this query.)" in p

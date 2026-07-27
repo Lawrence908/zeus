@@ -37,6 +37,10 @@ class ChatMessageRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=32000)
     max_tokens: int | None = Field(None, ge=64, le=4096)
     use_context: bool = True
+    # When true, replies use the terse TTS-oriented voice_system prompt while
+    # still going through the full tool loop + Aegis + sessions (Orpheus uses
+    # this via /chat/stream to get tool/Aegis/session parity with text chat).
+    voice: bool = False
 
 
 class ChatMessageResponse(BaseModel):
@@ -154,6 +158,7 @@ async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessag
             use_context=body.use_context,
             max_tokens=max_out,
             source="chat",
+            voice=body.voice,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Query failed: {e}") from e
@@ -481,6 +486,7 @@ async def voice_interact(
         use_context=use_context,
         max_tokens=max_tokens,
         source="voice_interact",
+        voice=True,
     )
 
     sess = await engine.sessions.get(result.session_id)
@@ -562,8 +568,9 @@ async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingRe
                 session_id_out,
                 use_context=body.use_context,
                 max_tokens=max_out,
-                source="chat",
+                source="voice" if body.voice else "chat",
                 tool_calls_out=tool_calls,
+                voice=body.voice,
             ):
                 accumulated.append(chunk)
                 yield _sse_token_event(chunk).encode("utf-8")

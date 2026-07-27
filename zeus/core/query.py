@@ -616,6 +616,52 @@ def _build_system_prompt(
     )
 
 
+def _build_voice_system_prompt(
+    *,
+    profile_section: str,
+    memory_section: str,
+    conversation_section: str,
+    knowledge_section: str = "",
+    reference_section: str = "",
+    tools_section: str = "",
+) -> str:
+    """Voice-tone system prompt (voice_system.md) carrying the same retrieval +
+    tool context as the chat prompt.
+
+    Lets the voice path reuse QueryEngine's retrieval, tool loop, Aegis, and
+    sessions while keeping TTS-friendly brevity. The voice template has no
+    per-section placeholders, so the four labelled blocks are folded into one
+    `CONTEXT` and the tool list is appended only when tools are enabled.
+    """
+    parts: list[str] = []
+    for label, body in (
+        ("Profile", profile_section),
+        ("Memories", memory_section),
+        ("Knowledge", knowledge_section),
+        ("Reference", reference_section),
+        ("Conversation", conversation_section),
+    ):
+        body = (body or "").strip()
+        if body:
+            parts.append(f"### {label}\n{body}")
+    context = "\n\n".join(parts) or "(No retrieved context for this query.)"
+
+    rendered = render_prompt(
+        "voice_system",
+        context=context,
+        model_name=_active_model_name(),
+        provider="Anthropic Claude" if _chat_use_claude() else "Ollama (local)",
+    )
+    tools_section = (tools_section or "").strip()
+    if tools_section:
+        rendered += (
+            "\n\n## Tools\n"
+            "Call a tool when it helps answer, then speak a short spoken-style "
+            "reply from the result.\n" + tools_section
+        )
+    return rendered
+
+
 def _build_tools_section() -> str:
     """Format the registered-tools list for the system prompt when tools are enabled.
 
@@ -672,6 +718,7 @@ class QueryEngine:
         max_tokens: int = 512,
         stream: bool = False,
         source: str = "chat",
+        voice: bool = False,
     ) -> QueryResult:
         _ = stream
         t0 = time.monotonic()
@@ -706,7 +753,8 @@ class QueryEngine:
             max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
-        system = _build_system_prompt(
+        _prompt_builder = _build_voice_system_prompt if voice else _build_system_prompt
+        system = _prompt_builder(
             profile_section=profile_section,
             memory_section=memory_section,
             conversation_section=conversation_section,
@@ -807,6 +855,7 @@ class QueryEngine:
         max_tokens: int = 512,
         source: str = "chat",
         tool_calls_out: list[dict] | None = None,
+        voice: bool = False,
     ) -> AsyncIterator[str]:
         """Stream a reply chunk-by-chunk.
 
@@ -847,7 +896,8 @@ class QueryEngine:
             max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
-        system = _build_system_prompt(
+        _prompt_builder = _build_voice_system_prompt if voice else _build_system_prompt
+        system = _prompt_builder(
             profile_section=profile_section,
             memory_section=memory_section,
             conversation_section=conversation_section,
