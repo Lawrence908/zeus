@@ -1,0 +1,61 @@
+name: meshtastic
+description: |
+  Bidirectional policy for LoRa mesh traffic (source == "meshtastic").
+  Applied to BOTH inbound mesh text (before it reaches the chat LLM) and
+  outbound text at the /mesh/notify choke point (Kairos pushes, command
+  replies). Stricter than `standard` on two axes:
+
+    1. Inbound is public-channel-adjacent — if the PSK ever leaked, input
+       could come from a stranger — so prompt-injection / role-override
+       patterns are rejected aggressively.
+    2. Outbound goes out over broadcast RF; anyone on the zeus channel (and
+       anyone who captured the PSK) sees it. So credential-shaped content is
+       REJECTED here, not merely flagged as it is in `standard` — we would
+       rather drop an alert than transmit a secret over the air.
+
+  Engine note: rules compile with IGNORECASE + DOTALL, so the (?i) prefixes
+  are redundant but kept for readability. `reject` returns on first hit;
+  `flag_for_review` accumulates. There is no redaction action — fail closed.
+rules:
+  # ---- Inbound: prompt injection / jailbreak / prompt disclosure ----
+  - name: prompt_injection_attempt
+    pattern: '(?i)(ignore (all |your |previous |prior |above |the )*(instructions|prompts?|rules?)|disregard (your |the )?(system )?(prompt|instructions)|forget (your |the |all )*(instructions|rules|prompt))'
+    action: reject
+    message: "Prompt injection pattern detected on mesh input."
+  - name: role_override_attempt
+    pattern: '(?i)(you are now|from now on you are|act as .{0,40} (without|no) (restrictions?|rules?|filter)|developer mode|jailbreak|\bDAN\b|pretend you (are|have) no)'
+    action: reject
+    message: "Role-override pattern detected on mesh input."
+  - name: system_prompt_exfiltration
+    pattern: '(?i)((reveal|print|show|repeat|output|dump) (me )?(your )?(system )?(prompt|instructions|rules)|what (are|were) your (instructions|system prompt))'
+    action: reject
+    message: "System-prompt disclosure attempt on mesh input."
+  # ---- Both directions: shell / traversal shapes ----
+  - name: shell_metacharacters
+    # Same shape as file_access.yaml: backtick spans must contain a shell
+    # keyword so plain code spans like `!status` or `~/.zeus/` do not trip.
+    pattern: '(?:\$\(|`[^`]*\b(rm|curl|wget|sh|bash|nc|eval|exec)\b[^`]*`|\|\s*(curl|wget|sh|bash|nc)\b|;\s*(rm|curl|wget|nc)\b|&&\s*(rm|curl|wget))'
+    action: reject
+    message: "Shell metacharacter pattern in mesh payload."
+  - name: path_traversal
+    pattern: '(\.\./){2,}|/etc/(passwd|shadow|sudoers)\b|\bproc/self\b'
+    action: reject
+    message: "Path traversal pattern in mesh payload."
+  # ---- Outbound leak prevention (broadcast RF) ----
+  - name: hardcoded_credential_quoted
+    pattern: '(?i)(api[_-]?key|password|secret|token)\s*=\s*[''"][^''"]{8,}[''"]'
+    action: reject
+    message: "Refusing to transmit embedded credentials over the mesh."
+  - name: credential_assignment_unquoted
+    # Mesh text rarely uses quotes; catch bare key: value / key=value secrets.
+    pattern: '(?i)(api[_-]?key|secret|password|token|bearer)\s*[:=]\s*\S{8,}'
+    action: reject
+    message: "Refusing to transmit credential-shaped content over the mesh."
+  - name: private_key_block
+    pattern: '(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    action: reject
+    message: "Refusing to transmit a private key over the mesh."
+  - name: jwt_shaped_token
+    pattern: '\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\b'
+    action: flag_for_review
+    message: ""
