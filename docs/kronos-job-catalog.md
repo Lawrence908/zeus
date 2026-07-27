@@ -1,6 +1,6 @@
 # Kronos Job Catalog
 
-A brainstorm of useful scheduled jobs for this Zeus deployment, with the tools each one needs, what's already wired, and what to build next. Use this as a planning surface — pick a job, follow the references, ship it.
+A brainstorm of useful scheduled jobs for this Zeus deployment, with the tools each one needs, what's already wired, and what to build next. Use this as a planning surface - pick a job, follow the references, ship it.
 
 Companions:
 - How to author a job: [`../zeus/docs/kronos-job-guide.md`](../zeus/docs/kronos-job-guide.md)
@@ -43,7 +43,7 @@ Built-in Kronos executors (in `zeus/kronos/jobs/`):
 
 Each entry below has the same shape:
 
-> **`<id>`** — one-line purpose
+> **`<id>`** - one-line purpose
 > **When**: cron + tz · **Mode**: built-in / agent / shell · **Executor**: dotted path
 > **Tools**: what it uses (or would use)
 > **Build status**: ✅ ship now / 🟡 needs new built-in / 🔴 needs new tool
@@ -53,7 +53,7 @@ Each entry below has the same shape:
 
 ## 1. Daily routines
 
-### `morning-news-briefing` — composite morning digest
+### `morning-news-briefing` - composite morning digest
 
 **When**: `0 7 * * *` America/Los_Angeles · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.briefing.run_morning_briefing` (new)
@@ -61,7 +61,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in; composes existing tools
 **Notes**: pulls latest newsletter digest + today's calendar + last 24h inbox additions; runs `small_llm_call(min_privacy_tier=1)` to write a 5-bullet daily brief; appends to `~/.zeus/status.md` so the chat tool `status_read` surfaces it. Optional: also push to Telegram (needs new tool below).
 
-### `evening-recap` — what happened today
+### `evening-recap` - what happened today
 
 **When**: `30 21 * * *` America/Los_Angeles · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.briefing.run_evening_recap` (new)
@@ -69,7 +69,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in + 🔴 new `zeus_git_recent` tool
 **Notes**: counts commits + summarises memory adds + lists tomorrow's first three calendar events. Output → inbox so morning-you sees it.
 
-### `monday-week-ahead` — Monday morning planning
+### `monday-week-ahead` - Monday morning planning
 
 **When**: `0 8 * * 1` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.briefing.run_week_ahead` (new)
@@ -77,7 +77,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in + 🔴 needs `zeus_calendar_range(days)`
 **Notes**: full week calendar + open task themes. Could chain into `kronos_create_job` to schedule one-off prep jobs for big meetings.
 
-### `daily-intention` — morning prompt
+### `daily-intention` - morning prompt
 
 **When**: `0 7 * * *` (right after briefing) · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.notify.run_intention_prompt` (new, tiny)
@@ -89,13 +89,13 @@ Each entry below has the same shape:
 
 ## 2. Memory hygiene
 
-### `weekly-memory-review` — already shipped (stub-grade)
+### `weekly-memory-review` - already shipped (stub-grade)
 
 **When**: `0 18 * * 0` · **Mode**: built-in · **Executor**: `zeus.kronos.jobs.memory_review.run_weekly_review`
 **Build status**: ✅ live
 **Upgrade idea**: chain into `small_llm_call` (tier 1) to synthesize a weekly narrative from the category groups, then `zeus_remember(namespace="weekly_review")` so the next week's memory-review can spot trends.
 
-### `memory-drift-check` — flag contradictions
+### `memory-drift-check` - flag contradictions
 
 **When**: `0 4 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.memory_review.run_drift_check` (new)
@@ -103,15 +103,15 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in
 **Notes**: scans facts added in the last 7 days against existing high-confidence facts in the same category, looks for contradictions ("user lives in X" vs "user lives in Y"), and writes a flagged-pairs report to `kronos_execution_log` namespace. Caller decides what to do; this is observation, not action.
 
-### `stale-memory-audit` — surface expired facts
+### `stale-memory-audit` - surface expired facts
 
 **When**: `0 3 * * 1` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.memory_review.run_stale_audit` (new)
 **Tools used**: Qdrant scroll filtered by `valid_until <= now`
 **Build status**: 🟡 new built-in
-**Notes**: lists facts whose `valid_until` has passed but are still in the collection. Doesn't delete (that's irreversible) — appends list to inbox for review.
+**Notes**: lists facts whose `valid_until` has passed but are still in the collection. Doesn't delete (that's irreversible) - appends list to inbox for review.
 
-### `pii-audit` — count PII-bearing facts
+### `pii-audit` - count PII-bearing facts
 
 **When**: `0 4 * * 0` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.memory_review.run_pii_audit` (new)
@@ -123,12 +123,12 @@ Each entry below has the same shape:
 
 ## 3. Ingest & library
 
-### `nightly-knowledge-ingest` — already seeded
+### `nightly-knowledge-ingest` - already seeded
 
 **When**: `0 2 * * *` · **Mode**: built-in · **Executor**: `zeus.kronos.jobs.ingest.run_nightly_ingest`
 **Build status**: ✅ wires through `IngestPipeline.run_all_sources`; activate by enabling the seed job.
 
-### `obsidian-livesync-watcher` — re-ingest changed notes
+### `obsidian-livesync-watcher` - re-ingest changed notes
 
 **When**: `*/30 * * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.ingest.run_obsidian_recent` (new)
@@ -136,7 +136,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in (or run as `zeus_ingest_trigger(source="obsidian")` via the existing endpoint)
 **Notes**: cheaper than the nightly bulk run for a constantly-edited vault. Requires `OBSIDIAN_VAULT_PATH`.
 
-### `bookmark-fetch-and-ingest` — fetch new bookmarked URLs
+### `bookmark-fetch-and-ingest` - fetch new bookmarked URLs
 
 **When**: `0 3 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.bookmarks.run_fetch_recent` (new)
@@ -144,7 +144,7 @@ Each entry below has the same shape:
 **Build status**: 🔴 needs `zeus_web_fetch(url)` tool + 🟡 new built-in
 **Notes**: bookmarks source currently reads URL + title only. Adding fetched-page-text to the knowledge layer makes RAG over bookmarks actually useful.
 
-### `git-commit-ingest` — capture recent commits
+### `git-commit-ingest` - capture recent commits
 
 **When**: `0 */6 * * *` · **Mode**: agent
 **Agent**: `iris` · **Endpoint**: `/iris/ingest` (already declared in `iris.yaml`, needs a real route)
@@ -152,7 +152,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 needs `/iris/ingest` actually wired in `zeus/orchestration/bus.py` or a built-in wrapper that calls the existing CLI path
 **Notes**: keeps the knowledge layer current with the codebase narrative.
 
-### `newsletter-imap-poll` — only digest when new mail arrives
+### `newsletter-imap-poll` - only digest when new mail arrives
 
 **When**: `0 */2 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.newsletter.run_poll_then_digest` (new)
@@ -164,12 +164,12 @@ Each entry below has the same shape:
 
 ## 4. Health & observability
 
-### `hourly-service-health` — already seeded
+### `hourly-service-health` - already seeded
 
 **When**: `0 * * * *` · **Mode**: built-in · **Executor**: `zeus.kronos.jobs.health_check.run_service_health`
 **Build status**: ✅ live; extend `params.targets` to add voicebox + whisper.
 
-### `disk-space-monitor` — warn before disk fills
+### `disk-space-monitor` - warn before disk fills
 
 **When**: `0 */4 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.disk_check.run_disk_audit` (new)
@@ -177,7 +177,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in (~30 LOC)
 **Notes**: cap at /, /home, and `zeus/data` usage. Threshold from params.
 
-### `qdrant-collection-stats` — track growth
+### `qdrant-collection-stats` - track growth
 
 **When**: `0 5 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.health_check.run_qdrant_stats` (new)
@@ -185,7 +185,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in
 **Notes**: writes daily {memories_count, knowledge_count, vectors_count} to `kronos_execution_log` namespace; growth curve queryable via `zeus_memory_search`.
 
-### `kronos-overdue-alarm` — meta-watchdog
+### `kronos-overdue-alarm` - meta-watchdog
 
 **When**: `*/30 * * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.health_check.run_kronos_overdue` (new)
@@ -193,7 +193,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in (tiny)
 **Notes**: Kronos watching itself. Cheap insurance.
 
-### `small-llm-cost-summary` — daily spend tally
+### `small-llm-cost-summary` - daily spend tally
 
 **When**: `0 23 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.small_llm.run_cost_summary` (new)
@@ -201,7 +201,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in + 🔴 optional `zeus_small_llm_usage(period)` MCP tool for chat queries
 **Notes**: surfaces overrun risk before the next-day cap kicks in. Trivial since the DB schema is already there.
 
-### `model-benchmark-refresh` — keep tok/s data current
+### `model-benchmark-refresh` - keep tok/s data current
 
 **When**: `0 4 * * 0` · **Mode**: shell (one-shot CLI)
 **Executor**: `shell:python -m zeus.bench`
@@ -212,7 +212,7 @@ Each entry below has the same shape:
 
 ## 5. Calendar & meetings
 
-### `daily-calendar-brief` — morning calendar push
+### `daily-calendar-brief` - morning calendar push
 
 **When**: `30 7 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.calendar.run_daily_brief` (new)
@@ -220,15 +220,15 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in (small)
 **Notes**: trivial wrapper; explicit so it's queryable from the dashboard.
 
-### `meeting-prep-15` — 15min-before-meeting context pull
+### `meeting-prep-15` - 15min-before-meeting context pull
 
 **When**: dynamic, scheduled by another job · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.calendar.run_meeting_prep` (new)
 **Tools used**: `zeus_query` to RAG against the meeting title + attendees
 **Build status**: 🔴 needs `zeus_calendar_next_meeting(within_minutes)` tool + 🟡 new built-in + a parent job that scans gcal hourly and `kronos_create_job`s a one-off `run_at` for 15min before each meeting
-**Notes**: most ambitious entry on this list — chains four pieces. Probably best deferred until other jobs are stable.
+**Notes**: most ambitious entry on this list - chains four pieces. Probably best deferred until other jobs are stable.
 
-### `weekly-calendar-review` — Sunday evening look-ahead
+### `weekly-calendar-review` - Sunday evening look-ahead
 
 **When**: `0 19 * * 0` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.calendar.run_weekly_review` (new)
@@ -239,15 +239,15 @@ Each entry below has the same shape:
 
 ## 6. Notifications & inbox flow
 
-### `telegram-good-morning` — push briefing to phone
+### `telegram-good-morning` - push briefing to phone
 
 **When**: `5 7 * * *` (just after morning briefing) · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.notify.send_telegram` (new)
 **Tools used**: 🔴 new `zeus_telegram_send(text, chat_id?)` tool
 **Build status**: 🔴 needs the tool first (Telegram bot exists, just no MCP/chat tool wraps it)
-**Notes**: piggybacks on existing `zeus/integrations/telegram/bot.py` — add a thin send wrapper, register as both chat-path tool and MCP tool, then job fires it with the morning brief text.
+**Notes**: piggybacks on existing `zeus/integrations/telegram/bot.py` - add a thin send wrapper, register as both chat-path tool and MCP tool, then job fires it with the morning brief text.
 
-### `inbox-watcher` — turn "remind me" notes into one-off jobs
+### `inbox-watcher` - turn "remind me" notes into one-off jobs
 
 **When**: `*/15 * * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.inbox.run_remind_parser` (new)
@@ -255,7 +255,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in (medium)
 **Notes**: lets you write "remind me 2026-04-30 14:00 buy birthday cake" into your inbox and have Kronos auto-schedule it. Mark processed lines with a checkmark to avoid re-firing.
 
-### `birthday-watcher` — surface upcoming birthdays from contacts
+### `birthday-watcher` - surface upcoming birthdays from contacts
 
 **When**: `0 6 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.notify.run_birthday_check` (new)
@@ -267,7 +267,7 @@ Each entry below has the same shape:
 
 ## 7. Web / external watchers
 
-### `hn-top-fetch` — daily Hacker News top stories
+### `hn-top-fetch` - daily Hacker News top stories
 
 **When**: `0 8 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.watchers.run_hn_top` (new)
@@ -275,22 +275,22 @@ Each entry below has the same shape:
 **Build status**: 🔴 needs web fetch tool + 🟡 new built-in
 **Notes**: hits the HN Algolia API, fetches top 30 story titles + scores. No need for full-text initially.
 
-### `arxiv-keyword-watch` — academic feed
+### `arxiv-keyword-watch` - academic feed
 
 **When**: `0 9 * * 1` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.watchers.run_arxiv` (new)
 **Tools used**: arxiv API (httpx), `KnowledgeStore.add_chunks`
-**Build status**: 🟡 new built-in (no new tool — direct httpx)
+**Build status**: 🟡 new built-in (no new tool - direct httpx)
 **Notes**: keywords from `params.keywords`; one source of fresh research material.
 
-### `cloudflare-uptime-check` — public-site availability
+### `cloudflare-uptime-check` - public-site availability
 
 **When**: `*/10 * * * *` · **Mode**: built-in
-**Executor**: `zeus.kronos.jobs.health_check.run_uptime_check` (new) — or extend `run_service_health` with external URLs
+**Executor**: `zeus.kronos.jobs.health_check.run_uptime_check` (new) - or extend `run_service_health` with external URLs
 **Build status**: ✅ trivially handled by extending `run_service_health` params with `{ "zeus.chrislawrence.ca": "https://zeus.chrislawrence.ca/health" }`
 **Notes**: don't even need a new built-in if the existing health check is parameterised correctly.
 
-### `github-starred-fetch` — weekly recap of new starred repos
+### `github-starred-fetch` - weekly recap of new starred repos
 
 **When**: `0 10 * * 0` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.watchers.run_github_starred` (new)
@@ -301,7 +301,7 @@ Each entry below has the same shape:
 
 ## 8. Code & dev workflows
 
-### `daily-commit-narrative` — yesterday's commits as a paragraph
+### `daily-commit-narrative` - yesterday's commits as a paragraph
 
 **When**: `0 9 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.code.run_commit_narrative` (new)
@@ -309,7 +309,7 @@ Each entry below has the same shape:
 **Build status**: 🔴 needs git tool + 🟡 new built-in
 **Notes**: writes "yesterday I committed X across Y repos: {narrative}" to inbox. Good for offloading tracking from your head.
 
-### `outdated-deps-scan` — weekly Python dep check
+### `outdated-deps-scan` - weekly Python dep check
 
 **When**: `0 11 * * 1` · **Mode**: shell
 **Executor**: `shell:pip list --outdated --format=json`
@@ -317,18 +317,18 @@ Each entry below has the same shape:
 **Build status**: ✅ shell mode ships; allowlist `^pip list `
 **Notes**: writes the JSON to a file; companion built-in could parse it and alert on major bumps.
 
-### `todo-fixme-scan` — weekly repo audit
+### `todo-fixme-scan` - weekly repo audit
 
 **When**: `0 12 * * 1` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.code.run_todo_scan` (new)
 **Tools used**: `olympian_file_search` (already has ripgrep)
-**Build status**: 🟡 new built-in (small) — search for `TODO|FIXME|XXX`, count by file, tally.
+**Build status**: 🟡 new built-in (small) - search for `TODO|FIXME|XXX`, count by file, tally.
 
 ---
 
 ## 9. AI / LLM ops
 
-### `provider-chain-probe` — verify small_llm fallback works
+### `provider-chain-probe` - verify small_llm fallback works
 
 **When**: `0 6 * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.small_llm.run_chain_probe` (new)
@@ -336,7 +336,7 @@ Each entry below has the same shape:
 **Build status**: 🟡 new built-in
 **Notes**: catches "OpenRouter changed their auth" before it hits a real digest. Result → inbox if any provider fails.
 
-### `ollama-warm-up` — keep model resident in VRAM
+### `ollama-warm-up` - keep model resident in VRAM
 
 **When**: `*/15 * * * *` · **Mode**: built-in
 **Executor**: `zeus.kronos.jobs.small_llm.run_ollama_warmup` (new)
@@ -348,7 +348,7 @@ Each entry below has the same shape:
 
 ## 10. Voice & Phaos
 
-### `voice-pipeline-health` — TTS + STT probes
+### `voice-pipeline-health` - TTS + STT probes
 
 **When**: `*/15 * * * *` · **Mode**: built-in
 **Executor**: extend `run_service_health` with `{ "voicebox": "${VOICEBOX_URL}/health", "whisper": "http://localhost:9090/health" }`
@@ -358,7 +358,7 @@ Each entry below has the same shape:
 
 ## New tools to build (consolidated)
 
-If you only build a few, build these — they unlock the most jobs:
+If you only build a few, build these - they unlock the most jobs:
 
 | Tool | Surface | Effort | Unlocks |
 |------|---------|--------|---------|
@@ -424,19 +424,19 @@ zeus/kronos/jobs/
 
 ## Recommended build order (highest leverage first)
 
-1. **`zeus_telegram_send`** + **`send_telegram`** — every notification job depends on this; one MCP tool unlocks five jobs.
-2. **`zeus_web_fetch`** + **`bookmarks.run_fetch_recent`** + **`watchers.run_hn_top`** — three useful jobs, one tool.
-3. **`zeus_calendar_range`** + **`calendar.run_daily_brief`** + **`calendar.run_weekly_review`** — calendar surface stays useful for chat too.
-4. **`small_llm.run_cost_summary`** + **`small_llm.run_chain_probe`** — operational hygiene; 0 new tools.
-5. **`disk_check.run_disk_audit`** + **`health_check.run_kronos_overdue`** — cheap insurance; 0 new tools.
-6. **`briefing.run_morning_briefing`** — payoff job; needs items 1 + 3 first.
-7. **`memory_review.run_drift_check`** — once the trivial weekly review proves itself.
+1. **`zeus_telegram_send`** + **`send_telegram`** - every notification job depends on this; one MCP tool unlocks five jobs.
+2. **`zeus_web_fetch`** + **`bookmarks.run_fetch_recent`** + **`watchers.run_hn_top`** - three useful jobs, one tool.
+3. **`zeus_calendar_range`** + **`calendar.run_daily_brief`** + **`calendar.run_weekly_review`** - calendar surface stays useful for chat too.
+4. **`small_llm.run_cost_summary`** + **`small_llm.run_chain_probe`** - operational hygiene; 0 new tools.
+5. **`disk_check.run_disk_audit`** + **`health_check.run_kronos_overdue`** - cheap insurance; 0 new tools.
+6. **`briefing.run_morning_briefing`** - payoff job; needs items 1 + 3 first.
+7. **`memory_review.run_drift_check`** - once the trivial weekly review proves itself.
 
 After (1)–(7), most of the other entries become 30–50 LOC each.
 
 ## Things to avoid
 
-- **Don't schedule jobs that themselves call `_run_llm` (chat path).** Use `small_llm_call(min_privacy_tier=1)` instead — keeps the chat LLM free for the user during cron-driven work. The newsletter swap (Phase 2) is the precedent.
+- **Don't schedule jobs that themselves call `_run_llm` (chat path).** Use `small_llm_call(min_privacy_tier=1)` instead - keeps the chat LLM free for the user during cron-driven work. The newsletter swap (Phase 2) is the precedent.
 - **Don't widen `ZEUS_KRONOS_SHELL_ALLOWLIST` casually.** Each entry is a regex; a typo silently rejects everything (or, worse, allows more than you intended). Test with a manual `POST /kronos/jobs/{id}/run` before letting any new pattern on the schedule.
 - **Don't write to memory from a job without going through Aegis.** All built-ins already pass through the executor's pre/post hooks, but if you reach for `MemoryStore` directly from a job, you bypass the post-hook. Use `zeus_remember` (HTTP) which goes through the chat-path safety stack.
 - **Don't fan out a single cron tick to many subprocesses.** `ZEUS_KRONOS_MAX_CONCURRENT` defaults to 3; if a job kicks off five sub-jobs via `kronos_create_job`, you'll queue them across ticks. Acceptable, just don't be surprised by the cadence.
