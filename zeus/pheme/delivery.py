@@ -182,13 +182,13 @@ def format_digest_html(digest: PhemeDigest, *, breaking: bool = False) -> str:
             lines.append(f"•  {_esc(c.claim)} ({c.confidence:.0%})")
 
     lines += ["", "📰 <b>Top stories</b>"]
-    from zeus.pheme.pipeline import _one_line_take
+    from zeus.pheme.pipeline import _coverage_label, _one_line_take
 
     for i, cluster in enumerate(digest.clusters, 1):
         marker = "📈 developing" if cluster.thread_status == "development" else "🆕 new"
-        n = len(cluster.item_ids)
-        count = f"{n} articles" if n > 1 else "1 article"
-        lines.append(f"{i}. <b>{_esc(cluster.name)}</b>  ·  {count}  ·  {marker}")
+        lines.append(
+            f"{i}. <b>{_esc(cluster.name)}</b>  ·  {_esc(_coverage_label(cluster))}  ·  {marker}"
+        )
         take = _one_line_take(cluster)
         if take:
             lines.append(f"     {_esc(take)}.")

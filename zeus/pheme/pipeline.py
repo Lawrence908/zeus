@@ -189,41 +189,54 @@ Return JSON only. Rules:
 
 
 async def _stage_extract(items: list[_Item], store: NewsStore, cache: StageCache) -> None:
+    from zeus.pheme.tickers import resolve_tickers
+
     cached: dict[str, Any] = cache.get("stage1_extract") or {}
     for item in items:
-        if item.entities and item.claim:
-            continue
-        if item.key in cached:
-            data = cached[item.key]
-        else:
-            try:
-                parsed = await pheme_llm_call(
-                    system=_EXTRACT_SYSTEM,
-                    user=f"Title: {item.title}\n\nText: {item.text[:2000]}",
-                    response_format=ItemExtraction,
-                    max_tokens=350,
-                    caller="pheme.extract",
-                )
-            except PhemeLLMFailed as exc:
-                logger.warning("extract failed for %s: %s", item.key, exc)
-                continue
-            data = parsed.model_dump()
-            cached[item.key] = data
-            cache.put("stage1_extract", cached)
-        merged_entities = sorted(
-            _norm_entities(_clean_extracted_entities(item.entities))
-            | _norm_entities(_clean_extracted_entities(data.get("entities") or []))
-        )
-        item.entities = merged_entities or item.entities
-        item.topics = item.topics or [str(t) for t in data.get("topics") or []]
-        item.claim = item.claim or str(data.get("claim", ""))
-        store.set_analysis(
-            item.source,
-            item.source_id,
-            entities=item.entities,
-            topics=item.topics,
-            extra={"claim": item.claim},
-        )
+        changed = False
+        if not (item.entities and item.claim):
+            if item.key in cached:
+                data = cached[item.key]
+            else:
+                try:
+                    parsed = await pheme_llm_call(
+                        system=_EXTRACT_SYSTEM,
+                        user=f"Title: {item.title}\n\nText: {item.text[:2000]}",
+                        response_format=ItemExtraction,
+                        max_tokens=350,
+                        caller="pheme.extract",
+                    )
+                except PhemeLLMFailed as exc:
+                    logger.warning("extract failed for %s: %s", item.key, exc)
+                    continue
+                data = parsed.model_dump()
+                cached[item.key] = data
+                cache.put("stage1_extract", cached)
+            merged_entities = sorted(
+                _norm_entities(_clean_extracted_entities(item.entities))
+                | _norm_entities(_clean_extracted_entities(data.get("entities") or []))
+            )
+            item.entities = merged_entities or item.entities
+            item.topics = item.topics or [str(t) for t in data.get("topics") or []]
+            item.claim = item.claim or str(data.get("claim", ""))
+            changed = True
+
+        # Deterministic ticker <-> company-name enrichment for every item
+        # (including ones that skipped extraction): this is what lets stage 4
+        # key a CapitolScope trade against name-only prose.
+        extras = resolve_tickers(item.entities, f"{item.title}. {item.claim} {item.text[:800]}")
+        if extras:
+            item.entities = sorted(set(item.entities) | set(extras))
+            changed = True
+
+        if changed:
+            store.set_analysis(
+                item.source,
+                item.source_id,
+                entities=item.entities,
+                topics=item.topics,
+                extra={"claim": item.claim},
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +265,51 @@ class _UnionFind:
             self.parent[rb] = ra
 
 
+def _url_domain(url: str) -> str:
+    try:
+        return url.split("//", 1)[-1].split("/", 1)[0].removeprefix("www.").casefold()
+    except Exception:
+        return ""
+
+
+def _syndication_sim() -> float:
+    # Near-copy threshold: syndicated wire copies measure 0.93+ on this corpus.
+    try:
+        return float(os.getenv("PHEME_SYNDICATION_SIM", "0.95"))
+    except ValueError:
+        return 0.95
+
+
+def _dedupe_syndicated(
+    items: list["_Item"],
+    neighbor_map: dict[str, list[tuple[str, float]]],
+    threshold: float,
+) -> dict[str, list["_Item"]]:
+    """Group near-identical copies (same wire story, many outlets).
+
+    Returns canonical_key -> all copies (canonical first). Canonical is the
+    copy with a clean title, then the longest text - the best face for the
+    story; the rest only contribute outlet count and URLs.
+    """
+    uf = _UnionFind([i.key for i in items])
+    for key, neighbours in neighbor_map.items():
+        for other_key, score in neighbours:
+            if score >= threshold:
+                uf.union(key, other_key)
+    groups: dict[str, list[_Item]] = {}
+    for item in items:
+        groups.setdefault(uf.find(item.key), []).append(item)
+
+    out: dict[str, list[_Item]] = {}
+    for members in groups.values():
+        members.sort(
+            key=lambda m: (not _is_junk_text(m.title), len(m.text), m.published_at),
+            reverse=True,
+        )
+        out[members[0].key] = members
+    return out
+
+
 async def _stage_cluster(
     items: list[_Item], store: NewsStore, cache: StageCache, fp: str
 ) -> list[ClusterSummary]:
@@ -259,17 +317,49 @@ async def _stage_cluster(
     if cached:
         return [ClusterSummary(**c) for c in cached]
 
-    uf = _UnionFind([i.key for i in items])
-    by_key = {i.key: i for i in items}
     by_point = {i.point_id: i for i in items}
 
+    # One qdrant recommend-by-id pass per item feeds both edge sets below.
+    # k=12: syndicated near-copies (0.93+) crowd a small window and hide
+    # same-story cross-outlet neighbours at 0.80-0.90 (the Berlin split).
+    neighbor_map: dict[str, list[tuple[str, float]]] = {}
+    for item in items:
+        hits = await asyncio.to_thread(store.similar, item.point_id, 12)
+        neighbor_map[item.key] = [
+            (by_point[pid].key, score) for pid, score in hits if pid in by_point
+        ]
+
+    # Collapse syndicated near-copies first so cluster size measures genuine
+    # distinct coverage, not how many regional outlets ran the same wire text.
+    dupe_groups = _dedupe_syndicated(items, neighbor_map, _syndication_sim())
+    canonical_items = [group[0] for group in dupe_groups.values()]
+    canonical_of = {m.key: group[0].key for group in dupe_groups.values() for m in group}
+    if len(canonical_items) < len(items):
+        logger.info(
+            "syndication dedup: %d items -> %d distinct stories",
+            len(items), len(canonical_items),
+        )
+
+    uf = _UnionFind([i.key for i in canonical_items])
+
     # Entity-overlap edges (the Ground News move: one story, multiple sources).
-    for idx, a in enumerate(items):
-        ea = _norm_entities(a.entities)
+    # Company name + its ticker collapse to one identity here, otherwise the
+    # ticker enrichment makes every single-company match count as two shared
+    # entities and glues loosely related market stories together.
+    from zeus.pheme.tickers import NAME_TO_TICKER
+
+    def _edge_entities(entities: list[str]) -> set[str]:
+        return {
+            NAME_TO_TICKER.get(e, e.upper() if e.upper() in NAME_TO_TICKER.values() else e).casefold()
+            for e in _norm_entities(entities)
+        }
+
+    for idx, a in enumerate(canonical_items):
+        ea = _edge_entities(a.entities)
         if not ea:
             continue
-        for b in items[idx + 1 :]:
-            eb = _norm_entities(b.entities)
+        for b in canonical_items[idx + 1 :]:
+            eb = _edge_entities(b.entities)
             shared = ea & eb
             if not shared:
                 continue
@@ -277,19 +367,17 @@ async def _stage_cluster(
             if len(shared) >= 2 or jaccard >= 0.34:
                 uf.union(a.key, b.key)
 
-    # Embedding-neighbour edges via qdrant recommend-by-id (no re-embedding).
-    # k=12: syndicated near-copies (0.93+) crowd a small window and hide
-    # same-story cross-outlet neighbours at 0.80-0.90 (the Berlin split).
+    # Embedding-neighbour edges, endpoints mapped onto canonicals.
     sim_threshold = _cluster_sim_threshold()
     for item in items:
-        for neighbour_id, score in await asyncio.to_thread(store.similar, item.point_id, 12):
-            other = by_point.get(neighbour_id)
-            if other is not None and score >= sim_threshold:
-                uf.union(item.key, other.key)
+        a = canonical_of[item.key]
+        for other_key, score in neighbor_map[item.key]:
+            if score >= sim_threshold:
+                uf.union(a, canonical_of[other_key])
 
     def _build_groups() -> dict[str, list[_Item]]:
         out: dict[str, list[_Item]] = {}
-        for item in items:
+        for item in canonical_items:
             out.setdefault(uf.find(item.key), []).append(item)
         return out
 
@@ -312,8 +400,14 @@ async def _stage_cluster(
             if len(token_sets[ra] & token_sets[rb]) < 2:
                 continue
             small, large = sorted((ra, rb), key=lambda r: len(groups[r]))
-            large_points = {m.point_id for m in groups[large]}
-            rep = groups[small][0]  # newest member (sorted below is later; order here is scroll order)
+            # Bridge targets include syndicated copies of the large cluster's
+            # members, not just canonicals - a wire copy is a valid bridge.
+            large_points = {
+                dupe.point_id
+                for m in groups[large]
+                for dupe in dupe_groups.get(m.key, [m])
+            }
+            rep = groups[small][0]
             bridged = any(
                 pid in large_points and score >= merge_sim
                 for pid, score in await asyncio.to_thread(store.similar, rep.point_id, 25)
@@ -329,6 +423,10 @@ async def _stage_cluster(
     clusters: list[ClusterSummary] = []
     for root, members in groups.items():
         members.sort(key=lambda i: i.published_at, reverse=True)
+        # All copies (canonical + syndicated) for provenance, outlets, and
+        # significance write-backs; `members` stays the distinct-story view.
+        all_members = [d for m in members for d in dupe_groups.get(m.key, [m])]
+        outlets = sorted({_url_domain(m.url) for m in all_members if m.url} - {""})
         entities = sorted({e for m in members for e in _norm_entities(m.entities)})
         topics = sorted({t for m in members for t in m.topics})
         # Representative text must never be filename residue: prefer the newest
@@ -359,17 +457,26 @@ async def _stage_cluster(
                     name = named.name.strip()
             except PhemeLLMFailed:
                 pass
+        seen_domains: set[str] = set()
+        urls: list[str] = []
+        for m in all_members:
+            domain = _url_domain(m.url)
+            if m.url and domain not in seen_domains:
+                seen_domains.add(domain)
+                urls.append(m.url)
         clusters.append(
             ClusterSummary(
                 key=root,
                 name=name,
-                item_ids=[m.key for m in members],
+                item_ids=[m.key for m in all_members],
                 titles=[m.title for m in members],
-                sources=sorted({m.source for m in members}),
-                urls=[m.url for m in members if m.url],
+                sources=sorted({m.source for m in all_members}),
+                urls=urls,
                 entities=entities[:12],
                 topics=topics[:8],
                 claim=claim,
+                unique_count=len(members),
+                outlet_count=len(outlets),
             )
         )
     clusters.sort(key=lambda c: len(c.item_ids), reverse=True)
@@ -562,11 +669,15 @@ async def _score_relevance(
 
 def _cluster_heuristic(cluster: ClusterSummary, correlated_keys: set[str]) -> float:
     heuristic = 0.0
-    # Log-scaled size term so an 18-item story outranks a 4-item one
-    # instead of both saturating a hard cap.
-    n = len(cluster.item_ids)
+    # Distinct-story size term (post-dedup): breadth of genuine coverage,
+    # not how many regional outlets ran the same wire copy.
+    n = cluster.unique_count or len(cluster.item_ids)
     if n > 1:
         heuristic += min(0.35, 0.08 * math.log2(n) + 0.06)
+    # Outlet breadth is still real signal (14 outlets picked it up), just a
+    # weaker one than distinct coverage.
+    if cluster.outlet_count > 1:
+        heuristic += min(0.15, 0.04 * math.log2(cluster.outlet_count))
     if len(cluster.sources) > 1:
         heuristic += 0.2                                                   # cross-source story
     if cluster.thread_status == "development":
@@ -721,6 +832,15 @@ async def _synthesize_insights(
     return out
 
 
+def _coverage_label(cluster: ClusterSummary) -> str:
+    """Human coverage line: distinct stories + outlet breadth when they differ."""
+    n = cluster.unique_count or len(cluster.item_ids)
+    label = f"{n} stories" if n > 1 else "1 story"
+    if cluster.outlet_count > n:
+        label += f" · {cluster.outlet_count} outlets"
+    return label
+
+
 def _one_line_take(cluster: ClusterSummary) -> str:
     take = cluster.thread_note or cluster.claim
     take = take.strip().rstrip(".")
@@ -749,9 +869,7 @@ def _compose_body(
     lines.append("Top stories:")
     for i, cluster in enumerate(top, 1):
         marker = "developing" if cluster.thread_status == "development" else "new"
-        n = len(cluster.item_ids)
-        count = f"{n} articles" if n > 1 else "1 article"
-        lines.append(f"{i}. {cluster.name} ({count}, {marker})")
+        lines.append(f"{i}. {cluster.name} ({_coverage_label(cluster)}, {marker})")
         take = _one_line_take(cluster)
         if take:
             lines.append(f"   {take}.")

@@ -78,6 +78,8 @@ class ClusterSummary(BaseModel):
     thread_status: str = "new"
     thread_note: str = ""
     significance: float = 0.0
+    unique_count: int = 0      # distinct stories after syndication dedup
+    outlet_count: int = 0      # distinct outlet domains across all copies
 
 
 class PhemeDigest(BaseModel):
