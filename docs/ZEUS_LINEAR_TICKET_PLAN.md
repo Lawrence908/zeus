@@ -178,7 +178,7 @@ IMAP fetch → LLM summarization → optional TTS audio → web UI. Uses `Ingest
   - Voicebox REST TTS client (streaming sentences): `zeus/voice/tts.py`
   - Orpheus orchestrator loop + Phaos emitter: `zeus/voice/pipeline.py`
   - Non-wake-word test endpoint (WAV upload): `zeus/core/chat.py` (`POST /voice/interact`)
-- **Gap (future):** `llm_stream()` in `zeus/voice/pipeline.py` always streams from Ollama, while text chat can use Claude in dev via `zeus/core/query.py` (`_chat_use_claude()`). Closing the gap means Anthropic streaming + the same env switches (`ZEUS_ENV`, `ZEUS_LLM`, `ANTHROPIC_API_KEY`). Tracked in Backlog as **Orpheus voice LLM env parity**.
+- **Resolved:** `OrpheusPipeline` no longer calls Ollama directly. `llm_stream()` now streams from Core `/chat/stream` with `voice=True` and a persisted `session_id`, so the voice path inherits provider selection (`_chat_use_claude()`), retrieval, the tool loop, Aegis, and session continuity. The terse `voice_system` prompt is preserved via `_build_voice_system_prompt()`. Closes the Backlog item **Orpheus voice LLM env parity** (tool-use productionization Phase 4).
 
 | Parent | Title                           | Labels           | Subs |
 | ------ | ------------------------------- | ---------------- | ---- |
@@ -590,7 +590,7 @@ Lets `QueryEngine.query()` itself call concrete tools (web_search, current_time)
 3. Per-query tool-call cap `ZEUS_TOOLS_MAX_CALLS_PER_QUERY=5` doubles as iteration cap.
 4. Every tool argument dict + every tool result text passes through Aegis via the new `tool_arguments` policy; `evaluate_payload()` is reused as-is from LAB-343.
 5. Tool-result cache is opt-in per `ToolSpec.cacheable` (`web_search` yes, `current_time` no); TTL-LRU at `ZEUS_TOOL_CACHE_TTL_SECONDS` (default 300, `0` disables) and `ZEUS_TOOL_CACHE_MAX_ENTRIES` (default 256); errors never cached.
-6. Streaming + tools deferred: `query_stream()` is untouched in this round.
+6. Streaming + tools: `query_stream()` now runs the tool loop to completion and yields the assembled reply as one chunk (tool-free replies still stream token-by-token). Per-provider token-delta streaming of the model's final turn *after* tools remains deferred. Voice reaches the same loop via `voice=True`.
 
 **New endpoints:**
 - `POST /chat/async` — fire-and-forget, returns `{job_id, status, session_id, created_at}` immediately; optional `callback_url` POSTed with the final `ChatMessageResponse`; ring buffer maxlen 100. Built for Meshtastic LoRa bridge.

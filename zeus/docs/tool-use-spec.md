@@ -14,6 +14,9 @@ export ZEUS_TOOLS_ENABLED=1
 export BRAVE_API_KEY=<your-brave-search-key>
 # optional: lower or raise the per-query cap (default 5)
 export ZEUS_TOOLS_MAX_CALLS_PER_QUERY=5
+# optional: restrict which tools the model may use (unset = all registered).
+# Use a read-only set in prod while dev runs the full pack.
+export ZEUS_TOOLS_ALLOWLIST=current_time,web_search,zeus_calendar_today,zeus_news_search
 docker compose up zeus-core
 ```
 
@@ -135,6 +138,7 @@ The chat-path tool loop lets web_search queries run for 10–30 seconds. Synchro
 |-----|---------|---------|
 | `ZEUS_TOOLS_ENABLED` | `0` | Opt-in feature flag for the chat-path tool loop. |
 | `ZEUS_TOOLS_MAX_CALLS_PER_QUERY` | `5` | Cap on total tool calls emitted per single `/chat/message` request. |
+| `ZEUS_TOOLS_ALLOWLIST` | unset (all) | Comma-separated tool names the model may see and call this turn. Unset = every registered tool. Per-env rollout control: prod runs a read-only subset while dev runs the full pack. Resolved by `allowed_tool_specs()` and used both to build the system-prompt tool list and to hand tools to the loop, so the model is never told about a tool it can't call. Write tools stay additionally gated by `ZEUS_MCP_ALLOW_WRITE` / `ZEUS_ACTIONS_ENABLED`. |
 | `BRAVE_API_KEY` | unset | Required to register the `web_search` tool. Without it, the registry is empty even when the flag is on. |
 
 ## Olympian tool pack (LAB-328)
@@ -167,15 +171,28 @@ Server-side gates compose:
 
 Aegis policy `file_access.yaml` is new and rejects path traversal, shell metacharacters, and I/O redirection to sensitive paths in tool payloads. It flags (does not reject) credential-shaped strings in inbox captures so personal notes are not blocked by false positives.
 
+## Observability
+
+Every tool invocation (success, error, cache hit, Aegis reject) is recorded into an in-process ring buffer (`zeus/core/tools/recorder.py`) and exposed two ways:
+
+- `GET /admin/tools/invocations`: the raw recent feed (newest first) for the Tools UIs.
+- `GET /admin/metrics` `tools` block, via `recorder.metrics_summary()`, rolls the buffer into overall `total` / `error_rate` / `cache_hit_rate` / `aegis_reject_count` / `latency_ms_p50/p95` plus a per-tool breakdown (busiest first). Optional `window_seconds` restricts to recent calls. MCP-server invocations happen out-of-process and are not recorded here.
+
+`GET /admin/tools` also reports `chat.allowlist` / `chat.allowed_count` and a per-tool `allowed` flag so the UI can grey out registered-but-blocked tools.
+
+## Voice parity
+
+`QueryEngine.query()` and `query_stream()` accept a `voice` flag. When set, the reply uses `_build_voice_system_prompt()` (the terse, no-markdown `voice_system.md` tone) while retrieval, the tool loop, Aegis, and sessions run identically. The four retrieval blocks fold into one `CONTEXT`; the tool list is appended only when tools are enabled. The host-native Orpheus pipeline streams from `/chat/stream` with `voice=True` and a persisted `session_id`, so spoken turns share history with text chat and inherit tools + Aegis for free (no separate LLM path).
+
 ## Deferred (not in scope)
 
-- **Streaming + tools (`query_stream`).** Anthropic's `input_json_delta` accumulation and Ollama's NDJSON tool-call chunks both need per-provider handling; React SSE UI works fine on tool-free chat today, so this is deferred until a concrete UX demands it.
+- **Token-delta streaming during tool use.** `query_stream` runs the tool loop to completion (it needs multiple round trips) and yields the assembled reply as a single chunk; tool-free replies still stream token-by-token. Per-provider streaming of the model's final turn *after* tools (Anthropic `input_json_delta`, Ollama NDJSON) is deferred until a concrete UX demands it.
 - **Meshtastic bridge switching to `/chat/async`.** Node-RED flow change, not a chat-engine change. The endpoint is ready; the bridge migration is a separate ticket.
 
 ## Invariants (do not regress)
 
 1. With `ZEUS_TOOLS_ENABLED=0`, `QueryEngine.query()` makes exactly one `_run_llm()` call plus any reflection retries - identical to pre-tool-use.
-2. With the flag on and no registered tools, the code path routes around `run_tool_loop` and behaves as if the flag were off.
+2. With the flag on but no tools available after the allowlist filter (none registered, or `ZEUS_TOOLS_ALLOWLIST` excludes them all), the code path routes around `run_tool_loop` and behaves as if the flag were off.
 3. Every tool invocation passes through Aegis on both args and result text when `ZEUS_AEGIS_ENABLED=1`.
 4. Reflection never runs when any tool fired during the query.
 5. `QueryResult.tool_calls` is empty unless the tool loop was taken and at least one call fired.
