@@ -177,8 +177,33 @@ class TelegramBot:
             await query.answer()
             return
 
-        parts = query.data.split(":", 2)
+        parts = query.data.split(":")
         action = parts[1] if len(parts) > 1 else ""
+
+        if action == "fb":
+            # pheme:fb:<digest_id>:<story_idx>:<up|down> - ranking feedback.
+            # Answered with a toast only; the digest message stays untouched.
+            digest_id = parts[2] if len(parts) > 2 else ""
+            try:
+                idx = int(parts[3])
+            except (IndexError, ValueError):
+                await query.answer()
+                return
+            reaction = 1 if (len(parts) > 4 and parts[4] == "up") else -1
+            import asyncio as _asyncio
+
+            from zeus.pheme.feedback import record_reaction
+
+            story = await _asyncio.to_thread(record_reaction, digest_id, idx, reaction)
+            if story is None:
+                await query.answer("Feedback window for this digest has expired.")
+            else:
+                verb = "More" if reaction > 0 else "Less"
+                await query.answer(
+                    f"{verb} like: {str(story.get('name', ''))[:50]}"
+                )
+            return
+
         digest_id = parts[2] if len(parts) > 2 else ""
         await query.answer()
 

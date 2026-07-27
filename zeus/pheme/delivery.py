@@ -235,18 +235,46 @@ async def send_digest_telegram(digest: PhemeDigest, *, breaking: bool = False) -
         html = format_digest_html(digest, breaking=breaking)
         plain = markdown_to_plaintext(digest.body)
 
-    keyboard = None
     from zeus.integrations.twitter.poster import twitter_enabled
+    from zeus.pheme.feedback import save_digest_context
 
-    if twitter_enabled() and digest.public_lead and not _autopost_enabled():
-        keyboard = InlineKeyboardMarkup(
+    rows: list[list[InlineKeyboardButton]] = []
+    if digest.clusters:
+        # Per-story thumbs: one 👍 row and one 👎 row, numbered to match the
+        # digest's story list. Presses feed the ranking preference store.
+        save_digest_context(
+            digest.id,
             [
-                [
-                    InlineKeyboardButton("✅ Tweet it", callback_data=f"pheme:approve:{digest.id}"),
-                    InlineKeyboardButton("⏭️ Skip", callback_data=f"pheme:skip:{digest.id}"),
-                ]
+                {
+                    "key": c.key,
+                    "name": c.name,
+                    "entities": c.entities,
+                    "topics": c.topics,
+                    "sources": c.sources,
+                }
+                for c in digest.clusters
+            ],
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(f"👍{i + 1}", callback_data=f"pheme:fb:{digest.id}:{i}:up")
+                for i in range(len(digest.clusters))
             ]
         )
+        rows.append(
+            [
+                InlineKeyboardButton(f"👎{i + 1}", callback_data=f"pheme:fb:{digest.id}:{i}:down")
+                for i in range(len(digest.clusters))
+            ]
+        )
+    if twitter_enabled() and digest.public_lead and not _autopost_enabled():
+        rows.append(
+            [
+                InlineKeyboardButton("✅ Tweet it", callback_data=f"pheme:approve:{digest.id}"),
+                InlineKeyboardButton("⏭️ Skip", callback_data=f"pheme:skip:{digest.id}"),
+            ]
+        )
+    keyboard = InlineKeyboardMarkup(rows) if rows else None
 
     bot = Bot(token=token)
 

@@ -520,8 +520,20 @@ async def _score_relevance(
         f"{i + 1}. {c.name} [{', '.join(c.entities[:4])}]: {c.claim[:150]}"
         for i, c in enumerate(clusters)
     )
+    feedback_block = ""
+    try:
+        from zeus.pheme.feedback import recent_reaction_summary
+
+        liked, disliked = recent_reaction_summary()
+        if liked:
+            feedback_block += "\nRecently upvoted stories:\n" + "\n".join(f"- {n}" for n in liked)
+        if disliked:
+            feedback_block += "\nRecently downvoted stories:\n" + "\n".join(f"- {n}" for n in disliked)
+    except Exception as exc:
+        logger.debug("reaction summary unavailable: %s", exc)
     user = (
         "Reader profile:\n" + "\n".join(f"- {f}" for f in facts)
+        + feedback_block
         + f"\n\nStories:\n{listing}"
     )
     for attempt in range(2):
@@ -622,13 +634,30 @@ async def _stage_rank(
                     relevance[candidate_idx[pos]] = s
         cache.put("stage5_rank", {"relevance": relevance}, fingerprint=fp)
 
+    fb_weights: dict[str, float] = {}
+    fb_scale = 0.0
+    try:
+        from zeus.pheme.feedback import cluster_feedback_score, feedback_weight, preference_weights
+
+        fb_weights = preference_weights()
+        fb_scale = feedback_weight()
+        if fb_weights:
+            logger.info("pheme rank using %d feedback preference tokens", len(fb_weights))
+    except Exception as exc:
+        logger.debug("feedback weights unavailable: %s", exc)
+
     for i, cluster in enumerate(clusters):
         heuristic = heuristics[i]
         # 65/35 blend: the local 7B scores conservatively (mostly zeros), so
         # structural evidence keeps the upper hand and relevance nudges.
-        cluster.significance = round(
-            min(1.0, 0.65 * min(1.0, heuristic / 0.9) + 0.35 * relevance[i]), 3
-        )
+        base = 0.65 * min(1.0, heuristic / 0.9) + 0.35 * relevance[i]
+        # Reader feedback term: thumbs on past digests nudge matching
+        # entities/topics up or down (see zeus/pheme/feedback.py).
+        if fb_weights and fb_scale:
+            base += fb_scale * cluster_feedback_score(
+                cluster.entities, cluster.topics, fb_weights
+            )
+        cluster.significance = round(max(0.0, min(1.0, base)), 3)
         for key in cluster.item_ids:
             item = items_by_key.get(key)
             if item is not None:

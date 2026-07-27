@@ -71,6 +71,16 @@ CapitolScope┘   (NewsStore)               └─ Twitter (gated, approval-firs
    `newsletter_type="pheme"` so the `/newsletters` UI and
    `zeus_newsletter_latest` surface it.
 
+**Feedback loop** (`zeus/pheme/feedback.py`): every digest carries per-story
+👍/👎 rows; presses land in `zeus/data/pheme/feedback.db` (one reaction per
+story, re-press overwrites). At rank time the reactions become per-entity and
+per-topic weights with a `PHEME_FEEDBACK_HALFLIFE_DAYS` (30d) exponential
+decay; matching clusters get up to `PHEME_FEEDBACK_WEIGHT` (0.15) added or
+subtracted from significance, and the last few liked/disliked story names are
+fed into the relevance prompt. Reactions resolve via
+`digest_context.json` (last 15 digests); older digests answer "feedback window
+expired".
+
 Telegram delivery renders the digest as Telegram HTML (`format_digest_html`):
 bold headers with date, insights and connections sections, per-story meta line
 (`N articles · new/developing`), one titled link per story with a `+N more`
