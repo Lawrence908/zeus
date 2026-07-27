@@ -90,9 +90,9 @@ See the Pheme block in `.env.example`. The non-obvious ones:
   Telegram **Tweet it**; at `1` the pipeline posts directly after Aegis passes.
 - `PHEME_DIGEST_HOUR` - read at Kronos **seed time** only (first boot);
   afterwards the live `pheme-daily-digest` job owns the schedule.
-- `TWITTER_OAUTH2_*` - user-context OAuth2 app credentials with
-  `tweet.write` + `offline.access` scopes. Do a one-time authorization-code
-  flow to obtain the initial access/refresh tokens; the poster rotates them.
+- `TWITTER_OAUTH2_*` - user-context OAuth2 app credentials. Full setup
+  walkthrough (developer app, `.env` keys, one-command token bootstrap via
+  `scripts/twitter_oauth_setup.py`): [`pheme-twitter-setup.md`](pheme-twitter-setup.md).
 
 ## Operations
 

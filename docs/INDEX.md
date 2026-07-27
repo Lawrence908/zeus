@@ -59,6 +59,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [mesh-outbound-spec.md](../zeus/docs/mesh-outbound-spec.md) | product | Outbound direction: `/mesh/notify` choke point, Kairos proactive push, read-only break-glass `!commands`. Gates, quiet hours, dedupe, mesh Aegis policy, audit. |
 | [model-comparison.md](../zeus/docs/model-comparison.md) | product | Measured tok/s, TTFT, VRAM fit per Ollama model on the 3080. |
 | [pheme.md](../zeus/docs/pheme.md) | product | Pheme news subsystem: `zeus_news` store, Canary + CapitolScope ingest, staged local pipeline, Kronos daily digest, breaking observer, Telegram push, gated Twitter. |
+| [pheme-twitter-setup.md](../zeus/docs/pheme-twitter-setup.md) | ops | One-time X/Twitter OAuth2 setup for Pheme: developer-app values, `.env` keys, `scripts/twitter_oauth_setup.py` token bootstrap, verification, troubleshooting. |
 | [zeus-os.md](../zeus/docs/zeus-os.md) | product | Tiling-WM web shell: SvelteKit frontend at `zeus-os/`, FastAPI bridge at `zeus/core/zeus_os/`, served at `/os/`. Keymap, env vars, phase plan. |
 | [obsidian-livesync-ingest.md](../zeus/docs/obsidian-livesync-ingest.md) | ops | CouchDB to local vault to ingest: LiveSync CLI setup, headless troubleshooting. |
 | [orpheus-spec.md](../zeus/docs/orpheus-spec.md) | product | Voice pipeline: wake, STT, TTS, streaming LLM, Phaos emitter. |
