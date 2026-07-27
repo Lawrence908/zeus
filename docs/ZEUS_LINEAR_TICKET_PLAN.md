@@ -3,14 +3,14 @@
 Full ticket structure for the Zeus project. Incorporates feedback on sprint ordering, Phaos subsystem, retrieval eval, collection versioning, and dependency awareness.
 
 **Team:** `<YOUR_LINEAR_TEAM>`
-**Linear Projects:** Zeus 0–8 + Backlog
+**Linear Projects:** Zeus 0–10 + Backlog
 
 ## Labels
 
 
 | Label     | Color   | Subsystem                                              |
 | --------- | ------- | ------------------------------------------------------ |
-| mnemosyne | #7C3AED | Memory layer, mem0 + Qdrant                           |
+| mnemosyne | #7C3AED | Memory layer, MemoryStore + Qdrant                    |
 | iris      | #10B981 | Ingest pipeline, data sources → chunks                |
 | orpheus   | #F59E0B | Voice interface, STT, TTS, wake word                  |
 | aegis     | #EF4444 | Safety layer, NemoClaw + OpenShell                    |
@@ -33,6 +33,22 @@ Key changes from v1:
 6. **Collection versioning added**: Qdrant migration strategy
 7. **Email ingest moved to Project 2**: it's a data source, not a deploy concern
 8. **Ruflo validation spike added**: verify before betting architecture on it
+
+---
+
+## Shipped since this plan's last full revision (as of 27 Jul 2026)
+
+This plan was last revised in April 2026 (Projects 0–10). Several whole subsystems have shipped to `main`/`zeus-os` since and are **not** yet broken out into their own project sections here. Summary so the plan doesn't read as current-state ground truth on its own — see each subsystem's doc and `CLAUDE.md` for detail. Ticket breakdowns are intentionally omitted (per the realignment scope).
+
+| Subsystem | State | Ticket refs | Key paths / docs |
+|---|---|---|---|
+| **Memory rewrite** | mem0 **replaced** by in-house `MemoryStore` (April 2026); bi-temporal payloads, LLM fact extraction via `small_llm_call` | LAB-61 lineage | `zeus/memory/store.py`; `docs/memory-architecture-plan.md` |
+| **Pheme** (news consolidation & analysis) | ✅ Shipped (26 Jul 2026) | LAB-417..425 | `zeus/pheme/`, `zeus/memory/news.py`; `zeus/docs/pheme.md`, `zeus/docs/pheme-twitter-setup.md` |
+| **Kronos / CapitolScope** | ✅ Shipped — job scheduler + daily digest/scrutiny jobs, CapitolScope ingest + MCP tools | (see git log) | `zeus/kronos/`, `zeus/ingest/sources/capitolscope.py`; `zeus/docs/kronos-job-guide.md` |
+| **Mesh outbound** (Meshtastic) | Built — Zeus→mesh push + read-only break-glass on one `/mesh/notify` choke point; phases loaded, radio-gated OFF by default | (see git log) | `zeus/core/mesh.py`, `zeus/safety/policies/meshtastic.yaml`; `zeus/docs/mesh-outbound-spec.md`, `zeus/docs/meshtastic-bridge.md` |
+| **Zeus OS** (tiling-WM web shell) | ✅ Shipped — SvelteKit SPA + `/zeus-os/*` FastAPI bridge, served from `/os/` | (see git log) | `zeus-os/`, `zeus/core/zeus_os/`; `zeus/docs/zeus-os.md` |
+| **Chat-path tool-use** (LAB-395) | ✅ Merged (PRs #34/#36) — see Project 10 | LAB-395..402 | `zeus/core/tools/`; `zeus/docs/tool-use-spec.md` |
+| **Argo swarm** | In-flight on `feat/swarm-orchestration` (PR #44) — **not** in this tree | — | branch only |
 
 ---
 
@@ -78,7 +94,7 @@ Closing this spike should establish whether **Ruflo owns** multi-step swarm sema
   - **LAB-48 (Zeus Context API v1 / Oracle)**: `zeus/api/main.py` (mounted by `zeus/core/main.py`)
   - **LAB-49 (Zeus Query Engine)**: `zeus/core/query.py` (used by chat routes)
 - **Partially implemented / needs validation**:
-  - **LAB-61 (mem0 Integration & Retrieval Quality)**: mem0 client + retrieval helpers exist (`zeus/memory/config.py`, `zeus/memory/search.py`), but quality eval harness / tuning loop isn’t represented as a dedicated suite yet. **Orchestration alignment:** add sub-scope or child work for **retrieval after summarization** and **execution-log / task summaries** in memory (short-term session vs long-term vector vs structured execution trail). Cross-link: **Backlog** *Mnemosyne: task execution log + rolling summaries*; **Project 7** LAB-144.
+  - **LAB-61 (mem0 Integration & Retrieval Quality)**: **mem0 was replaced by the in-house `MemoryStore` (`zeus/memory/store.py`) in April 2026** after the mem0 v2.0.0 rewrite; Zeus now owns the write path (LLM fact extraction via `small_llm_call`, bi-temporal payloads). Retrieval helpers live in `zeus/memory/search.py` / `zeus/memory/config.py`. The retrieval eval suite now exists (`tests/retrieval_eval.py`, see Spikes 1–3 below and LAB-NEW-D). **Orchestration alignment:** add sub-scope or child work for **retrieval after summarization** and **execution-log / task summaries** in memory (short-term session vs long-term vector vs structured execution trail). Cross-link: **Backlog** *Mnemosyne: task execution log + rolling summaries*; **Project 7** LAB-144.
   - **LAB-56 (Privacy & Data Governance / Aegis)**: **in-process Aegis** is present (`zeus/safety/policy_engine.py`, YAML under `zeus/safety/policies/`, optional `ZEUS_AEGIS_ENABLED` / `ZEUS_AEGIS_POLICY` / `NEMOCLAW_POLICY` per `.env.example`). Chat, streaming chat, voice text responses, and `/orchestration/call` outputs can be filtered by policy. **Still open** on this ticket: privacy level tagging, PII scanning across ingest, deduplication strategy, collection versioning; see ticket scope. **Orchestration alignment:** **input validation**, **tool argument checks**, and **defensive execution** (no blind tool runs). Cross-link: **Backlog** *Aegis: tool argument verification + execution guardrails*; **Project 7** LAB-145–146; **Project 10** LAB-326 (bus pre-hook + `evaluate_payload`).
 - **Not started (no code present yet)**:
   - **LAB-64 (Email Ingest)**: General email ingest (starred/sent) not started. Newsletter-specific email ingest shipped via LAB-336.
@@ -119,7 +135,7 @@ Add `pyyaml` to `requirements.txt`. Trigger: ingestion failing on real vault fro
 ### LAB-153: IngestPipeline memory client injection
 **File:** `zeus/ingest/pipeline.py`, `run_ingest()` · **Priority:** Medium · **Status:** Deferred (pre-Olympus always-on)
 
-`run_ingest()` calls `get_memory_client()` internally on every scheduled run, creating a fresh mem0/Qdrant client each time instead of reusing `app.state.memory`. Adds connection overhead and complicates clean shutdown.
+`run_ingest()` resolves the memory client (`MemoryStore`) internally on every scheduled run, creating a fresh Qdrant-backed client each time instead of reusing `app.state.memory`. Adds connection overhead and complicates clean shutdown.
 
 **Fix:** Add optional `memory` param to `IngestPipeline.__init__` and thread it through to `run_ingest`. In `main.py` lifespan, pass `memory=app.state.memory` when constructing the pipeline. Gate on **Project 6**.
 
@@ -226,7 +242,7 @@ IMAP fetch → LLM summarization → optional TTS audio → web UI. Uses `Ingest
 
 ## Project 7: Orchestration Runtime
 
-**Status (2 Apr 2026):** Runtime skeleton is in place: `zeus/orchestration/runtime.py` (YAML load, agent lifecycle), `zeus/orchestration/bus.py` (`/orchestration/call`, status, agent actions), `zeus/orchestration/hooks.py`. Aegis can post-filter orchestration responses. **LAB-144–146** below spell out **task-oriented** behavior (plan → act → reflect), bus hardening, and hook-based retries, patterns that improve reliability more than raw model swaps alone.
+**Status (27 Jul 2026):** Runtime is implemented: `zeus/orchestration/runtime.py` now ships the `TaskRunner` class (LAB-144) over `AgentStep`/`StepResult` with `on_failure: skip|retry|abort`; `zeus/orchestration/bus.py` (`/orchestration/call`, status, agent actions) and `zeus/orchestration/hooks.py` are wired, and both the Aegis pre-hook and post-hook run around bus calls (see Project 10). **LAB-144–146** text below is retained as the design record for the task-oriented (plan → act → reflect) behavior.
 
 **Cross-links:** **LAB-121** (whether Ruflo owns multi-step semantics vs Core); **LAB-61** (execution summaries + retrieval); **LAB-56** (tool validation / defensive execution). **Backlog** rows under *Orchestration patterns (agent systems roadmap)* implement the same themes as dedicated Linear issues when the workspace limit allows.
 
@@ -458,7 +474,7 @@ Backend prerequisites: `GET /admin/tools` (split out of `/admin/tool_cache/stats
 
 ## Project 10: Agentic Resilience
 
-**Status (2 Apr 2026):** Planned. Fills five concrete gaps identified from Claude Code leak takeaways: Aegis pre-execution validation, QueryEngine reflection loop, expanded olympian tool pack, session persistence, and the KAIROS background agent daemon.
+**Status (27 Jul 2026): Shipped.** All six parents are implemented in the repo: Aegis pre-hook (`register_aegis_bus_pre_hook` wired in `main.py`), QueryEngine reflection loop (`_is_empty_or_failed_reply` + `reflection_attempts` in `query.py`), olympian tool pack (`olympian_*` in `zeus/mcp/tools.py`), SQLite session persistence (`zeus/core/session_storage.py`, `ZEUS_SESSION_BACKEND`), the KAIROS daemon (`zeus/orchestration/daemon.py`, `ZEUS_KAIROS_ENABLED`), and the chat-path tool-use loop (`zeus/core/tools/`, merged via PRs #34/#36). Ticket text below is retained as the design record.
 
 | Parent | Title | Labels | Subs |
 |--------|-------|--------|------|
@@ -556,7 +572,7 @@ All four tools registered in `server.py` via `@mcp.tool()`. Shell tool env-gated
 
 | Sub | Title | Notes |
 |-----|-------|-------|
-| LAB-354 | `ObservationSource` Protocol + `MemoryDriftObserver` | `daemon.py`; checks mem0 for new additions |
+| LAB-354 | `ObservationSource` Protocol + `MemoryDriftObserver` | `daemon.py`; checks `MemoryStore` for new additions |
 | LAB-355 | `KairosAgent` observe/decide/act/update loop | LLM-driven decision; reuses TaskRunner |
 | LAB-356 | `KairosDaemon` wrapper + lifespan wiring | `asyncio.Event` stop; `ZEUS_KAIROS_ENABLED` gate |
 | LAB-357 | KAIROS safety gates + `/orchestration/kairos/status` | Tool allowlist; status endpoint |
@@ -564,7 +580,7 @@ All four tools registered in `server.py` via `@mcp.tool()`. Shell tool env-gated
 **Cross-links:** LAB-327 (reflection loop for KAIROS decide step), LAB-144 (TaskRunner reuse)
 
 ### LAB-395: Chat-path tool-use loop
-**Files:** `zeus/core/tools/` (new package), `zeus/core/query.py`, `zeus/core/chat.py`, `zeus/core/main.py`, `zeus/core/admin.py`, `zeus/safety/policies/tool_arguments.yaml`, `tests/test_tool_loop.py`, `tests/test_chat_async.py`, `tests/test_classify.py`, `zeus/docs/tool-use-spec.md` · **Priority:** High · **Status (Apr 2026):** Implemented end-to-end on the `tools` branch; awaiting commit + merge to main.
+**Files:** `zeus/core/tools/` (new package), `zeus/core/query.py`, `zeus/core/chat.py`, `zeus/core/main.py`, `zeus/core/admin.py`, `zeus/safety/policies/tool_arguments.yaml`, `tests/test_tool_loop.py`, `tests/test_chat_async.py`, `tests/test_classify.py`, `zeus/docs/tool-use-spec.md` · **Priority:** High · **Status:** ✅ Done — merged to main via PRs #34/#36 (`zeus/core/tools/` package present; `ZEUS_TOOLS_ENABLED` default off).
 
 Lets `QueryEngine.query()` itself call concrete tools (web_search, current_time) during a single `/chat/message` round-trip and fold results back into the reply. Behind `ZEUS_TOOLS_ENABLED=0` default off so chat is byte-identical to pre-tool-use until opted in. Sibling family to LAB-326 (Aegis pre-hook) and LAB-328 (olympian tool pack), but on the **chat path**, not the agent / KAIROS path.
 
@@ -695,7 +711,7 @@ See LAB-291 notes above. Not a new ticket.
 
 Splits the single `zeus_memories` Qdrant collection into a three-layer retrieval architecture so bulk RAG stops polluting the profile layer:
 
-- **Mnemosyne / Memory** (`zeus_memories`, rebuilt), mem0 with LLM fact extraction; curated profile sources only (`context_pack`, `gcal`). Target size: 100–500 items.
+- **Mnemosyne / Memory** (`zeus_memories`, rebuilt), `MemoryStore` (post-mem0) with LLM fact extraction via `small_llm_call`; curated profile sources only (`context_pack`, `gcal`). Target size: 100–500 items.
 - **Library / Knowledge** (`zeus_knowledge`, new), `KnowledgeStore` raw embed + Qdrant upsert, **no LLM** on the write path. Every bulk source (`markdown`, `obsidian`, `chatgpt`, `email`, `newsletter`, `bookmarks`, `git`). Target size: 10k–1M chunks.
 - **Reference / Live** (Phase 2), kiwix Wikipedia + Project NOMAD via live HTTP proxy, schema-accepted but pipeline-rejected until then.
 
@@ -763,19 +779,6 @@ Action: `ZEUS_KNOWLEDGE_RERANK` stays `0` in prod. See LAB-NEW-F below for the G
 
 Chain order `gemini_paid → anthropic_haiku → ollama` is confirmed as the right default for tier-1 fact extraction; two router fixes are needed before the chain is trustworthy in prod (LAB-NEW-E).
 
-<<<<<<< Updated upstream
-### LAB-NEW-E: `small_llm_call` router hardening (tabled)
-**Files:** `zeus/core/small_llm.py` · **Priority:** Medium · **Parent:** LAB-NEW-A
-
-Two targeted fixes before Spike 4 numbers can be trusted in prod:
-
-1. **Gemini 429 backoff + jitter.** On HTTP 429 from `gemini_paid`, retry with exponential backoff (2s, 5s, 15s + jitter) up to 3 attempts before falling through to the next provider. Current behaviour is fail-fast, which burned $0.06 on the shootout because Haiku absorbed every Gemini rate-limit.
-2. **Ollama structured-output timeout.** Raise `_call_ollama` read timeout from the default 120s to 300s (or stream + assemble) — qwen2.5:7b with a full extraction prompt + JSON schema exceeds 120s cold. After this, re-run Spike 4; if qwen still fails schema, ollama is empty-only fallback until we move to qwen2.5:14b on a larger GPU.
-
-Verify: re-run `tests/fact_extract_spike.py` after each fix lands; Gemini row should be 20/20; ollama row should be schema_ok > 0.
-
-### LAB-NEW-F: Reranker GPU sidecar (tabled)
-=======
 ### LAB-NEW-E: `small_llm_call` router hardening ✅ Done (April 2026)
 
 **Files:** `zeus/core/small_llm.py`, `.env.example`, `tests/fact_extract_spike_results_v2.json`, `tests/fact_extract_spike_ollama_only.json` · **Priority:** Medium · **Parent:** LAB-NEW-A
