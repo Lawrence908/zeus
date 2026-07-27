@@ -11,6 +11,7 @@ from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     ContextTypes,
     MessageHandler,
     filters,
@@ -115,6 +116,9 @@ class TelegramBot:
         application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
         )
+        application.add_handler(
+            CallbackQueryHandler(self._on_pheme_callback, pattern=r"^pheme:")
+        )
         await application.initialize()
         await application.start()
         if application.updater is None:
@@ -141,6 +145,71 @@ class TelegramBot:
             await app.shutdown()
         finally:
             self._application = None
+
+    async def _on_pheme_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle Pheme digest Approve / Skip inline buttons.
+
+        Approve fires the gated Twitter tool (Aegis pre-hook runs inside
+        post_news_thread); Skip just drops the pending entry. Both edit the
+        keyboard away so a digest cannot be approved twice.
+        """
+        query = update.callback_query
+        if query is None or not query.data:
+            return
+        chat = update.effective_chat
+        pheme_chat = None
+        try:
+            from zeus.pheme.delivery import pheme_chat_id
+
+            pheme_chat = pheme_chat_id()
+        except Exception:
+            pass
+        allowed = set(self._allowed)
+        if pheme_chat is not None:
+            allowed.add(pheme_chat)
+        if allowed and (chat is None or chat.id not in allowed):
+            logger.warning(
+                "dropping pheme callback from disallowed chat_id=%s",
+                getattr(chat, "id", None),
+            )
+            await query.answer()
+            return
+
+        parts = query.data.split(":", 2)
+        action = parts[1] if len(parts) > 1 else ""
+        digest_id = parts[2] if len(parts) > 2 else ""
+        await query.answer()
+
+        if action == "skip":
+            from zeus.pheme.delivery import pop_pending_tweet
+
+            pop_pending_tweet(digest_id)
+            await query.edit_message_reply_markup(reply_markup=None)
+            await context.bot.send_message(
+                chat_id=chat.id, text="Skipped - nothing posted to Twitter."
+            )
+            return
+
+        if action == "approve":
+            from zeus.integrations.twitter.poster import TwitterPostError
+            from zeus.pheme.delivery import approve_pending_tweet
+
+            try:
+                ids = await approve_pending_tweet(digest_id)
+            except TwitterPostError as exc:
+                logger.warning("pheme tweet approval failed: %s", exc)
+                await context.bot.send_message(
+                    chat_id=chat.id, text=f"Tweet failed: {exc}"
+                )
+                return
+            await query.edit_message_reply_markup(reply_markup=None)
+            await context.bot.send_message(
+                chat_id=chat.id,
+                text=f"Posted {len(ids)} tweet(s): https://x.com/i/web/status/{ids[0]}",
+                disable_web_page_preview=True,
+            )
 
     async def _on_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE

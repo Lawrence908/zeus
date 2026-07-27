@@ -85,6 +85,17 @@ sources:
   # Leave `books` empty (or drop the key) to ingest every eligible ZIM under
   # the size threshold. The default list is conservative: small curated books
   # where semantic retrieval wins.
+  # Pheme news layer (zeus_news). Both read connection details from env;
+  # unset env vars mean the source is skipped under --source all.
+  canary:
+    target: news
+    days_back: 3
+    limit: 200
+
+  capitolscope:
+    target: news
+    days_back: 2
+
   kiwix_zim:
     target: knowledge
     zim_dir: ${ZEUS_KIWIX_ZIM_DIR}

@@ -525,10 +525,27 @@ async def _collect_retrieval_context(
             logger.warning("reference search failed: %s", exc)
             return []
 
+    async def _news_task() -> list[dict]:
+        # Opt-in (ZEUS_NEWS_IN_CONTEXT=1): ordinary chat is not diluted by
+        # news; the zeus_news_search tool is the primary deep-dive path.
+        if not use_context or os.getenv("ZEUS_NEWS_IN_CONTEXT", "0").strip() not in ("1", "true", "yes"):
+            return []
+        try:
+            from zeus.memory.search import search_news
+
+            return await asyncio.to_thread(search_news, message, 4)
+        except Exception as exc:
+            logger.warning("news search failed: %s", exc)
+            return []
+
     t_retrieve = time.monotonic()
-    facts, mem_results, know_results, ref_results = await asyncio.gather(
-        _prof_task(), _mem_task(), _know_task(), _ref_task()
+    facts, mem_results, know_results, ref_results, news_results = await asyncio.gather(
+        _prof_task(), _mem_task(), _know_task(), _ref_task(), _news_task()
     )
+    if news_results:
+        # Rendered inside the knowledge block with per-item [news] labels;
+        # sub-budget stays the knowledge 45% share.
+        know_results = [*know_results, *news_results]
     _log_timing("retrieval.parallel", (time.monotonic() - t_retrieve) * 1000)
 
     if facts:

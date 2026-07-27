@@ -130,3 +130,25 @@ jobs:
     max_retries: 1
     tags: [research, capitolscope, scrutiny, daily]
     enabled: true
+
+  - id: pheme-daily-digest
+    name: Pheme Daily News Digest
+    description: >
+      Pheme news pipeline: ingest Canary + CapitolScope into zeus_news,
+      retention sweep, staged local-Ollama analysis (extract, cluster, thread,
+      correlate, rank, synthesize), then delivery - Telegram push to the news
+      chat and Twitter via the approval gate (autopost only when
+      PHEME_TWITTER_AUTOPOST=1). Digest hour comes from PHEME_DIGEST_HOUR at
+      seed time; edit the live job via /kronos to change it later.
+    category: briefing
+    schedule:
+      cron: "0 ${PHEME_DIGEST_HOUR:-7} * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.pheme.run_daily_digest
+    params:
+      news_days_back: 2
+    safety_policy: pheme
+    timeout_seconds: 3600
+    max_retries: 1
+    tags: [pheme, news, daily]
+    enabled: true

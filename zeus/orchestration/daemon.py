@@ -209,6 +209,82 @@ class MemoryDriftObserver:
         )
 
 
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _envf(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+class ServerHealthObserver:
+    """Poll /admin/system and flag threshold breaches as alertable observations.
+
+    Emits an Observation carrying ``raw["alert"]`` (text/priority/dedupe_key)
+    only when something is wrong; idle otherwise. The alert is templated here
+    (deterministic) rather than composed by the decide-LLM, because health
+    alerts must be reliable and never hallucinated. Degrades gracefully when a
+    data source is absent (no GPU / no docker in-container -> those checks skip).
+    """
+
+    def __init__(self) -> None:
+        self._gpu_temp_c = _envf("ZEUS_MESH_ALERT_GPU_TEMP_C", 85.0)
+        self._disk_pct = _envf("ZEUS_MESH_ALERT_DISK_PCT", 90.0)
+        self._expected = [
+            c.strip()
+            for c in os.getenv("ZEUS_MESH_ALERT_EXPECTED_CONTAINERS", "").split(",")
+            if c.strip()
+        ]
+
+    async def observe(self) -> Observation | None:
+        try:
+            data = await _http_get_json("/admin/system")
+        except Exception as exc:
+            logger.warning("kairos health observer poll failed: %s", exc)
+            return None
+
+        breaches: list[str] = []
+        for d in data.get("disks") or []:
+            pct = d.get("percent_used")
+            if pct is not None and pct >= self._disk_pct:
+                breaches.append(f"disk {d.get('path')} {pct:.0f}%")
+        for g in data.get("gpus") or []:
+            t = g.get("temperature_c")
+            if t is not None and t >= self._gpu_temp_c:
+                breaches.append(f"GPU{g.get('index')} {t:.0f}C")
+        docker = data.get("docker") or {}
+        names = set(docker.get("names") or [])
+        # Only alert on down containers when we both expect some AND can see the
+        # running set; an empty `names` means docker is unavailable, not "all down".
+        if self._expected and names:
+            down = [c for c in self._expected if c not in names]
+            if down:
+                breaches.append("down: " + ",".join(down))
+
+        if not breaches:
+            return None
+
+        text = "zeus alert: " + "; ".join(breaches)
+        return Observation(
+            source="server_health",
+            summary=text,
+            raw={
+                "alert": {
+                    "text": text,
+                    # Any breach is operationally critical -> bypasses quiet hours.
+                    "priority": "critical",
+                    # Stable key + the choke point's payload-signature check means a
+                    # standing condition fires once per dedupe window, but a CHANGED
+                    # breach set re-alerts immediately (text differs -> new signature).
+                    "dedupe_key": "health:server_health",
+                }
+            },
+        )
+
+
 # ------------------------------------------------------------------
 # Agent
 # ------------------------------------------------------------------
@@ -227,6 +303,7 @@ class KairosAgent:
         allowlist: list[str],
         max_actions: int,
         user_id: str = "user",
+        mesh_enabled: bool = False,
     ) -> None:
         self._llm = llm_fn
         self._observers = observers
@@ -234,6 +311,10 @@ class KairosAgent:
         self._allowlist = [t.strip() for t in allowlist if t.strip()]
         self._max_actions = max_actions
         self._user_id = user_id
+        # mesh_notify is deliberately NOT in the LLM allowlist: the decide-LLM
+        # must never compose radio traffic. It fires only from emit_alerts on
+        # deterministic observer alerts, gated by this flag.
+        self._mesh_enabled = mesh_enabled
 
     async def observe(self) -> list[Observation]:
         out: list[Observation] = []
@@ -289,52 +370,69 @@ class KairosAgent:
             plan.steps = plan.steps[: self._max_actions]
         return plan
 
+    async def _run_tool_call(
+        self, step: ToolCall, *, enforce_allowlist: bool = True
+    ) -> StepExecution:
+        """Guard + dispatch one tool call. Shared by act() and emit_alerts().
+
+        Guard order: allowlist membership (LLM-plan path only) -> Aegis
+        pre-hook on the args -> dispatch. emit_alerts skips the allowlist
+        (mesh_notify is intentionally absent from it) but keeps the Aegis hook.
+        """
+        if enforce_allowlist and step.tool not in self._allowlist:
+            logger.warning(
+                "kairos rejected tool %r not in allowlist %s",
+                step.tool, self._allowlist,
+            )
+            return StepExecution(tool=step.tool, status="rejected", error="not_in_allowlist")
+
+        try:
+            await aegis_bus_pre_hook(
+                {
+                    "target_agent": "kairos",
+                    "endpoint": step.tool,
+                    "safety_policy": "standard",
+                    "payload": step.args,
+                }
+            )
+        except Exception as exc:
+            logger.warning("kairos aegis rejected %s args: %s", step.tool, exc)
+            return StepExecution(tool=step.tool, status="rejected", error=str(exc))
+
+        try:
+            data = await self._dispatch(step.tool, step.args)
+            return StepExecution(tool=step.tool, status="ok", data=data)
+        except Exception as exc:
+            logger.warning("kairos tool %s raised: %s", step.tool, exc)
+            return StepExecution(tool=step.tool, status="error", error=str(exc))
+
     async def act(self, plan: CognitivePlan) -> list[StepExecution]:
+        return [await self._run_tool_call(step) for step in plan.steps]
+
+    async def emit_alerts(self, observations: list[Observation]) -> list[StepExecution]:
+        """Deterministically push observer alerts to the mesh via mesh_notify.
+
+        Runs outside the LLM decide/act path. Each observation carrying an
+        ``raw["alert"]`` becomes a mesh_notify call. No-op unless mesh is
+        enabled, so a stray alert can never transmit when the gate is off.
+        """
+        if not self._mesh_enabled:
+            return []
         results: list[StepExecution] = []
-        for step in plan.steps:
-            if step.tool not in self._allowlist:
-                logger.warning(
-                    "kairos rejected tool %r not in allowlist %s",
-                    step.tool, self._allowlist,
-                )
-                results.append(
-                    StepExecution(
-                        tool=step.tool,
-                        status="rejected",
-                        error="not_in_allowlist",
-                    )
-                )
+        for obs in observations:
+            alert = (obs.raw or {}).get("alert")
+            if not isinstance(alert, dict) or not alert.get("text"):
                 continue
-
-            # Aegis pre-hook on every tool call.
-            try:
-                await aegis_bus_pre_hook(
-                    {
-                        "target_agent": "kairos",
-                        "endpoint": step.tool,
-                        "safety_policy": "standard",
-                        "payload": step.args,
-                    }
-                )
-            except Exception as exc:
-                logger.warning(
-                    "kairos aegis rejected %s args: %s", step.tool, exc
-                )
-                results.append(
-                    StepExecution(
-                        tool=step.tool, status="rejected", error=str(exc)
-                    )
-                )
-                continue
-
-            try:
-                data = await self._dispatch(step.tool, step.args)
-                results.append(StepExecution(tool=step.tool, status="ok", data=data))
-            except Exception as exc:
-                logger.warning("kairos tool %s raised: %s", step.tool, exc)
-                results.append(
-                    StepExecution(tool=step.tool, status="error", error=str(exc))
-                )
+            step = ToolCall(
+                tool="mesh_notify",
+                args={
+                    "text": alert["text"],
+                    "priority": alert.get("priority", "normal"),
+                    "dedupe_key": alert.get("dedupe_key"),
+                },
+                rationale=f"auto-alert from {obs.source}",
+            )
+            results.append(await self._run_tool_call(step, enforce_allowlist=False))
         return results
 
     async def _dispatch(self, tool: str, args: dict[str, Any]) -> Any:
@@ -360,6 +458,24 @@ class KairosAgent:
         if tool in _OLYMPIAN_READONLY_DISPATCH:
             handler = _OLYMPIAN_READONLY_DISPATCH[tool]
             return await handler(args)
+
+        if tool == "mesh_notify":
+            if not self._mesh_enabled:
+                return {"ok": False, "reason": "mesh_notify_disabled"}
+            # In-process call into the choke point: same gate/Aegis/quiet-hours/
+            # dedupe/rate-limit/audit pipeline as any other caller, no HTTP hop.
+            from zeus.core.mesh import MeshNotifyRequest, mesh_notify
+
+            text = str(args.get("text") or "").strip()
+            if not text:
+                return {"ok": False, "reason": "empty_text"}
+            req = MeshNotifyRequest(
+                text=text,
+                priority=str(args.get("priority") or "normal"),
+                dedupe_key=args.get("dedupe_key"),
+                source="kairos",
+            )
+            return await mesh_notify(req)
 
         raise RuntimeError(f"tool dispatch not implemented: {tool}")
 
@@ -439,10 +555,12 @@ class KairosDaemon:
             observations = await self._agent.observe()
             plan = await self._agent.decide(observations)
             executions = await self._agent.act(plan)
+            alerts = await self._agent.emit_alerts(observations)
+            executions = executions + alerts
             await self._agent.update_memory(observations, plan, executions)
             logger.info(
-                "kairos cycle %d: obs=%d steps=%d",
-                self._state.cycle_count, len(observations), len(executions),
+                "kairos cycle %d: obs=%d steps=%d alerts=%d",
+                self._state.cycle_count, len(observations), len(executions), len(alerts),
             )
         except Exception as exc:
             self._state.errors += 1
@@ -479,13 +597,31 @@ def build_default_kairos_daemon(
     except ValueError:
         interval_min = _DEFAULT_INTERVAL_MIN
 
+    # mesh_notify is gated by its own knob (plus the choke point's own master
+    # gate ZEUS_MESH_OUTBOUND_ENABLED downstream). Flipping this on both adds the
+    # health observer and permits emit_alerts to fire; it never enters the LLM
+    # allowlist, so the decide-LLM cannot author mesh traffic.
+    mesh_enabled = _truthy_env("ZEUS_KAIROS_MESH_NOTIFY")
+
     observers: list[ObservationSource] = [MemoryDriftObserver()]
+    if mesh_enabled:
+        observers.append(ServerHealthObserver())
+
+    # Pheme breaking-news observer: acts inside observe() (delivery passes
+    # Aegis in zeus/pheme/delivery.py) and reports what it sent. Gated by
+    # PHEME_BREAKING_ENABLED; never enters the LLM tool allowlist.
+    if _truthy_env("PHEME_BREAKING_ENABLED"):
+        from zeus.pheme.observer import PhemeBreakingObserver
+
+        observers.append(PhemeBreakingObserver())
+
     agent = KairosAgent(
         llm_fn=llm_fn,
         observers=observers,
         state=state,
         allowlist=allowlist,
         max_actions=max_actions,
+        mesh_enabled=mesh_enabled,
     )
     daemon = KairosDaemon(
         agent=agent, state=state, interval_seconds=interval_min * 60.0

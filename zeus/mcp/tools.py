@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -373,3 +374,74 @@ async def capitolscope_context_pack(*, days: int = 7) -> dict[str, Any]:
     clusters/trades, and top scrutiny movers. Feed this to a model to connect
     congressional trading shifts to global events."""
     return await _cs_get("context-pack", {"days": days})
+
+
+# ---------------------------------------------------------------------------
+# Pheme - news deep-dive search + gated Twitter posting
+# ---------------------------------------------------------------------------
+async def zeus_news_search(
+    *,
+    query: str,
+    source: str | None = None,
+    topic: str | None = None,
+    entity: str | None = None,
+    since: str | None = None,
+    top_k: int = 8,
+) -> dict[str, Any]:
+    """Deep-dive search over the Pheme news layer (zeus_news): consolidated
+    Canary OSINT articles + CapitolScope congressional-trading signals with
+    entity/topic/date filters. Use for "what has the news said about X"
+    questions across time."""
+    from zeus.memory.search import search_news
+
+    results = await asyncio.to_thread(
+        search_news,
+        query,
+        top_k=top_k,
+        source=source,
+        topic=topic,
+        entity=entity,
+        since=since,
+    )
+    return {
+        "results": [
+            {
+                "title": r["metadata"].get("title", ""),
+                "text": r["memory"],
+                "score": r["score"],
+                "source": r["metadata"].get("source", ""),
+                "url": r["metadata"].get("url", ""),
+                "published_at": r["metadata"].get("published_at", ""),
+                "entities": r["metadata"].get("entities", []),
+                "topics": r["metadata"].get("topics", []),
+                "significance": r["metadata"].get("significance", 0.0),
+            }
+            for r in results
+        ],
+        "count": len(results),
+    }
+
+
+def _pheme_twitter_enabled() -> bool:
+    return os.getenv("PHEME_TWITTER_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def olympian_twitter_post(
+    *, text: str, thread: list[str] | None = None
+) -> dict[str, Any]:
+    """Post a tweet (plus optional reply thread) to the configured X/Twitter
+    account. PUBLIC and IRREVERSIBLE: double-gated by ZEUS_MCP_ALLOW_WRITE and
+    PHEME_TWITTER_ENABLED, and every tweet text passes the Aegis 'pheme'
+    policy pre-hook inside the poster before anything is sent."""
+    if not _allow_write():
+        raise PermissionError("ZEUS_MCP_ALLOW_WRITE is false; olympian_twitter_post disabled")
+    if not _pheme_twitter_enabled():
+        raise PermissionError("PHEME_TWITTER_ENABLED is false; olympian_twitter_post disabled")
+
+    from zeus.integrations.twitter.poster import TwitterPostError, post_news_thread
+
+    try:
+        ids = await post_news_thread(text, thread or [])
+    except TwitterPostError as exc:
+        return {"posted": False, "error": str(exc)}
+    return {"posted": True, "tweet_ids": ids, "url": f"https://x.com/i/web/status/{ids[0]}"}

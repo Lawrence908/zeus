@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 from zeus.ingest.privacy import classify_chunk
 from zeus.ingest.types import Chunk
 from zeus.memory.library import KnowledgeChunk, KnowledgeStore, get_knowledge_store
+from zeus.memory.news import NewsItem, NewsStore, get_news_store
 from zeus.memory.store import AddResult, MemoryStore, get_memory_store
 
 logger = logging.getLogger("iris")
@@ -120,6 +121,15 @@ def _resolve_knowledge(
     return get_knowledge_store()
 
 
+def _resolve_news(dry_run: bool, injected: NewsStore | None) -> NewsStore | None:
+    """Return NewsStore for live ingest, or None for dry_run."""
+    if dry_run:
+        return None
+    if injected is not None:
+        return injected
+    return get_news_store()
+
+
 def _chunk_to_knowledge(chunk: Chunk, privacy_level: str) -> KnowledgeChunk:
     """Map a pipeline Chunk (mem0-shaped) onto a KnowledgeChunk for raw RAG store."""
     src_label = chunk.source or "unknown"
@@ -176,6 +186,39 @@ def _store_chunk_knowledge(
         raise RuntimeError(f"knowledge store accepted 0 chunks (skipped={result.skipped})")
 
 
+def _chunk_to_news(chunk: Chunk, privacy_level: str) -> NewsItem:
+    """Map a pipeline Chunk onto a NewsItem. News sources put item fields in metadata."""
+    src_label = chunk.source or "unknown"
+    if ":" in src_label:
+        source_kind, source_id = src_label.split(":", 1)
+    else:
+        source_kind, source_id = src_label, src_label
+    md = dict(chunk.metadata or {})
+    return NewsItem(
+        text=chunk.text,
+        title=str(md.pop("title", "") or ""),
+        source=source_kind,
+        source_id=source_id,
+        url=str(md.pop("url", "") or "") or None,
+        published_at=str(md.pop("published_at", "") or ""),
+        ingested_at="",  # payload() stamps now
+        entities=[str(e) for e in md.pop("entities", []) or []],
+        topics=[str(t) for t in md.pop("topics", []) or []],
+        bias=str(md.pop("bias", "") or "") or None,
+        metadata={**md, "privacy_level": privacy_level, "user_id": chunk.user_id},
+    )
+
+
+def _store_chunk_news(store: NewsStore, chunk: Chunk, privacy_level: str) -> None:
+    """Blocking news upsert. Raises on failure so the retry loop can catch it."""
+    item = _chunk_to_news(chunk, privacy_level)
+    result = store.add_items([item])
+    if result.errors:
+        raise RuntimeError(result.errors[0])
+    if result.added == 0 and result.unchanged == 0:
+        raise RuntimeError(f"news store accepted 0 items (skipped={result.skipped})")
+
+
 def _use_rich_progress(ingest_ui: Literal["auto", "rich", "plain"]) -> bool:
     if ingest_ui == "plain":
         return False
@@ -191,6 +234,7 @@ async def run_ingest(
     *,
     memory: MemoryStore | None = None,
     knowledge: KnowledgeStore | None = None,
+    news: NewsStore | None = None,
     ingest_ui: Literal["auto", "rich", "plain"] = "auto",
     console: Console | None = None,
 ) -> list[IngestResult]:
@@ -201,11 +245,14 @@ async def run_ingest(
     """
     memory_store: MemoryStore | None = None
     knowledge_store: KnowledgeStore | None = None
+    news_store: NewsStore | None = None
     targets = {getattr(s, "target", "memory") for s in sources}
     if "memory" in targets:
         memory_store = _resolve_memory(dry_run, memory)
     if "knowledge" in targets:
         knowledge_store = _resolve_knowledge(dry_run, knowledge)
+    if "news" in targets:
+        news_store = _resolve_news(dry_run, news)
     results: list[IngestResult] = []
     use_progress = _use_rich_progress(ingest_ui)
     progress_cm = nullcontext(None)
@@ -288,6 +335,14 @@ async def run_ingest(
                             await asyncio.to_thread(
                                 _store_chunk_knowledge,
                                 knowledge_store,
+                                chunk,
+                                privacy_level.value,
+                            )
+                            k_ops["ADD"] += 1
+                        elif source_target == "news":
+                            await asyncio.to_thread(
+                                _store_chunk_news,
+                                news_store,
                                 chunk,
                                 privacy_level.value,
                             )
@@ -403,7 +458,7 @@ async def run_ingest(
                         await asyncio.sleep(sleep_s)
 
             elapsed = time.monotonic() - t_start
-            if source_target == "knowledge" and errors:
+            if source_target in ("knowledge", "news") and errors:
                 k_ops["ERROR"] += len(errors)
             result = IngestResult(
                 source=source_name,

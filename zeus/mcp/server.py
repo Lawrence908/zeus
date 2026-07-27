@@ -29,9 +29,11 @@ from zeus.mcp.tools import (
     olympian_inbox_append,
     olympian_server_health,
     olympian_status_read,
+    olympian_twitter_post,
     zeus_calendar_today,
     zeus_ingest_trigger,
     zeus_memory_search,
+    zeus_news_search,
     zeus_newsletter_latest,
     zeus_profile,
     zeus_query,
@@ -156,6 +158,25 @@ async def kronos_create_job_tool(
         max_retries=max_retries,
         job_id=job_id,
     )
+
+
+@mcp.tool(name="zeus_news_search")
+async def zeus_news_search_tool(
+    query: str,
+    source: str | None = None,
+    topic: str | None = None,
+    entity: str | None = None,
+    since: str | None = None,
+    top_k: int = 8,
+):
+    return await zeus_news_search(
+        query=query, source=source, topic=topic, entity=entity, since=since, top_k=top_k
+    )
+
+
+@mcp.tool(name="olympian_twitter_post")
+async def olympian_twitter_post_tool(text: str, thread: list[str] | None = None):
+    return await olympian_twitter_post(text=text, thread=thread)
 
 
 @mcp.tool(name="capitolscope_digest")

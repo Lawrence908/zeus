@@ -203,6 +203,56 @@ async def search_reference(query: str, top_k: int | None = None) -> list[dict]:
     return out
 
 
+def search_news(
+    query: str,
+    top_k: int | None = None,
+    source: str | None = None,
+    topic: str | None = None,
+    entity: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Vector search over the Pheme news layer (zeus_news). Returns the shared
+    context-block dict shape so it renders like the other layers."""
+    from zeus.memory.news import get_news_store
+
+    k = max(1, min(20, top_k if top_k is not None else 8))
+    filters: dict = {}
+    if source:
+        filters["source"] = source
+    if topic:
+        filters["topic"] = topic
+    if entity:
+        filters["entity"] = entity
+    if since:
+        filters["since"] = since
+    if until:
+        filters["until"] = until
+    try:
+        store = get_news_store()
+        hits = store.search(query, top_k=k, filters=filters or None)
+    except Exception as exc:
+        logger.warning("news search failed: %s", exc)
+        return []
+
+    results: list[dict] = []
+    for hit in hits:
+        md = dict(hit.payload)
+        md.setdefault("source", hit.source)
+        md.setdefault("title", hit.title)
+        md.setdefault("file", hit.url or hit.title)
+        md.setdefault("type", "news")
+        results.append(
+            {
+                "id": hit.id,
+                "memory": f"{hit.title}: {hit.text}" if hit.title else hit.text,
+                "score": hit.score,
+                "metadata": md,
+            }
+        )
+    return results
+
+
 def get_profile_facts(user_id: str, top_k: int = 8) -> list[str]:
     """Retrieve stable profile facts; prefer context_pack + identity/preference categories."""
     from zeus.memory.store import get_memory_store

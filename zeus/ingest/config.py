@@ -22,10 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 DEFAULT_CONFIG_PATH = "zeus/ingest/config.yaml"
 
-Target = Literal["memory", "knowledge", "reference"]
+Target = Literal["memory", "knowledge", "reference", "news"]
 # Phase 2: reference is a query-time proxy (kiwix/NOMAD), not an ingest target,
 # but the schema accepts it so configs can declare intent without errors.
-_SUPPORTED_TARGETS: set[str] = {"memory", "knowledge", "reference"}
+# news routes to NewsStore (zeus_news) - the Pheme consolidation layer.
+_SUPPORTED_TARGETS: set[str] = {"memory", "knowledge", "reference", "news"}
 
 
 class MarkdownRoot(BaseModel):
@@ -71,9 +72,9 @@ class SourceConfig(BaseModel):
     @field_validator("target")
     @classmethod
     def _validate_target(cls, v: str) -> str:
-        if v not in ("memory", "knowledge", "reference"):
+        if v not in _SUPPORTED_TARGETS:
             raise ValueError(
-                f"target must be memory|knowledge|reference, got {v!r}"
+                f"target must be memory|knowledge|reference|news, got {v!r}"
             )
         return v
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,23 @@ from zeus.kronos.models import JobDefinition, JobRun, JobSchedule, JobStatus
 from zeus.kronos.storage import JobStorage
 
 logger = logging.getLogger("zeus.kronos")
+
+# ${VAR} / ${VAR:-default} interpolation for seed YAML values (same spirit as
+# zeus/ingest/config.py). Lets e.g. PHEME_DIGEST_HOUR shape a seed cron without
+# templating the file. Only applies at first insert - live jobs are never touched.
+_SEED_ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_seed_env(value: Any) -> Any:
+    if isinstance(value, str):
+        return _SEED_ENV_RE.sub(
+            lambda m: os.environ.get(m.group(1)) or (m.group(2) or ""), value
+        )
+    if isinstance(value, list):
+        return [_expand_seed_env(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand_seed_env(v) for k, v in value.items()}
+    return value
 
 
 class KronosRegistry:
@@ -65,7 +84,7 @@ class KronosRegistry:
             return []
 
         with open(p, encoding="utf-8") as f:
-            doc = yaml.safe_load(f) or {}
+            doc = _expand_seed_env(yaml.safe_load(f) or {})
         raw_jobs = doc.get("jobs") or []
         if not isinstance(raw_jobs, list):
             logger.warning("kronos seed YAML has no 'jobs' list, skipping")
