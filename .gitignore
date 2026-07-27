@@ -259,3 +259,4 @@ compose.override.yaml
 # Zeus - generated brief/report artifacts (runtime output, not docs)
 zeus/data/briefings/
 zeus/data/research/
+zeus/data/pheme/
