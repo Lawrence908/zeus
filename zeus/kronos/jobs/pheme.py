@@ -42,11 +42,18 @@ async def run_daily_digest(params: dict[str, Any]) -> dict[str, Any]:
             logger.warning("pheme: capitolscope source unavailable - %s", exc)
 
         if sources:
-            results = await run_ingest(sources, ingest_ui="plain")
-            ingest_summary = {
-                r.source: {"stored": r.chunks_stored, "errors": len(r.errors)}
-                for r in results
-            }
+            # A dead source must degrade, never kill the digest: the pipeline
+            # still runs over whatever is already stored (2026-07-27 incident:
+            # an unreachable Canary URL failed the whole 7am run).
+            try:
+                results = await run_ingest(sources, ingest_ui="plain")
+                ingest_summary = {
+                    r.source: {"stored": r.chunks_stored, "errors": len(r.errors)}
+                    for r in results
+                }
+            except Exception as exc:
+                logger.error("pheme: ingest phase failed, continuing with stored items - %s", exc)
+                ingest_summary = {"error": str(exc)[:300]}
 
     store = get_news_store()
     swept = store.sweep_expired()
