@@ -26,7 +26,7 @@ def embed_texts(
 ) -> list[list[float]]:
     """Embed each text via Ollama's /api/embeddings. Ollama has no batch endpoint."""
     url = (ollama_url or os.getenv("OLLAMA_URL", "http://localhost:11435")).rstrip("/")
-    embed_model = model or os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text")
+    embed_model = model or os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text:v1.5")
     keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
     raw_num_ctx = os.getenv("ZEUS_EMBED_NUM_CTX")
     num_ctx = DEFAULT_EMBED_NUM_CTX

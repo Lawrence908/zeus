@@ -840,3 +840,56 @@ class TestQueryEngineToolIntegration:
         # Reflection should have run because no tool fired and reply was empty.
         assert reflect_llm_called >= 1
         assert result.tool_calls == []
+
+
+class TestToolAllowlist:
+    """ZEUS_TOOLS_ALLOWLIST filters which registered tools the model sees."""
+
+    def _reset_registry(self) -> None:
+        registry.clear()
+        register_current_time()  # registers "current_time"
+
+        async def _noop(args: dict) -> ToolResult:
+            return ToolResult(call_id="", name="second_tool", content="ok")
+
+        registry.register(
+            ToolSpec(
+                name="second_tool",
+                description="A second tool for allowlist tests.",
+                parameters={"type": "object", "properties": {}},
+            ),
+            _noop,
+        )
+
+    def test_no_allowlist_returns_all(self) -> None:
+        from zeus.core.tools import allowed_tool_specs, tools_allowlist
+
+        self._reset_registry()
+        with patch.dict("os.environ", {}, clear=False):
+            os_env = __import__("os").environ
+            os_env.pop("ZEUS_TOOLS_ALLOWLIST", None)
+            assert tools_allowlist() is None
+            names = {s.name for s in allowed_tool_specs()}
+        assert names == {"current_time", "second_tool"}
+
+    def test_allowlist_filters_and_ignores_unknown(self) -> None:
+        from zeus.core.tools import allowed_tool_specs, tools_allowlist
+
+        self._reset_registry()
+        with patch.dict(
+            "os.environ",
+            {"ZEUS_TOOLS_ALLOWLIST": " current_time , bogus "},
+            clear=False,
+        ):
+            assert tools_allowlist() == {"current_time", "bogus"}
+            names = [s.name for s in allowed_tool_specs()]
+        assert names == ["current_time"]
+
+    def test_empty_after_filter_returns_none(self) -> None:
+        from zeus.core.tools import allowed_tool_specs
+
+        self._reset_registry()
+        with patch.dict(
+            "os.environ", {"ZEUS_TOOLS_ALLOWLIST": "nonexistent"}, clear=False
+        ):
+            assert allowed_tool_specs() == []

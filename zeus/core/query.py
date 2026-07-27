@@ -622,13 +622,15 @@ def _build_tools_section() -> str:
     Returns an empty string when tools are disabled or no tools are registered
     so the chat_system.md template falls back to "(No tools available for this turn.)".
     """
-    from zeus.core.tools import registry as tool_registry
-    from zeus.core.tools import tools_enabled
+    from zeus.core.tools import allowed_tool_specs, tools_enabled
 
-    if not (tools_enabled() and tool_registry.available()):
+    if not tools_enabled():
+        return ""
+    specs = allowed_tool_specs()
+    if not specs:
         return ""
     lines: list[str] = []
-    for spec in tool_registry.list_specs():
+    for spec in specs:
         # First sentence of the description is usually the most load-bearing —
         # keep the whole thing for Qwen since it needs the forceful "you must
         # call this" language that lives in the full description.
@@ -719,18 +721,18 @@ class QueryEngine:
 
         # Tool-use path (ZEUS_TOOLS_ENABLED=1). Skips the reflection loop when
         # any tool fired -- a tool-informed reply is treated as authoritative.
-        from zeus.core.tools import registry as tool_registry
-        from zeus.core.tools import tools_enabled, tools_max_calls
+        from zeus.core.tools import allowed_tool_specs, tools_enabled, tools_max_calls
 
         tool_calls_out: list[dict] = []
         skip_reflection = False
-        if tools_enabled() and tool_registry.available():
+        _tool_specs = allowed_tool_specs() if tools_enabled() else []
+        if _tool_specs:
             from zeus.core.tools.loop import run_tool_loop
 
             loop_result = await run_tool_loop(
                 system=system,
                 user_prompt=current_prompt,
-                tools=tool_registry.list_specs(),
+                tools=_tool_specs,
                 max_tokens=max_tokens,
                 max_calls=tools_max_calls(),
                 use_claude=_chat_use_claude(),
@@ -865,16 +867,16 @@ class QueryEngine:
         # The model's final turn is what the user sees; tool calls flow back
         # to the caller through tool_calls_out so the SSE done event can carry
         # them and the Chat UI can render the collapsible tool-call card.
-        from zeus.core.tools import registry as tool_registry
-        from zeus.core.tools import tools_enabled, tools_max_calls
+        from zeus.core.tools import allowed_tool_specs, tools_enabled, tools_max_calls
 
-        if tools_enabled() and tool_registry.available():
+        _tool_specs = allowed_tool_specs() if tools_enabled() else []
+        if _tool_specs:
             from zeus.core.tools.loop import run_tool_loop
 
             loop_result = await run_tool_loop(
                 system=system,
                 user_prompt=current_prompt,
-                tools=tool_registry.list_specs(),
+                tools=_tool_specs,
                 max_tokens=max_tokens,
                 max_calls=tools_max_calls(),
                 use_claude=_chat_use_claude(),
