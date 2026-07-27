@@ -233,6 +233,9 @@ zeus/data/*.db-wal
 zeus/data/audio/
 zeus/data/newsletters/
 
+# Zeus — fastembed BM25 model cache (persistent across container recreates, LAB-NEW-G)
+zeus/data/fastembed_cache/
+
 # Zeus — per-deployer personalized prompts and workspace files.
 # Generic templates are under zeus/prompts/templates/ and
 # zeus/safety/workspace-templates/ (tracked). These overrides dirs hold
