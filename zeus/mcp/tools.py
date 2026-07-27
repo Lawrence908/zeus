@@ -445,3 +445,159 @@ async def olympian_twitter_post(
     except TwitterPostError as exc:
         return {"posted": False, "error": str(exc)}
     return {"posted": True, "tweet_ids": ids, "url": f"https://x.com/i/web/status/{ids[0]}"}
+
+
+# ---------------------------------------------------------------------------
+# Epstein researcher — live proxy to the external document-research service.
+#
+# READ-ONLY. The ~1.3M-doc DOJ/court corpus, retrieval, graph, and synthesis
+# LLM live in the separate `epstein` service; Zeus stores nothing. SAFETY:
+# mention is not involvement; keep allegations labeled; never surface or infer
+# victim identities or redacted content; cite document_id + source_label for
+# every claim; obey the manifest's safety_rules. There is NO write path here.
+# ---------------------------------------------------------------------------
+_EPSTEIN_SAFETY = (
+    "Sensitive legal corpus (victims + unproven allegations). Mention is not "
+    "involvement; keep allegations labeled; never infer victim identities or "
+    "redacted content; cite document_id + source_label for every claim."
+)
+
+
+def _epstein_client():
+    from zeus.memory.epstein import get_epstein_client
+
+    client = get_epstein_client()
+    if client is None:
+        raise PermissionError(
+            "ZEUS_EPSTEIN_ENABLED is false; the Epstein research capability is disabled"
+        )
+    return client
+
+
+async def epstein_capabilities() -> dict[str, Any]:
+    """Live capability manifest of the Epstein research service: doc_types,
+    filter fields, endpoints, graph availability, auth mode, and the corpus
+    safety_rules. Call FIRST; do not hardcode doc types or filters."""
+    client = _epstein_client()
+    cap = await client.capabilities()
+    cap["_resolved_base"] = client.resolved_base
+    cap["_safety"] = _EPSTEIN_SAFETY
+    return cap
+
+
+async def epstein_search(
+    *,
+    query: str,
+    doc_type: str | None = None,
+    date_mentioned: str | None = None,
+    document_ids: list[str] | None = None,
+    n_results: int = 10,
+    expand_graph: bool = False,
+) -> dict[str, Any]:
+    """Fast semantic search over the Epstein DOJ/court corpus. Each result
+    carries a document_id + source_label you MUST cite. Mention is not
+    involvement; keep allegations labeled; never infer victim identities."""
+    client = _epstein_client()
+    data = await client.search(
+        query,
+        doc_type=doc_type,
+        date_mentioned=date_mentioned,
+        document_ids=document_ids,
+        n_results=n_results,
+        expand_graph=expand_graph,
+    )
+    data["_safety"] = _EPSTEIN_SAFETY
+    return data
+
+
+async def epstein_document(*, document_id: str) -> dict[str, Any]:
+    """Reconstructed full text + metadata of one corpus document by id. Do not
+    surface or infer victim identities or redacted content; cite the id."""
+    client = _epstein_client()
+    d = await client.document(document_id)
+    d["_safety"] = _EPSTEIN_SAFETY
+    return d
+
+
+async def epstein_entity(
+    *, name: str, depth: int = 1, related_to: str | None = None
+) -> dict[str, Any]:
+    """Entity dossier from the corpus knowledge graph. Graph co-occurrence is a
+    signal for where to read, NEVER an accusation. Degrades gracefully when the
+    graph is down (503)."""
+    from zeus.memory.epstein import EpsteinError
+
+    client = _epstein_client()
+    try:
+        d = await client.entity(name, depth=depth, related_to=related_to)
+    except EpsteinError as exc:
+        if exc.status == 503:
+            return {"entity": name, "graph_available": False, "error": "graph down (503)", "_safety": _EPSTEIN_SAFETY}
+        raise
+    d["_safety"] = _EPSTEIN_SAFETY
+    return d
+
+
+async def epstein_research_start(
+    *,
+    question: str,
+    doc_type: str | None = None,
+    date_mentioned: str | None = None,
+    depth: int = 3,
+) -> dict[str, Any]:
+    """Start an async deep-research job (decompose -> retrieve -> cited
+    synthesis). Returns a job_id immediately; poll epstein_research_result.
+    Synthesis may time out but citations still return."""
+    client = _epstein_client()
+    d = await client.start_job(
+        question, doc_type=doc_type, date_mentioned=date_mentioned, depth=depth
+    )
+    d["_safety"] = _EPSTEIN_SAFETY
+    return d
+
+
+async def epstein_research_result(*, job_id: str) -> dict[str, Any]:
+    """Poll a deep-research job. Returns status, steps, report (may be empty on
+    synthesis timeout — a known caveat), and citations. ALWAYS surface the
+    citations even when the prose is missing."""
+    client = _epstein_client()
+    d = await client.get_job(job_id)
+    d["_safety"] = _EPSTEIN_SAFETY
+    return d
+
+
+async def epstein_research(
+    *,
+    question: str,
+    doc_type: str | None = None,
+    date_mentioned: str | None = None,
+    depth: int = 3,
+    wait_seconds: int = 0,
+) -> dict[str, Any]:
+    """End-to-end research workflow: plan sub-queries -> fast cited retrieval ->
+    entity signals -> async deep-synthesis job. Returns a citation-backed
+    answer (markdown), the citations, an explicit confidence level, and the
+    gaps. Mention is not involvement; allegations stay labeled; victim
+    identities are never inferred."""
+    _epstein_client()  # gate on ZEUS_EPSTEIN_ENABLED
+    from zeus.orchestration.epstein_research import run_research
+
+    result = await run_research(
+        question,
+        doc_type=doc_type,
+        date_mentioned=date_mentioned,
+        depth=depth,
+        poll_budget_seconds=float(wait_seconds or 0),
+    )
+    return {
+        "question": result.question,
+        "answer_markdown": result.to_markdown(),
+        "citations": result.citations(),
+        "confidence": result.confidence,
+        "gaps": result.gaps,
+        "job_id": result.job_id,
+        "job_status": result.job_status,
+        "graph_available": result.graph_available,
+        "error": result.error,
+        "_safety": _EPSTEIN_SAFETY,
+    }

@@ -145,6 +145,82 @@ async def _dispatch_newsletter_latest(args: dict[str, Any]) -> Any:
     return {"digest": digests[0] if digests else None, "exists": bool(digests)}
 
 
+async def _epstein_client_or_none():
+    from zeus.memory.epstein import get_epstein_client
+
+    return get_epstein_client()
+
+
+async def _dispatch_epstein_capabilities(args: dict[str, Any]) -> Any:
+    client = await _epstein_client_or_none()
+    if client is None:
+        return {"error": "epstein disabled"}
+    cap = await client.capabilities()
+    return {
+        "doc_types": list(cap.get("doc_types", {})),
+        "graph_available": cap.get("graph_available"),
+        "safety_rules": cap.get("safety_rules"),
+    }
+
+
+async def _dispatch_epstein_search(args: dict[str, Any]) -> Any:
+    client = await _epstein_client_or_none()
+    if client is None:
+        return {"error": "epstein disabled"}
+    query = str(args.get("query") or "").strip()
+    if not query:
+        raise ValueError("epstein_search requires 'query'")
+    data = await client.search(
+        query,
+        doc_type=args.get("doc_type"),
+        date_mentioned=args.get("date_mentioned"),
+        n_results=int(args.get("n_results") or 10),
+    )
+    # Compact: counts + citation handles only (Kairos observes, doesn't render).
+    results = data.get("results", []) or []
+    return {
+        "count": len(results),
+        "citations": [
+            {"document_id": r.get("document_id"), "source_label": r.get("source_label")}
+            for r in results
+        ],
+    }
+
+
+async def _dispatch_epstein_entity(args: dict[str, Any]) -> Any:
+    from zeus.memory.epstein import EpsteinError
+
+    client = await _epstein_client_or_none()
+    if client is None:
+        return {"error": "epstein disabled"}
+    name = str(args.get("name") or "").strip()
+    if not name:
+        raise ValueError("epstein_entity requires 'name'")
+    try:
+        d = await client.entity(name, depth=int(args.get("depth") or 1))
+    except EpsteinError as exc:
+        if exc.status == 503:
+            return {"entity": name, "graph_available": False}
+        raise
+    sg = d.get("subgraph", {}) or {}
+    return {"entity": d.get("entity", name), "nodes": len(sg.get("nodes", []) or [])}
+
+
+async def _dispatch_epstein_research_result(args: dict[str, Any]) -> Any:
+    client = await _epstein_client_or_none()
+    if client is None:
+        return {"error": "epstein disabled"}
+    job_id = str(args.get("job_id") or "").strip()
+    if not job_id:
+        raise ValueError("epstein_research_result requires 'job_id'")
+    d = await client.get_job(job_id)
+    return {
+        "status": d.get("status"),
+        "citations": len(d.get("citations", []) or []),
+        "has_report": bool(str(d.get("report") or "").strip()),
+    }
+
+
 _OLYMPIAN_READONLY_DISPATCH: dict[str, Any] = {
     "olympian_status_read": _dispatch_status_read,
     "olympian_server_health": _dispatch_server_health,
@@ -152,6 +228,13 @@ _OLYMPIAN_READONLY_DISPATCH: dict[str, Any] = {
     "olympian_file_search": _dispatch_file_search,
     "zeus_calendar_today": _dispatch_calendar_today,
     "zeus_newsletter_latest": _dispatch_newsletter_latest,
+    # Epstein researcher — read-only corpus proxy. Only reachable when both the
+    # tool is in ZEUS_KAIROS_TOOL_ALLOWLIST and ZEUS_EPSTEIN_ENABLED=1. No write
+    # path to the epstein service is exposed to Kairos.
+    "epstein_capabilities": _dispatch_epstein_capabilities,
+    "epstein_search": _dispatch_epstein_search,
+    "epstein_entity": _dispatch_epstein_entity,
+    "epstein_research_result": _dispatch_epstein_research_result,
 }
 
 

@@ -339,6 +339,117 @@ MCP_TOOLS: list[McpToolSpec] = [
         },
         write_gated=True,
     ),
+    # Epstein researcher — read-only live proxy to the external corpus API.
+    # Gated by ZEUS_EPSTEIN_ENABLED. Mention is not involvement; allegations
+    # stay labeled; victim identities are never inferred; every claim is cited.
+    McpToolSpec(
+        name="epstein_capabilities",
+        description=(
+            "Live capability manifest of the external Epstein research service: "
+            "doc_types, filter fields, endpoints, graph availability, and the "
+            "corpus safety_rules. Call first; do not hardcode doc types."
+        ),
+        parameters={"type": "object", "properties": {}},
+    ),
+    McpToolSpec(
+        name="epstein_search",
+        description=(
+            "Fast semantic search over the Epstein DOJ/court corpus (~1.3M "
+            "docs). Each result carries a document_id + source_label you MUST "
+            "cite. Mention is not involvement; never infer victim identities."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "doc_type": {"type": "string"},
+                "date_mentioned": {"type": "string"},
+                "document_ids": {"type": "array", "items": {"type": "string"}},
+                "n_results": {"type": "integer", "minimum": 1, "maximum": 50},
+                "expand_graph": {"type": "boolean"},
+            },
+            "required": ["query"],
+        },
+    ),
+    McpToolSpec(
+        name="epstein_document",
+        description=(
+            "Reconstructed full text + metadata of one corpus document by id. "
+            "Do not surface or infer redacted content; cite the id."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"document_id": {"type": "string"}},
+            "required": ["document_id"],
+        },
+    ),
+    McpToolSpec(
+        name="epstein_entity",
+        description=(
+            "Entity dossier from the corpus knowledge graph (co-occurrence is a "
+            "signal, NEVER an accusation). Degrades gracefully when the graph "
+            "is down (503)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 3},
+                "related_to": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    ),
+    McpToolSpec(
+        name="epstein_research_start",
+        description=(
+            "Start an async deep-research job (decompose -> retrieve -> cited "
+            "synthesis). Returns a job_id; poll epstein_research_result. "
+            "Synthesis may time out but citations still return."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "doc_type": {"type": "string"},
+                "date_mentioned": {"type": "string"},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 5},
+            },
+            "required": ["question"],
+        },
+    ),
+    McpToolSpec(
+        name="epstein_research_result",
+        description=(
+            "Poll a deep-research job: status, steps, report (may be empty on "
+            "synthesis timeout), and citations. Always surface the citations "
+            "even when the prose is missing."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"job_id": {"type": "string"}},
+            "required": ["job_id"],
+        },
+    ),
+    McpToolSpec(
+        name="epstein_research",
+        description=(
+            "End-to-end research workflow: plan sub-queries -> fast cited "
+            "retrieval -> entity signals -> async deep-synthesis job. Returns a "
+            "citation-backed answer with explicit confidence and gaps."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "doc_type": {"type": "string"},
+                "date_mentioned": {"type": "string"},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 5},
+                "wait_seconds": {"type": "integer", "minimum": 0, "maximum": 120},
+            },
+            "required": ["question"],
+        },
+    ),
 ]
 
 

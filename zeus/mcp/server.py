@@ -21,6 +21,13 @@ from zeus.mcp.tools import (
     capitolscope_leaderboard,
     capitolscope_sector_flow,
     capitolscope_ticker,
+    epstein_capabilities,
+    epstein_document,
+    epstein_entity,
+    epstein_research,
+    epstein_research_result,
+    epstein_research_start,
+    epstein_search,
     kronos_create_job,
     olympian_action_list,
     olympian_action_run,
@@ -207,6 +214,74 @@ async def capitolscope_sector_flow_tool(days: int = 90):
 @mcp.tool(name="capitolscope_leaderboard")
 async def capitolscope_leaderboard_tool(limit: int = 20):
     return await capitolscope_leaderboard(limit=limit)
+
+
+@mcp.tool(name="epstein_capabilities")
+async def epstein_capabilities_tool():
+    return await epstein_capabilities()
+
+
+@mcp.tool(name="epstein_search")
+async def epstein_search_tool(
+    query: str,
+    doc_type: str | None = None,
+    date_mentioned: str | None = None,
+    document_ids: list[str] | None = None,
+    n_results: int = 10,
+    expand_graph: bool = False,
+):
+    return await epstein_search(
+        query=query,
+        doc_type=doc_type,
+        date_mentioned=date_mentioned,
+        document_ids=document_ids,
+        n_results=n_results,
+        expand_graph=expand_graph,
+    )
+
+
+@mcp.tool(name="epstein_document")
+async def epstein_document_tool(document_id: str):
+    return await epstein_document(document_id=document_id)
+
+
+@mcp.tool(name="epstein_entity")
+async def epstein_entity_tool(name: str, depth: int = 1, related_to: str | None = None):
+    return await epstein_entity(name=name, depth=depth, related_to=related_to)
+
+
+@mcp.tool(name="epstein_research_start")
+async def epstein_research_start_tool(
+    question: str,
+    doc_type: str | None = None,
+    date_mentioned: str | None = None,
+    depth: int = 3,
+):
+    return await epstein_research_start(
+        question=question, doc_type=doc_type, date_mentioned=date_mentioned, depth=depth
+    )
+
+
+@mcp.tool(name="epstein_research_result")
+async def epstein_research_result_tool(job_id: str):
+    return await epstein_research_result(job_id=job_id)
+
+
+@mcp.tool(name="epstein_research")
+async def epstein_research_tool(
+    question: str,
+    doc_type: str | None = None,
+    date_mentioned: str | None = None,
+    depth: int = 3,
+    wait_seconds: int = 0,
+):
+    return await epstein_research(
+        question=question,
+        doc_type=doc_type,
+        date_mentioned=date_mentioned,
+        depth=depth,
+        wait_seconds=wait_seconds,
+    )
 
 
 def main() -> None:

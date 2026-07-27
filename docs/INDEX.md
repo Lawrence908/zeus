@@ -60,6 +60,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [model-comparison.md](../zeus/docs/model-comparison.md) | product | Measured tok/s, TTFT, VRAM fit per Ollama model on the 3080. |
 | [pheme.md](../zeus/docs/pheme.md) | product | Pheme news subsystem: `zeus_news` store, Canary + CapitolScope ingest, staged local pipeline, Kronos daily digest, breaking observer, Telegram push, gated Twitter. |
 | [pheme-twitter-setup.md](../zeus/docs/pheme-twitter-setup.md) | ops | One-time X/Twitter OAuth2 setup for Pheme: developer-app values, `.env` keys, `scripts/twitter_oauth_setup.py` token bootstrap, verification, troubleshooting. |
+| [epstein.md](../zeus/docs/epstein.md) | product | Epstein researcher: live read-only proxy to the external ~1.3M-doc corpus API, 7 tools (MCP + chat + Kairos), plan→retrieve→job research workflow, write-gated memory persistence, overnight Kronos job, safety framing, epstein-side evolution notes. |
 | [zeus-os.md](../zeus/docs/zeus-os.md) | product | Tiling-WM web shell: SvelteKit frontend at `zeus-os/`, FastAPI bridge at `zeus/core/zeus_os/`, served at `/os/`. Keymap, env vars, phase plan. |
 | [obsidian-livesync-ingest.md](../zeus/docs/obsidian-livesync-ingest.md) | ops | CouchDB to local vault to ingest: LiveSync CLI setup, headless troubleshooting. |
 | [orpheus-spec.md](../zeus/docs/orpheus-spec.md) | product | Voice pipeline: wake, STT, TTS, streaming LLM, Phaos emitter. |
