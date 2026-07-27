@@ -866,6 +866,32 @@ async def _synthesize_insights(
     return out
 
 
+def _audio_enabled() -> bool:
+    return os.getenv("PHEME_AUDIO", "1").strip() not in ("0", "false", "no")
+
+
+def _audio_summary_dict(
+    lead: str, insights: list[str], top: list[ClusterSummary]
+) -> dict[str, Any]:
+    """Map a digest onto the newsletter _generate_audio() shape.
+
+    The TTS script becomes: lead, then per-story one-liners as 'highlights',
+    then insights as the 'advice' closer. Voice-friendly: no URLs, no markup.
+    """
+    bullets = []
+    for cluster in top:
+        take = _one_line_take(cluster)
+        line = f"{cluster.name}. {take}" if take else cluster.name
+        if cluster.thread_status == "development" and cluster.thread_days > 1:
+            line = f"Day {cluster.thread_days} of {line}"
+        bullets.append(line)
+    return {
+        "summary": lead.strip(),
+        "bullets": bullets,
+        "advice": " ".join(insights),
+    }
+
+
 def _coverage_label(cluster: ClusterSummary) -> str:
     """Human coverage line: distinct stories + outlet breadth when they differ."""
     n = cluster.unique_count or len(cluster.item_ids)
@@ -1015,6 +1041,18 @@ async def run_pheme_pipeline(
         lead = top[0].claim if top else "No significant news in this window."
 
     insights = await _synthesize_insights(top, correlations)
+
+    # Morning-listen track via the newsletter TTS path. Best-effort: returns
+    # None whenever Voicebox is unreachable, and the digest ships without it.
+    audio_file: str | None = None
+    if _audio_enabled() and top:
+        try:
+            from zeus.core.newsletter import _generate_audio
+
+            audio_file = await _generate_audio(_audio_summary_dict(lead, insights, top))
+        except Exception as exc:
+            logger.warning("digest audio generation failed: %s", exc)
+
     public_lead, public_thread = _compose_public_trim(correlations, top)
     digest = PhemeDigest(
         id=digest_id,
@@ -1025,6 +1063,8 @@ async def run_pheme_pipeline(
         connections=correlations,
         clusters=top,
         body=_compose_body(lead, insights, correlations, top),
+        audio_file=audio_file,
+        audio_url=f"/api/newsletter/audio/{audio_file}" if audio_file else None,
         public_lead=public_lead,
         public_thread=public_thread,
         stats={
@@ -1060,6 +1100,8 @@ def _record_manifest_entry(digest: PhemeDigest) -> None:
             summary=digest.lead,
             bullets=[f"{c.name}: {_one_line_take(c)}" for c in digest.clusters],
             advice="\n".join(c.claim for c in digest.connections[:3]),
+            audio_file=digest.audio_file,
+            audio_url=digest.audio_url,
             generated_at=digest.generated_at,
         )
         with _manifest_lock:

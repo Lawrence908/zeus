@@ -93,6 +93,8 @@ class PhemeDigest(BaseModel):
     connections: list[Correlation] = Field(default_factory=list)
     clusters: list[ClusterSummary] = Field(default_factory=list)
     body: str = ""                                          # full personal digest (markdown-ish plain text)
+    audio_file: str | None = None                           # TTS filename under NEWSLETTER_AUDIO_DIR
+    audio_url: str | None = None                            # served via /api/newsletter/audio/
     public_lead: str = ""                                   # trimmed lead tweet text
     public_thread: list[str] = Field(default_factory=list)  # follow-up tweets
     stats: dict[str, Any] = Field(default_factory=dict)

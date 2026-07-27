@@ -311,6 +311,23 @@ async def send_digest_telegram(digest: PhemeDigest, *, breaking: bool = False) -
         except Exception as exc2:
             logger.error("pheme telegram push failed: %s", exc2)
             return False
+
+    # Morning-listen track (best-effort; text digest already delivered).
+    if digest.audio_file:
+        audio_path = Path(os.getenv("NEWSLETTER_AUDIO_DIR", "zeus/data/audio")) / digest.audio_file
+        if audio_path.is_file():
+            try:
+                day = digest.generated_at[:10]
+                with open(audio_path, "rb") as fh:
+                    await bot.send_audio(
+                        chat_id=chat_id,
+                        audio=fh,
+                        title=f"Pheme Daily Digest {day}",
+                        performer="Zeus",
+                    )
+            except Exception as exc:
+                logger.warning("digest audio send failed: %s", exc)
+
     logger.info("pheme digest %s pushed to telegram chat %s", digest.id, chat_id)
     return True
 

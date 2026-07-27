@@ -85,6 +85,14 @@ fed into the relevance prompt. Reactions resolve via
 `digest_context.json` (last 15 digests); older digests answer "feedback window
 expired".
 
+**Audio digest** (`PHEME_AUDIO=1`, default on): stage 6 renders a
+voice-friendly script (lead, per-story one-liners with "Day N of ..."
+markers, insights as the closer) through the newsletter TTS path
+(`_generate_audio` -> Voicebox). Best-effort: when `VOICEBOX_URL` is down the
+digest ships without audio. When generated, the track is sent to the Telegram
+news chat as an audio message and exposed on the manifest entry
+(`/api/newsletter/audio/...`) so the `/newsletters` UI plays it.
+
 Telegram delivery renders the digest as Telegram HTML (`format_digest_html`):
 bold headers with date, insights and connections sections, per-story meta line
 (`N articles · new/developing`), one titled link per story with a `+N more`

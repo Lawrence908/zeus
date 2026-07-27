@@ -58,3 +58,20 @@ def test_name_from_bare_ticker():
 
 def test_no_false_positive_on_unrelated():
     assert resolve_tickers(["gatwick airport"], "water outage at the terminal") == []
+
+
+def test_audio_summary_dict_shape():
+    from zeus.pheme.models import ClusterSummary
+    from zeus.pheme.pipeline import _audio_summary_dict
+
+    clusters = [
+        ClusterSummary(key="a", name="Berlin Pride Attack", claim="Suspect shot dead",
+                       thread_status="development", thread_days=2),
+        ClusterSummary(key="b", name="Gatwick outage", claim="Water restored"),
+    ]
+    d = _audio_summary_dict("Lead paragraph.", ["Insight one."], clusters)
+    assert d["summary"] == "Lead paragraph."
+    assert d["bullets"][0].startswith("Day 2 of Berlin Pride Attack")
+    assert d["bullets"][1].startswith("Gatwick outage")
+    assert d["advice"] == "Insight one."
+    assert "http" not in " ".join(d["bullets"])
