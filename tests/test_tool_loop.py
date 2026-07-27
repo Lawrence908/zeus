@@ -893,3 +893,62 @@ class TestToolAllowlist:
             "os.environ", {"ZEUS_TOOLS_ALLOWLIST": "nonexistent"}, clear=False
         ):
             assert allowed_tool_specs() == []
+
+
+class TestToolMetrics:
+    """recorder.metrics_summary() rolls the ring buffer up for /admin/metrics."""
+
+    def test_empty_buffer(self) -> None:
+        from zeus.core.tools import recorder
+
+        recorder.clear_invocations()
+        s = recorder.metrics_summary()
+        assert s["total"] == 0
+        assert s["error_rate"] == 0.0
+        assert s["per_tool"] == {}
+
+    def test_rollup_counts_rates_and_percentiles(self) -> None:
+        from zeus.core.tools import recorder
+
+        recorder.clear_invocations()
+        for i in range(4):
+            recorder.record_invocation(
+                tool="current_time",
+                args={},
+                content="ok",
+                is_error=False,
+                cache_hit=(i % 2 == 0),
+                duration_ms=100,
+            )
+        recorder.record_invocation(
+            tool="web_search",
+            args={},
+            content="boom",
+            is_error=True,
+            cache_hit=False,
+            duration_ms=900,
+            aegis_rejected=True,
+        )
+        s = recorder.metrics_summary()
+        assert s["total"] == 5
+        assert s["error_rate"] == 0.2
+        assert s["cache_hit_rate"] == 0.4
+        assert s["aegis_reject_count"] == 1
+        # Busiest tool first.
+        assert next(iter(s["per_tool"])) == "current_time"
+        assert s["per_tool"]["current_time"]["calls"] == 4
+        assert s["per_tool"]["web_search"]["errors"] == 1
+        recorder.clear_invocations()
+
+    def test_window_filters_old_entries(self) -> None:
+        from zeus.core.tools import recorder
+
+        recorder.clear_invocations()
+        recorder.record_invocation(
+            tool="current_time", args={}, content="ok",
+            is_error=False, cache_hit=False, duration_ms=10,
+        )
+        # A negative window puts the cutoff in the future, excluding the entry.
+        assert recorder.metrics_summary(window_seconds=-1.0)["total"] == 0
+        assert recorder.metrics_summary(window_seconds=3600)["total"] == 1
+        recorder.clear_invocations()

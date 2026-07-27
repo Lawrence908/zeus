@@ -68,6 +68,8 @@ async def metrics(request: Request) -> dict[str, Any]:
         if recent else None
     )
 
+    from zeus.core.tools.recorder import metrics_summary as _tool_metrics
+
     return {
         "uptime_seconds": round(time.time() - boot_time, 1),
         "agents": runtime.get_status() if runtime else {},
@@ -76,6 +78,7 @@ async def metrics(request: Request) -> dict[str, Any]:
         "recent_queries": recent[-20:],  # last 20 for dashboard table
         "scheduler": scheduler_info,
         "kronos": await _kronos_metrics(request),
+        "tools": _tool_metrics(),
     }
 
 
