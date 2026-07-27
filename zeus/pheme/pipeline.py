@@ -488,49 +488,83 @@ async def _stage_cluster(
 # Stage 3 - thread to history
 # ---------------------------------------------------------------------------
 
-_THREAD_SYSTEM = """\
-You compare today's news story against prior coverage of the same story.
-Return JSON only: status is "development" when today's item advances a story
-already covered before, otherwise "new". note is one sentence stating what
-changed since the prior coverage (empty when status is "new").
+_THREAD_NOTE_SYSTEM = """\
+You write the "what changed" line for an ongoing news story. You get the
+story's prior coverage as dated claims, then today's claim. Return JSON only:
+status is always "development"; note is exactly one sentence stating what is
+new or different today versus the prior coverage. If today adds nothing
+substantive, state where the story stands instead. Plain text, neutral.
 """
 
 
 async def _stage_thread(
     clusters: list[ClusterSummary], store: NewsStore, cache: StageCache, since: str, fp: str
 ) -> None:
+    """Attach persistent story-thread identity (zeus/pheme/threads.py).
+
+    A cluster matching a thread first seen on an earlier day is a
+    "development" with a real day count and a history-grounded change note;
+    everything else starts a new thread. The cached path skips registry
+    writes so a same-item-set rerun never inflates day counts.
+    """
     cached: dict[str, Any] = cache.get("stage3_thread", fingerprint=fp) or {}
-    for cluster in clusters:
-        if cluster.key in cached:
-            data = cached[cluster.key]
+    if cached:
+        for cluster in clusters:
+            data = cached.get(cluster.key) or {}
             cluster.thread_status = data.get("status", "new")
             cluster.thread_note = data.get("note", "")
+            cluster.thread_id = data.get("thread_id", "")
+            cluster.thread_days = int(data.get("days", 1))
+        return
+
+    from zeus.pheme.threads import match_and_update
+
+    rows = [
+        (c.key, _entity_tokens(c.entities) | _entity_tokens([c.name]), c.name, c.claim)
+        for c in clusters
+    ]
+    matches = await asyncio.to_thread(match_and_update, rows)
+
+    for cluster in clusters:
+        m = matches.get(cluster.key)
+        if m is None:
             continue
-        query = f"{cluster.name} {' '.join(cluster.entities[:5])}"
-        prior = await asyncio.to_thread(
-            store.search, query, 5, {"until": since}
-        )
-        prior = [h for h in prior if h.score >= 0.6 and f"{h.source}:{h.payload.get('source_id')}" not in cluster.item_ids]
-        if prior:
-            prior_lines = "\n".join(f"- {h.published_at[:10]}: {h.title}" for h in prior[:4])
-            try:
-                note = await pheme_llm_call(
-                    system=_THREAD_SYSTEM,
-                    user=(
-                        f"Today's story: {cluster.name}\n{cluster.claim}\n\n"
-                        f"Prior coverage:\n{prior_lines}"
-                    ),
-                    response_format=ThreadNote,
-                    max_tokens=150,
-                    caller="pheme.thread",
-                )
-                cluster.thread_status = note.status
-                cluster.thread_note = note.note
-            except PhemeLLMFailed:
-                cluster.thread_status = "development"
-                cluster.thread_note = ""
-        cached[cluster.key] = {"status": cluster.thread_status, "note": cluster.thread_note}
-        cache.put("stage3_thread", cached, fingerprint=fp)
+        cluster.thread_id = m.thread_id
+        cluster.thread_days = m.days_seen
+        if m.is_new:
+            cluster.thread_status = "new"
+            cluster.thread_note = ""
+        else:
+            cluster.thread_status = "development"
+            cluster.thread_note = ""
+            history_lines = "\n".join(
+                f"- {h.get('date')}: {h.get('claim') or h.get('name')}"
+                for h in m.prior_history
+                if h.get("claim") or h.get("name")
+            )
+            if history_lines:
+                try:
+                    note = await pheme_llm_call(
+                        system=_THREAD_NOTE_SYSTEM,
+                        user=(
+                            f"Prior coverage (day 1 was {m.first_seen}):\n{history_lines}\n\n"
+                            f"Today ({cluster.name}): {cluster.claim}"
+                        ),
+                        response_format=ThreadNote,
+                        max_tokens=150,
+                        caller="pheme.thread",
+                    )
+                    if note.note.strip() and not _is_junk_text(note.note):
+                        cluster.thread_note = note.note.strip()
+                except PhemeLLMFailed:
+                    pass
+        cached[cluster.key] = {
+            "status": cluster.thread_status,
+            "note": cluster.thread_note,
+            "thread_id": cluster.thread_id,
+            "days": cluster.thread_days,
+        }
+    cache.put("stage3_thread", cached, fingerprint=fp)
 
 
 # ---------------------------------------------------------------------------
@@ -868,7 +902,10 @@ def _compose_body(
         lines.append("")
     lines.append("Top stories:")
     for i, cluster in enumerate(top, 1):
-        marker = "developing" if cluster.thread_status == "development" else "new"
+        if cluster.thread_status == "development":
+            marker = f"day {cluster.thread_days}" if cluster.thread_days > 1 else "developing"
+        else:
+            marker = "new"
         lines.append(f"{i}. {cluster.name} ({_coverage_label(cluster)}, {marker})")
         take = _one_line_take(cluster)
         if take:

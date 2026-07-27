@@ -77,6 +77,8 @@ class ClusterSummary(BaseModel):
     claim: str = ""
     thread_status: str = "new"
     thread_note: str = ""
+    thread_id: str = ""        # persistent story-thread identity (threads.db)
+    thread_days: int = 0       # how many days this story has run (1 = first day)
     significance: float = 0.0
     unique_count: int = 0      # distinct stories after syndication dedup
     outlet_count: int = 0      # distinct outlet domains across all copies

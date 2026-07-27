@@ -54,9 +54,13 @@ CapitolScope┘   (NewsStore)               └─ Twitter (gated, approval-firs
    only on an embedding bridge >= `PHEME_CLUSTER_MERGE_SIM` (0.78; measured on
    the 2026-07-26 Berlin split, where cross-outlet same-story pairs score
    0.80-0.90). LLM only names multi-item clusters.
-3. **Thread** (non-LLM query + light LLM): prior-coverage lookup with
-   `until=<window start>`; "development" vs "new" plus a one-line
-   what-changed note.
+3. **Thread** (registry + light LLM): clusters match persistent story threads
+   (`zeus/pheme/threads.py`, `threads.db`) by salient entity-token overlap
+   (>= 2 shared, strongest claim wins, threads expire after
+   `PHEME_THREAD_MAX_AGE_DAYS`, default 10). A thread first seen on an earlier
+   day IS a development - the LLM only writes the one-line what-changed note
+   from the thread's dated claim history. Digests show "day N" for ongoing
+   stories; same-day reruns never inflate day counts.
 4. **Correlate** (LLM, targeted): only CapitolScope x Canary pairs that share
    an entity, strongest overlap first, capped at
    `PHEME_MAX_CORRELATION_PAIRS`. Kept when connected, confidence >= 0.5.

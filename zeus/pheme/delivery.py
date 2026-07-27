@@ -185,7 +185,10 @@ def format_digest_html(digest: PhemeDigest, *, breaking: bool = False) -> str:
     from zeus.pheme.pipeline import _coverage_label, _one_line_take
 
     for i, cluster in enumerate(digest.clusters, 1):
-        marker = "📈 developing" if cluster.thread_status == "development" else "🆕 new"
+        if cluster.thread_status == "development":
+            marker = f"📈 day {cluster.thread_days}" if cluster.thread_days > 1 else "📈 developing"
+        else:
+            marker = "🆕 new"
         lines.append(
             f"{i}. <b>{_esc(cluster.name)}</b>  ·  {_esc(_coverage_label(cluster))}  ·  {marker}"
         )
