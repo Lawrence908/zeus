@@ -74,3 +74,14 @@ def test_stale_threads_pruned():
     out = match_and_update([("b", BERLIN, "Berlin again", "y")], today="2026-07-26")
     assert out["b"].is_new
     assert out["b"].thread_id != old["a"].thread_id
+
+
+def test_generic_tokens_cannot_carry_a_match():
+    tech = {"nvidia", "microsoft", "congress", "earnings", "tech"}
+    match_and_update([("c1", tech, "AI Letter to Congress", "x")], today="2026-07-27")
+    out = match_and_update(
+        [("c2", {"franklin", "electric", "earnings", "tech"}, "Franklin Electric earnings", "y")],
+        today="2026-07-28",
+        generic_tokens={"earnings", "tech"},
+    )
+    assert out["c2"].is_new  # only generic tokens shared -> no theft

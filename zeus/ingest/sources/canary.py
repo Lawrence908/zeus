@@ -51,6 +51,9 @@ def _title_from_url(url: str) -> str:
         if _SLUG_JUNK_RE.match(seg) or "." in seg or len(seg) < 12:
             continue
         words = [w for w in seg.replace("_", "-").split("-") if w]
+        # Drop leading date/id tokens ("2026-07-28-judge-dismisses-...").
+        while words and not words[0].isalpha():
+            words.pop(0)
         alpha_words = [
             w for w in words
             if w.isalpha() and not all(c in "0123456789abcdef" for c in w)

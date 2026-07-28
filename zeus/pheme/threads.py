@@ -71,15 +71,21 @@ def match_and_update(
     clusters: list[tuple[str, set[str], str, str]],
     *,
     today: str | None = None,
+    generic_tokens: set[str] | None = None,
 ) -> dict[str, ThreadMatch]:
     """Match this run's clusters to threads and update the registry.
 
     ``clusters`` rows are (cluster_key, salient_tokens, name, claim); the
     caller computes tokens with the same collapse rules it clusters with.
+    ``generic_tokens`` are run-frequent tokens ("earnings", "election") that
+    may support a match but never carry it: a match needs >= 2 shared tokens
+    of which at least one is distinctive, so Franklin Electric earnings
+    cannot steal the Nvidia/Microsoft thread on "tech" + "earnings" alone.
     Returns cluster_key -> ThreadMatch. Same-day reruns are idempotent:
     a thread already seen today is updated in place without inflating
     days_seen, and stays "new" only if today is its first day.
     """
+    generic_tokens = generic_tokens or set()
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     cutoff = (
         datetime.strptime(today, "%Y-%m-%d") - timedelta(days=_max_age_days())
@@ -108,9 +114,9 @@ def match_and_update(
         for pos, (key, tokens, name, claim) in enumerate(clusters):
             best, best_shared = None, 0
             for t in threads:
-                shared = len(tokens & t["tokens"])
-                if shared > best_shared:
-                    best, best_shared = t, shared
+                overlap = tokens & t["tokens"]
+                if len(overlap) > best_shared and overlap - generic_tokens:
+                    best, best_shared = t, len(overlap)
             scored.append((best_shared, pos, (key, tokens, name, claim, best)))
         scored.sort(key=lambda s: (-s[0], s[1]))
 

@@ -146,6 +146,21 @@ def _entity_tokens(entities: list[str]) -> set[str]:
     return tokens
 
 
+def _generic_tokens(token_sets: list[set[str]], *, floor: int = 3, frac: float = 0.08) -> set[str]:
+    """Tokens frequent across today's corpus ("earnings", "election", "trump").
+
+    Frequent tokens may support a cluster merge or thread match but never
+    carry one - that is how Franklin Electric earnings ended up glued to the
+    Nvidia/Microsoft AI-letter thread (2026-07-28 digest).
+    """
+    df: dict[str, int] = {}
+    for tokens in token_sets:
+        for tok in tokens:
+            df[tok] = df.get(tok, 0) + 1
+    threshold = max(floor, int(frac * len(token_sets)))
+    return {tok for tok, n in df.items() if n > threshold}
+
+
 def _clean_extracted_entities(entities: list[str]) -> list[str]:
     """Drop URL/id residue the extractor sometimes emits (e.g. 'n2430637')."""
     out = []
@@ -244,9 +259,30 @@ async def _stage_extract(items: list[_Item], store: NewsStore, cache: StageCache
 # ---------------------------------------------------------------------------
 
 _NAME_SYSTEM = """\
-You name one real-world news story that several items all cover.
-Return JSON only: a neutral 3-8 word name. No punctuation beyond spaces.
+You headline one real-world news story that several items all cover.
+Return JSON only: a specific news headline of 4-9 words saying who did what,
+e.g. "Oil Falls as US-Iran Talks Resume" or "Berlin Pride Attacker Shot Dead".
+Never a topic label or keyword list; never words like Story, Reports, Update,
+Coverage, News.
 """
+
+# Headline sanity: an acceptable name is short, or reads like a sentence
+# (contains a connective/verb-ish function word), and never ends in a
+# topic-label noun. Failures fall back to the best member headline.
+_LABEL_NOUN_RE = re.compile(r"(story|stories|reports?|updates?|coverage|news)\s*$", re.IGNORECASE)
+_FUNCTION_WORDS = {
+    "as", "in", "on", "to", "of", "at", "for", "with", "after", "over", "amid",
+    "into", "from", "by", "against", "despite", "is", "are", "falls", "rises",
+}
+
+
+def _looks_like_headline(name: str) -> bool:
+    words = name.strip().split()
+    if not words or _LABEL_NOUN_RE.search(name):
+        return False
+    if len(words) <= 4:
+        return True
+    return any(w.casefold().strip(".,'") in _FUNCTION_WORDS for w in words)
 
 
 class _UnionFind:
@@ -384,20 +420,23 @@ async def _stage_cluster(
     groups = _build_groups()
 
     # Second pass: merge same-story clusters that exact-phrase entity overlap
-    # missed. Candidates share >= 2 salient entity tokens; an embedding bridge
-    # (rep item's neighbour in the other cluster >= PHEME_CLUSTER_MERGE_SIM)
-    # makes the final call so generic token overlap alone never merges.
+    # missed. Candidates share >= 2 salient entity tokens with at least one
+    # distinctive (non-run-frequent); an embedding bridge (rep item's
+    # neighbour in the other cluster >= PHEME_CLUSTER_MERGE_SIM) makes the
+    # final call so generic token overlap alone never merges.
     merge_sim = _cluster_merge_sim()
     roots = list(groups)
     token_sets = {
         root: _entity_tokens([e for m in members for e in m.entities])
         for root, members in groups.items()
     }
+    run_generic = _generic_tokens(list(token_sets.values()))
     for i, ra in enumerate(roots):
         for rb in roots[i + 1 :]:
             if uf.find(ra) == uf.find(rb):
                 continue
-            if len(token_sets[ra] & token_sets[rb]) < 2:
+            shared_tokens = token_sets[ra] & token_sets[rb]
+            if len(shared_tokens) < 2 or not (shared_tokens - run_generic):
                 continue
             small, large = sorted((ra, rb), key=lambda r: len(groups[r]))
             # Bridge targets include syndicated copies of the large cluster's
@@ -419,6 +458,50 @@ async def _stage_cluster(
                     merge_sim, len(groups[ra]), len(groups[rb]),
                 )
     groups = _build_groups()
+
+    # Coherence veto: small groups where some member shares no distinctive
+    # entity with the rest were usually glued by a borderline embedding edge
+    # (Spain retail sales + French wildfires, 2026-07-28). One cheap yes/no
+    # LLM call decides; "no" splits the outlier back out.
+    from zeus.pheme.models import SameStory
+
+    for root in list(groups):
+        members = groups[root]
+        if not 2 <= len(members) <= 3:
+            continue
+        for member in list(members):
+            others = [m for m in members if m.key != member.key]
+            if not others:
+                continue
+            own = _entity_tokens(member.entities) - run_generic
+            rest = set().union(*(_entity_tokens(o.entities) for o in others)) - run_generic
+            if own & rest:
+                continue
+            try:
+                verdict = await pheme_llm_call(
+                    system=(
+                        "You judge whether two news items report the same "
+                        "real-world story. Return JSON only: same (bool). "
+                        "Related topics or the same region are NOT the same story."
+                    ),
+                    user=(
+                        f"Item A: {member.title or member.claim or member.text[:150]}\n"
+                        f"Item B: {others[0].title or others[0].claim or others[0].text[:150]}"
+                    ),
+                    response_format=SameStory,
+                    max_tokens=40,
+                    caller="pheme.coherence",
+                )
+            except PhemeLLMFailed:
+                continue
+            if not verdict.same:
+                members.remove(member)
+                groups[member.key] = [member]
+                logger.info(
+                    "coherence veto split %r out of %r", member.title[:40], root
+                )
+        if not members:
+            groups.pop(root, None)
 
     clusters: list[ClusterSummary] = []
     for root, members in groups.items():
@@ -453,8 +536,9 @@ async def _stage_cluster(
                     max_tokens=60,
                     caller="pheme.cluster_name",
                 )
-                if named.name.strip() and not _is_junk_text(named.name):
-                    name = named.name.strip()
+                candidate = named.name.strip()
+                if candidate and not _is_junk_text(candidate) and _looks_like_headline(candidate):
+                    name = candidate
             except PhemeLLMFailed:
                 pass
         seen_domains: set[str] = set()
@@ -489,11 +573,14 @@ async def _stage_cluster(
 # ---------------------------------------------------------------------------
 
 _THREAD_NOTE_SYSTEM = """\
-You write the "what changed" line for an ongoing news story. You get the
-story's prior coverage as dated claims, then today's claim. Return JSON only:
-status is always "development"; note is exactly one sentence stating what is
-new or different today versus the prior coverage. If today adds nothing
-substantive, state where the story stands instead. Plain text, neutral.
+You write the daily update line for an ongoing news story. You get what was
+known on previous days, then what is known today. Return JSON only:
+- changed: true when today brings a substantive development, false otherwise.
+- note: ONE sentence written like a news update about the events themselves,
+  e.g. "Talks continue in Vienna while oil extends its slide." When changed
+  is false: "No major developments; <one short clause on where things stand>."
+Never use the words "coverage", "claim", "information", "reported", or refer
+to the reporting itself. Plain text, neutral, no preamble.
 """
 
 
@@ -515,7 +602,10 @@ async def _stage_thread(
             cluster.thread_note = data.get("note", "")
             cluster.thread_id = data.get("thread_id", "")
             cluster.thread_days = int(data.get("days", 1))
+            cluster.thread_static = bool(data.get("static", False))
         return
+
+    from functools import partial
 
     from zeus.pheme.threads import match_and_update
 
@@ -523,7 +613,10 @@ async def _stage_thread(
         (c.key, _entity_tokens(c.entities) | _entity_tokens([c.name]), c.name, c.claim)
         for c in clusters
     ]
-    matches = await asyncio.to_thread(match_and_update, rows)
+    generic = _generic_tokens([r[1] for r in rows])
+    matches = await asyncio.to_thread(
+        partial(match_and_update, rows, generic_tokens=generic)
+    )
 
     for cluster in clusters:
         m = matches.get(cluster.key)
@@ -547,8 +640,8 @@ async def _stage_thread(
                     note = await pheme_llm_call(
                         system=_THREAD_NOTE_SYSTEM,
                         user=(
-                            f"Prior coverage (day 1 was {m.first_seen}):\n{history_lines}\n\n"
-                            f"Today ({cluster.name}): {cluster.claim}"
+                            f"Known on previous days (story began {m.first_seen}):\n{history_lines}\n\n"
+                            f"Known today ({cluster.name}): {cluster.claim}"
                         ),
                         response_format=ThreadNote,
                         max_tokens=150,
@@ -556,6 +649,7 @@ async def _stage_thread(
                     )
                     if note.note.strip() and not _is_junk_text(note.note):
                         cluster.thread_note = note.note.strip()
+                    cluster.thread_static = not note.changed
                 except PhemeLLMFailed:
                     pass
         cached[cluster.key] = {
@@ -563,6 +657,7 @@ async def _stage_thread(
             "note": cluster.thread_note,
             "thread_id": cluster.thread_id,
             "days": cluster.thread_days,
+            "static": cluster.thread_static,
         }
     cache.put("stage3_thread", cached, fingerprint=fp)
 
@@ -715,10 +810,16 @@ def _cluster_heuristic(cluster: ClusterSummary, correlated_keys: set[str]) -> fl
     if len(cluster.sources) > 1:
         heuristic += 0.2                                                   # cross-source story
     if cluster.thread_status == "development":
-        heuristic += 0.1                                                   # ongoing thread
+        if cluster.thread_static:
+            # A story that keeps running with nothing new should sink, not
+            # coast on its development bonus (UK election at "day 3" with
+            # "no new information" was still #2 on 2026-07-28).
+            heuristic -= min(0.12, 0.04 * max(0, cluster.thread_days - 1))
+        else:
+            heuristic += 0.1                                               # substantive development
     if any(k in correlated_keys for k in cluster.item_ids):
         heuristic += 0.25                                                  # part of the edge
-    return heuristic
+    return max(0.0, heuristic)
 
 
 async def _stage_rank(
@@ -847,19 +948,38 @@ async def _synthesize_insights(
         for c in top
     )
     conn_block = "\n".join(f"- {c.claim}" for c in correlations[:3]) or "(none)"
+    user = f"Today's stories:\n{story_block}\n\nCross-source connections:\n{conn_block}"
+    raw: list[str] = []
     try:
         parsed = await pheme_llm_call(
             system=_INSIGHTS_SYSTEM,
-            user=f"Today's stories:\n{story_block}\n\nCross-source connections:\n{conn_block}",
+            user=user,
             response_format=InsightList,
             max_tokens=400,
             caller="pheme.insights",
         )
+        raw = list(parsed.insights)
     except PhemeLLMFailed as exc:
-        logger.warning("insight synthesis failed: %s", exc)
-        return []
+        logger.warning("structured insight synthesis failed: %s", exc)
+    if not raw:
+        # qwen2.5:7b often returns a schema-valid but EMPTY {"insights": []}
+        # while producing good observations in free text (2026-07-28 digest
+        # shipped with no insights because of this). Fall back to text mode
+        # and split lines.
+        try:
+            text = await pheme_llm_text(
+                system=_INSIGHTS_SYSTEM.replace("Return JSON only:", "Write plain text:")
+                + "\nOne insight per line. No bullets, no numbering, no preamble.",
+                user=user,
+                max_tokens=400,
+                caller="pheme.insights_text",
+            )
+            raw = [ln.strip(" -*•") for ln in text.split("\n") if ln.strip()]
+        except PhemeLLMFailed as exc:
+            logger.warning("text insight fallback failed: %s", exc)
+            return []
     out = []
-    for line in parsed.insights[:4]:
+    for line in raw[:4]:
         line = line.strip()
         if line and not _is_junk_text(line):
             out.append(line)
@@ -1024,7 +1144,9 @@ async def run_pheme_pipeline(
     items_by_key = {i.key: i for i in items}
     await _stage_rank(clusters, correlations, items_by_key, store, cache, fp)
 
-    top = clusters[: _top_n()]
+    # Undisplayable clusters (junk name, no claim - e.g. an all-junk-title
+    # GDELT group) never reach the digest regardless of score.
+    top = [c for c in clusters if not (_is_junk_text(c.name) and not c.claim.strip())][: _top_n()]
     conn_block = "\n".join(f"- {c.claim}" for c in correlations[:3]) or "(none found)"
     story_block = "\n".join(
         f"- {c.name} ({c.thread_status}): {c.claim[:150]}" for c in top

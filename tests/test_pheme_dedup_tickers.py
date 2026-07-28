@@ -75,3 +75,29 @@ def test_audio_summary_dict_shape():
     assert d["bullets"][1].startswith("Gatwick outage")
     assert d["advice"] == "Insight one."
     assert "http" not in " ".join(d["bullets"])
+
+
+def test_headline_heuristic():
+    from zeus.pheme.pipeline import _looks_like_headline
+    assert _looks_like_headline("Oil Falls as US-Iran Talks Resume")
+    assert _looks_like_headline("Berlin Pride Attack")            # short is fine
+    assert not _looks_like_headline("Colleague Feedback Story")   # label noun
+    assert not _looks_like_headline("Tech Companies Earnings Reports")
+    assert not _looks_like_headline("Trump visits Michigan economy tariffs jobs")
+
+
+def test_generic_token_computation():
+    from zeus.pheme.pipeline import _generic_tokens
+    sets = [{"earnings", f"co{i}"} for i in range(10)] + [{"nvidia", "earnings"}]
+    g = _generic_tokens(sets, floor=3, frac=0.08)
+    assert "earnings" in g and "nvidia" not in g
+
+
+def test_static_thread_sinks():
+    from zeus.pheme.models import ClusterSummary
+    from zeus.pheme.pipeline import _cluster_heuristic
+    fresh = ClusterSummary(key="a", name="X", thread_status="development",
+                           thread_days=3, thread_static=False, unique_count=2)
+    stale = ClusterSummary(key="b", name="Y", thread_status="development",
+                           thread_days=3, thread_static=True, unique_count=2)
+    assert _cluster_heuristic(fresh, set()) > _cluster_heuristic(stale, set())

@@ -26,8 +26,18 @@ class ClusterName(BaseModel):
 class ThreadNote(BaseModel):
     """Stage 3 output relating a cluster to prior coverage."""
 
-    status: Literal["new", "development"] = "new"
-    note: str = Field(default="", description="One sentence: what changed since prior coverage")
+    status: Literal["new", "development"] = "development"
+    changed: bool = Field(
+        default=True,
+        description="false when today adds nothing substantive to the story",
+    )
+    note: str = Field(default="", description="One sentence news update: what is new today")
+
+
+class SameStory(BaseModel):
+    """Stage 2 coherence veto for weak two-item merges."""
+
+    same: bool = Field(..., description="true only if both items report the same real-world story")
 
 
 class CorrelationJudgment(BaseModel):
@@ -79,6 +89,7 @@ class ClusterSummary(BaseModel):
     thread_note: str = ""
     thread_id: str = ""        # persistent story-thread identity (threads.db)
     thread_days: int = 0       # how many days this story has run (1 = first day)
+    thread_static: bool = False  # development day with nothing substantive new
     significance: float = 0.0
     unique_count: int = 0      # distinct stories after syndication dedup
     outlet_count: int = 0      # distinct outlet domains across all copies
