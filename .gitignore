@@ -263,3 +263,6 @@ compose.override.yaml
 zeus/data/briefings/
 zeus/data/research/
 zeus/data/pheme/
+
+# Generated deep-research artifacts (dossiers, maps): output, not repo docs
+docs/research/
