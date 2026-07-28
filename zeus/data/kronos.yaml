@@ -71,6 +71,41 @@ jobs:
     tags: [health, hourly]
     enabled: false
 
+  - id: aletheia-nightly-sweep
+    name: Aletheia Nightly Drift Sweep
+    description: |
+      Read-only documentation-drift sweep across ZEUS_ALETHEIA_OBSERVE_ROOTS.
+      Extracts backticked references from every doc and resolves each against
+      the code; persists confirmed drift silently (the weekly digest delivers).
+      Additionally gated by ZEUS_ALETHEIA_ENABLED so this seed never spends until
+      you turn Aletheia on.
+    category: maintenance
+    schedule:
+      cron: "0 3 * * *"
+    executor: zeus.kronos.jobs.aletheia_sweep.run_nightly_sweep
+    safety_policy: standard
+    timeout_seconds: 3600
+    max_retries: 0
+    tags: [aletheia, drift, nightly]
+    enabled: false
+
+  - id: aletheia-weekly-digest
+    name: Aletheia Weekly Drift Digest
+    description: |
+      Render the week's confirmed drift into a markdown report (new vs
+      carried-over vs resolved), ingest it into the Knowledge layer idempotently
+      by iso-week, and push a Telegram headline. Gated by ZEUS_ALETHEIA_ENABLED.
+    category: maintenance
+    schedule:
+      cron: "0 8 * * 1"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.aletheia_digest.run_weekly_digest
+    safety_policy: standard
+    timeout_seconds: 600
+    max_retries: 0
+    tags: [aletheia, drift, weekly]
+    enabled: false
+
   - id: weekly-research-example
     name: "Weekly Research (example, disabled)"
     description: |

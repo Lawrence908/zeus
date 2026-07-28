@@ -43,6 +43,7 @@ index_text="$(cat docs/INDEX.md)"
 while IFS= read -r path; do
     case "$path" in
         */legacy/*) continue ;;
+        docs/research/*) continue ;;  # generated research output, not indexed docs
         docs/INDEX.md) continue ;;
     esac
     filename="$(basename "$path")"
@@ -67,6 +68,7 @@ emdash_hits=0
 while IFS= read -r path; do
     case "$path" in
         */legacy/*) continue ;;
+        docs/research/*) continue ;;  # generated research output
         # Ticket plan keeps emdashes inside ticket-title table cells by design.
         docs/ZEUS_LINEAR_TICKET_PLAN.md) continue ;;
     esac
