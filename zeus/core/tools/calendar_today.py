@@ -62,17 +62,29 @@ async def _handler(args: dict[str, Any]) -> ToolResult:
     data = r.json() or {}
     events = data.get("events") or []
     today = str(data.get("date") or "")
+    stale = bool(data.get("stale"))
+    stale_reason = str(data.get("stale_reason") or "")
+
     if not events:
+        # Distinguish a genuinely empty (but fresh) calendar from a broken one:
+        # a stale sync means "0 events" is not trustworthy.
+        if stale:
+            return ToolResult(
+                call_id="",
+                name=_SPEC.name,
+                content=(
+                    f"Calendar data is NOT current, so I can't confirm {today}'s "
+                    f"schedule. {stale_reason} To fix: re-auth Google Calendar and "
+                    "re-ingest (`python -m zeus.ingest.run --source gcal`)."
+                ),
+                is_error=True,
+            )
         return ToolResult(
             call_id="",
             name=_SPEC.name,
-            content=(
-                f"No calendar events found for {today}. Either nothing is "
-                "scheduled or the gcal source has not been re-ingested "
-                "recently. Run `python -m zeus.ingest.run --source gcal` "
-                "to refresh."
-            ),
+            content=f"No calendar events are scheduled for {today} (calendar is up to date).",
         )
+
     lines = [f"Calendar for {today}:"]
     for ev in events:
         summary = str(ev.get("summary") or "(no title)").strip()
@@ -81,6 +93,9 @@ async def _handler(args: dict[str, Any]) -> ToolResult:
         if text and text != summary:
             line += f"\n  {text[:280]}"
         lines.append(line)
+    if stale:
+        # Events exist but the sync is old; warn so the model can caveat.
+        lines.append(f"\n(Note: {stale_reason} These events may be out of date.)")
     return ToolResult(call_id="", name=_SPEC.name, content="\n".join(lines))
 
 
