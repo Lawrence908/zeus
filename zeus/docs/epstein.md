@@ -55,11 +55,31 @@ prose is missing.
 ### Tools (all read-only; no write path to the epstein service)
 
 `epstein_capabilities`, `epstein_search`, `epstein_document`, `epstein_entity`,
-`epstein_research_start`, `epstein_research_result`, and the one-shot
-orchestrated `epstein_research` (plan → fast cited retrieval → entity signals →
-async job → answer with confidence + gaps). Each is exposed on all three
-surfaces (MCP clients, the chat path when `ZEUS_TOOLS_ENABLED=1`, and Kairos)
-and gated by `ZEUS_EPSTEIN_ENABLED`.
+`epstein_research_start`, `epstein_research_result`, the one-shot orchestrated
+`epstein_research` (plan → fast cited retrieval → entity signals → async job →
+answer with confidence + gaps), plus two investigation flows:
+
+- `epstein_entity_dossier`, cited profile of one entity: graph neighborhood
+  (co-occurrence connections + a de-noised dated timeline) plus a bounded,
+  concurrency-limited search fan-out, confidence, and gaps. Degrades to
+  search-only when the graph is down. `write_report` saves markdown to
+  `<report-dir>/dossiers/`.
+- `epstein_connection_map`, how 2+ entities connect: pairwise graph paths
+  (co-occurrence), named intermediaries, and scoped cited evidence per pair.
+  `write_report` saves markdown + a `{nodes, edges}` JSON export to
+  `<report-dir>/maps/`. Edges are co-occurrence or explicitly-cited relations
+  only; there is no contradiction edge in the corpus graph.
+
+Each is exposed on all three surfaces (MCP clients, the chat path when
+`ZEUS_TOOLS_ENABLED=1`, and Kairos) and gated by `ZEUS_EPSTEIN_ENABLED`. The two
+flows and the shared `write_research_report` writer live in
+`zeus/orchestration/epstein_research.py`; the Kronos job dispatches them via a
+`mode` param (`question` | `entity_dossier` | `connection_map`).
+
+**Search fan-out is concurrency-bounded** (`ZEUS_EPSTEIN_SEARCH_CONCURRENCY`,
+default 3) with one retry: firing a whole fan-out at once trips the embedding
+backend into 500s (observed live 2026-07-27; a full unbounded burst can wedge
+the backend's ONNX embedder until `docker restart epstein-backend`).
 
 ## Config (mirrors `ZEUS_KIWIX_*` / `ZEUS_NOMAD_*`)
 
@@ -67,11 +87,13 @@ and gated by `ZEUS_EPSTEIN_ENABLED`.
 |---|---|---|
 | `ZEUS_EPSTEIN_ENABLED` | `0` | Master gate for the whole capability |
 | `ZEUS_EPSTEIN_BASE_URL` | (probe) | Skip probing; use this base verbatim |
-| `ZEUS_EPSTEIN_API_KEY` | (unset) | Optional bearer token (API is open today) |
+| `ZEUS_EPSTEIN_API_KEY` | (unset) | Optional read bearer token (read API is open today) |
+| `ZEUS_EPSTEIN_WRITE_API_KEY` | (unset) | Write bearer for findings write-back; must match the server's `RESEARCH_WRITE_API_KEY` |
 | `ZEUS_EPSTEIN_ASK_TIMEOUT` | `300` | Cap for the slow synchronous `/ask` |
 | `ZEUS_EPSTEIN_POLL_BUDGET` | `600` | Overnight-job seconds to wait for synthesis |
 | `ZEUS_EPSTEIN_MAX_CONCURRENT` | `2` | Concurrent researchers in the backlog job |
-| `ZEUS_EPSTEIN_REPORT_DIR` | `docs/research` | Where overnight reports land |
+| `ZEUS_EPSTEIN_SEARCH_CONCURRENCY` | `3` | Concurrent searches within a dossier/map fan-out |
+| `ZEUS_EPSTEIN_REPORT_DIR` | `docs/research` | Reports land here; dossiers in `dossiers/`, maps in `maps/` |
 
 **Base-URL resolution.** When `ZEUS_EPSTEIN_BASE_URL` is unset, the client
 probes `/api/research/capabilities` in order and uses the first 200:
@@ -84,9 +106,17 @@ The resolved base is logged and cached.
 `persist_findings(result)` writes a notable finding to mnemosyne
 (`zeus_memories`) as a **raw** payload (no LLM) with full provenance:
 `source=epstein_research`, the question, the deduped citation list, confidence,
-and the resolved base URL. Gated by `ZEUS_MCP_ALLOW_WRITE`. There is **no**
-write-back to the epstein service (that path is deliberately absent - see the
-evolution note below).
+and the resolved base URL. Gated by `ZEUS_MCP_ALLOW_WRITE`.
+
+**Second sink (write-back to the epstein service).** `persist_findings` also
+calls `submit_corpus_finding(...)`, which POSTs the finding to the epstein
+service's gated `POST /api/research/findings` as a `proposed` case-context
+proposal. Any flow can call `submit_corpus_finding` directly. It is a no-op
+unless BOTH `ZEUS_MCP_ALLOW_WRITE` is on AND the client carries a write key
+(`ZEUS_EPSTEIN_WRITE_API_KEY`); the server also refuses (403) without its own
+`RESEARCH_WRITE_API_KEY`. A finding never mutates corpus documents; reflecting an
+`accepted` finding into `context/*.md` or the claims ledger is a later human
+step. Client methods: `submit_finding`, `list_findings`, `set_finding_status`.
 
 ## Phase 4 - unattended research
 
@@ -129,11 +159,14 @@ Zeus reads the contract at runtime, but a few coordinated changes on the
    remote contract moves ahead of what Zeus was built against. (Zeus already
    tolerates new `doc_types`/`filter_fields` because it never hardcodes them.)
 
-2. **A future authenticated `POST /api/research/findings` write endpoint.** To
-   let Zeus contribute a synthesized, cited finding back into the case context.
-   It must require the bearer token (`ZEUS_EPSTEIN_API_KEY`) and, on the Zeus
-   side, be gated behind `ZEUS_MCP_ALLOW_WRITE` exactly like `persist_findings`.
-   Until it exists, Zeus persists findings only into its own mnemosyne.
+2. **DONE: the authenticated `POST /api/research/findings` write endpoint.**
+   Zeus contributes a cited finding back into the case context as a `proposed`
+   proposal. It requires a **separate** write bearer (`RESEARCH_WRITE_API_KEY`
+   server-side / `ZEUS_EPSTEIN_WRITE_API_KEY` client-side, distinct from the read
+   key), is closed by default (403 without a key), and on the Zeus side is gated
+   behind `ZEUS_MCP_ALLOW_WRITE` exactly like `persist_findings`. Reflecting an
+   `accepted` finding into `context/*.md` / the claims ledger remains a human step
+   and is not yet automated.
 
 3. **Fix synthesis speed + the healthcheck.** The `ask`/job synthesis GPU
    contention is the main quality limiter today (prose times out; citations
