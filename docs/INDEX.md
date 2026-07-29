@@ -32,6 +32,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [ZEUS_LINEAR_TICKET_PLAN.md](ZEUS_LINEAR_TICKET_PLAN.md) | ticket | Authoritative Linear ticket + project plan. Do not regenerate. |
 | [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) | bootstrap | Prompt for AI collaborators (Cursor, Claude Code) working on the Zeus codebase. |
 | [memory-architecture-plan.md](memory-architecture-plan.md) | product | Three-layer memory plan (Mnemosyne / Library / Reference), migration runbook. Phase 1 shipped. |
+| [themis-spec.md](themis-spec.md) | product | Retrieval eval harness worker: per-layer scoring, `layer_miss`, weekly minting with bias guards. Records the 3 resolved blocker decisions (keyword+judge oracle, doc-identity anchor, Kairos/small-LLM/CI split). Overlaps LAB-NEW-D. |
 | [kronos-backend-plan.md](kronos-backend-plan.md) | product | Kronos scheduler subsystem plan: job registry, asyncio loop, three dispatch modes, REST + MCP, Aegis-gated execution. |
 | [kronos-frontend-plan.md](kronos-frontend-plan.md) | product | `/jobs` dashboard plan for the React SPA: jobs table, detail drawer, cron builder, live execution feed. |
 | [kronos-job-catalog.md](kronos-job-catalog.md) | ticket | Brainstorm of useful scheduled jobs grouped by domain, with tools each needs (existing vs to-build) and a recommended build order. Use as the planning surface when picking the next Kronos work item. |

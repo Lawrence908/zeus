@@ -1,0 +1,120 @@
+# tests/retrieval_eval_queries/knowledge_questions.yaml
+#
+# Ground-truth queries whose answer lives in the Knowledge (Library) layer:
+# bulk raw chunks ingested from chatgpt, obsidian, markdown, homelab, git,
+# newsletter. These are the original 30 hand-written retrieval-eval queries,
+# migrated verbatim from tests/retrieval_eval.py::GROUND_TRUTH.
+#
+# expected_layer: knowledge  -> a keyword hit in the Knowledge block counts.
+#   A hit that appears only in Profile/Memories is a `layer_miss` for these.
+#
+# The accepted baseline is tests/retrieval_eval_baseline.json. Themis may
+# propose changes to that file but never write it (see docs/themis spec).
+
+# -- Zeus system --
+- query: "What is the Zeus project?"
+  expected_keywords: [zeus, assistant, homelab]
+  expected_layer: knowledge
+- query: "How does Zeus handle voice input and output?"
+  expected_keywords: [orpheus, tts, stt, whisper]
+  expected_layer: knowledge
+- query: "Aegis safety policies and guardrails"
+  expected_keywords: [aegis, policy, safety, nemoclaw]
+  expected_layer: knowledge
+- query: "What embedding model does Zeus use?"
+  expected_keywords: [nomic, embed, "768"]
+  expected_layer: knowledge
+- query: "Ruflo agent orchestration"
+  expected_keywords: [ruflo, agent, swarm]
+  expected_layer: knowledge
+
+# -- Astronomy / ASTR coursework --
+- query: "How do stars form from a solar nebula?"
+  expected_keywords: [star, nebula, solar]
+  expected_layer: knowledge
+- query: "Early galaxies and collisional events"
+  expected_keywords: [galaxies, collisional, ellipticals]
+  expected_layer: knowledge
+- query: "Copernicus Brahe Kepler heliocentric model"
+  expected_keywords: [copernicus, kepler, brahe]
+  expected_layer: knowledge
+- query: "Binary stars and stellar groupings"
+  expected_keywords: [binary, stellar, star]
+  expected_layer: knowledge
+
+# -- Math / proof coursework --
+- query: "Steps to solve a definite integral"
+  expected_keywords: [integral, antiderivative, bounds]
+  expected_layer: knowledge
+- query: "Proof step summaries for lemmas and theorems"
+  expected_keywords: [lemma, theorem, proof]
+  expected_layer: knowledge
+
+# -- Homelab / Atlas / Hephaestus --
+- query: "Atlas physical network interfaces"
+  expected_keywords: [atlas, eno1, networking]
+  expected_layer: knowledge
+- query: "Hephaestus fresh server directory structure"
+  expected_keywords: [hephaestus, github, directory]
+  expected_layer: knowledge
+- query: "Caddy proxy diagnostics troubleshooting"
+  expected_keywords: [caddy, proxy, diagnostics]
+  expected_layer: knowledge
+- query: "ZFS pool RAIDZ2 mount setup"
+  expected_keywords: [zfs, pool, raidz2]
+  expected_layer: knowledge
+- query: "SSH fail2ban hardening"
+  expected_keywords: [fail2ban, ssh, systemctl]
+  expected_layer: knowledge
+
+# -- Personal workflows --
+- query: "Gmail OAuth trigger for rent receipts"
+  expected_keywords: [gmail, oauth, rent]
+  expected_layer: knowledge
+- query: "InboxCast personalized inbox summary"
+  expected_keywords: [inboxcast, summary, inbox]
+  expected_layer: knowledge
+
+# -- ChatGPT coding conversations --
+- query: "Azure VM xfce4 session setup"
+  expected_keywords: [azure, xfce4, session]
+  expected_layer: knowledge
+- query: "WSL update in PowerShell"
+  expected_keywords: [wsl, powershell, update]
+  expected_layer: knowledge
+- query: "Portfolio of tools I have built"
+  expected_keywords: [portfolio, tools, platforms]
+  expected_layer: knowledge
+- query: "Resume for software developer data scientist student"
+  expected_keywords: [resume, software, developer]
+  expected_layer: knowledge
+- query: "C floating point addition function"
+  expected_keywords: [floating, fp_number, add_floating_point]
+  expected_layer: knowledge
+- query: "Team Arena PlayerNFT Linear checklist"
+  expected_keywords: [playernft, linear, checklist]
+  expected_layer: knowledge
+- query: "Lulu webhook email order integration"
+  expected_keywords: [lulu, webhook, order]
+  expected_layer: knowledge
+
+# -- Philosophy / ethics --
+- query: "Plato Republic summary life lessons"
+  expected_keywords: [plato, republic, lessons]
+  expected_layer: knowledge
+- query: "AI deception risks ethical dilemma"
+  expected_keywords: [deception, ethical, dilemma]
+  expected_layer: knowledge
+
+# -- TLDR newsletter --
+- query: "Physical Intelligence robotics research"
+  expected_keywords: ["physical intelligence", robots, robotics]
+  expected_layer: knowledge
+- query: "Amazon Leo in-flight antenna vs Starlink"
+  expected_keywords: [amazon, leo, antenna, starlink]
+  expected_layer: knowledge
+
+# -- Git commits --
+- query: "Add Telegram integration feature"
+  expected_keywords: [telegram, integration]
+  expected_layer: knowledge
