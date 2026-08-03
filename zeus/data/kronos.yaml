@@ -153,6 +153,100 @@ jobs:
     tags: [pheme, news, daily]
     enabled: true
 
+  # --- Epstein corpus research backlog (read-only against the corpus; the
+  # question job also submits `proposed` findings via the gated write-back when
+  # ZEUS_MCP_ALLOW_WRITE + ZEUS_EPSTEIN_WRITE_API_KEY are set). Reports land in
+  # zeus/docs/research/{,dossiers,maps}. Staggered after the 02:00 ingest to
+  # ease GPU contention on the shared synthesis backend. ---
+  - id: epstein-question-backlog
+    name: "Epstein Question Backlog"
+    description: >
+      Overnight multi-agent fan-out over the Epstein corpus for a backlog of
+      falsifiable, document-level questions (from the case's targeted-research
+      set). Each writes a cited markdown report and, with write-back enabled,
+      submits a `proposed` finding for human review. Read-only against the
+      corpus; citations are the floor, synthesized prose is best-effort.
+    category: research
+    schedule:
+      cron: "30 2 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.epstein_research.run_epstein_research
+    params:
+      mode: question
+      questions:
+        - "What documents record custody transfers, guard logs, or watch-status changes with specific timestamps around Jeffrey Epstein's incarceration?"
+        - "Which filings reference Non-Prosecution Agreement language, sealing orders, or protective orders, and on what dates?"
+        - "Are there documented discrepancies between indictment dates and the referenced conduct dates?"
+        - "Which motions explicitly discuss discovery limitations, evidence suppression, or missing exhibits?"
+        - "Which documents explicitly mention flight manifests, travel dates, or passenger lists?"
+        - "Do filings reference specific payment dates, transfers above a threshold, or structured settlement agreements?"
+        - "Do transcripts contain sworn testimony alleging procedural obstruction, and which documents record it?"
+        - "Which court filings reference internal investigations with specific dates?"
+      depth: 3
+      poll_budget_seconds: 300
+      write_report: true
+      persist: true
+    safety_policy: citation_required
+    timeout_seconds: 7200
+    max_retries: 0
+    tags: [epstein, research, nightly]
+    enabled: true
+
+  - id: epstein-entity-dossiers
+    name: "Epstein Entity Dossiers (disabled)"
+    description: >
+      Builds a cited dossier per seeded entity (graph neighborhood + dated
+      timeline + fanned-out cited excerpts), writing reports to
+      zeus/docs/research/dossiers/. Read-only; does NOT submit findings. Seeded
+      DISABLED - curate the entity list before enabling. Co-occurrence is a
+      signal about where to read, never an accusation.
+    category: research
+    schedule:
+      cron: "0 3 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.epstein_research.run_epstein_research
+    params:
+      mode: entity_dossier
+      entities:
+        - "Jeffrey Epstein"
+        - "Ghislaine Maxwell"
+        - "Southern District of New York U.S. Attorney"
+        - "Federal Bureau of Investigation"
+        - "Department of Justice"
+        - "Metropolitan Correctional Center"
+      depth: 1
+      write_report: true
+    safety_policy: citation_required
+    timeout_seconds: 3600
+    max_retries: 0
+    tags: [epstein, research, dossier]
+    enabled: false
+
+  - id: epstein-connection-maps
+    name: "Epstein Connection Maps (disabled)"
+    description: >
+      Maps how seeded entity groups connect through the corpus (pairwise graph
+      paths + scoped cited evidence per pair), writing markdown + a {nodes,edges}
+      JSON export to zeus/docs/research/maps/. Read-only; does NOT submit
+      findings. Seeded DISABLED - curate the groups before enabling. Edges are
+      co-occurrence or explicitly-cited relations only.
+    category: research
+    schedule:
+      cron: "30 3 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.epstein_research.run_epstein_research
+    params:
+      mode: connection_map
+      groups:
+        - ["Ghislaine Maxwell", "Jeffrey Epstein"]
+      depth: 2
+      write_report: true
+    safety_policy: citation_required
+    timeout_seconds: 1800
+    max_retries: 0
+    tags: [epstein, research, connection-map]
+    enabled: false
+
   - id: nightly-retrieval-eval
     name: Nightly Retrieval Eval (Themis)
     description: >

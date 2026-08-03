@@ -29,10 +29,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
+import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from zeus.memory.epstein import EpsteinClient, EpsteinError, EpsteinHit, get_epstein_client
@@ -199,6 +204,173 @@ def _confidence(distinct_docs: int, top_score: float, synth_ok: bool) -> str:
     if distinct_docs >= 2:
         return "medium"
     return "low"
+
+
+# Common role / non-name tokens the person extraction emits as if they were
+# people (seen live: "Prosecutor", "My", "unknown"). Co-occurrence is already a
+# weak signal; these are noise on top of it, so drop them from connection lists.
+_ROLE_STOPWORDS = {
+    "prosecutor", "defendant", "plaintiff", "the court", "court", "government",
+    "my", "unknown", "victim", "witness", "attorney", "judge", "counsel",
+    "defense", "petitioner", "respondent", "appellant", "appellee", "affiant",
+    "agent", "officer", "detective", "minor", "jane doe", "john doe",
+}
+
+
+def _related_names(name_a: str, name_b: str) -> bool:
+    """True if two names are near-duplicates (one contains the other), e.g.
+    'Maxwell' vs 'Ghislaine Maxwell'. Used to avoid listing an entity as its
+    own connection."""
+    a, b = name_a.strip().lower(), name_b.strip().lower()
+    return a == b or a in b or b in a
+
+
+def _graph_people(
+    subgraph: dict[str, Any], *, exclude: str, doc_type_keys: set[str]
+) -> list[str]:
+    """Named Person nodes from a subgraph, de-noised: drop the subject and its
+    near-duplicates, role stopwords, and implausible names. Co-occurrence only."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for n in subgraph.get("nodes", []) or []:
+        nm = n.get("name")
+        if not nm or n.get("type") not in (None, "Person"):
+            # Person nodes carry type == "Person"; event nodes have no name.
+            if n.get("type") not in (None, "Person"):
+                continue
+        if not nm:
+            continue
+        nm = str(nm).strip()
+        low = nm.lower()
+        if low in seen or low in _ROLE_STOPWORDS:
+            continue
+        if _related_names(nm, exclude):
+            continue
+        if not _plausible_entity(nm, doc_type_keys):
+            continue
+        seen.add(low)
+        out.append(nm)
+    return out
+
+
+def _graph_events(
+    subgraph: dict[str, Any], *, limit: int = 20, per_bucket: int = 2
+) -> list[dict[str, str]]:
+    """Dated events from a subgraph's event nodes (event_date_iso + description),
+    sorted chronologically and de-noised. Graph-derived, so weakly cited:
+    presented as a timeline scaffold, with the cited search evidence carrying the
+    real sourcing.
+
+    OCR chunks overlap, so one underlying passage surfaces as several event nodes
+    with near-identical text (observed live: 6x the same 2020-07-02 line). Dedupe
+    on a whitespace-normalized description prefix, and cap events per
+    (date, event_type) bucket so no single document floods the timeline."""
+    evs: list[dict[str, str]] = []
+    seen_prefix: set[str] = set()
+    bucket_count: dict[tuple[str, str], int] = {}
+    raw: list[dict[str, str]] = []
+    for n in subgraph.get("nodes", []) or []:
+        if n.get("name") or "event_id" not in n:
+            continue
+        date = str(n.get("event_date_iso") or "").strip()
+        desc = str(n.get("description") or "").strip()
+        if not (date or desc):
+            continue
+        raw.append({
+            "date": date,
+            "event_type": str(n.get("event_type") or "").strip(),
+            "description": desc,
+        })
+    raw.sort(key=lambda e: e["date"] or "9999-99-99")
+    for e in raw:
+        norm = re.sub(r"\s+", " ", e["description"]).strip().lower()
+        prefix = norm[:60]
+        if prefix and prefix in seen_prefix:
+            continue
+        bucket = (e["date"], e["event_type"])
+        if bucket_count.get(bucket, 0) >= per_bucket:
+            continue
+        seen_prefix.add(prefix)
+        bucket_count[bucket] = bucket_count.get(bucket, 0) + 1
+        evs.append(e)
+        if len(evs) >= limit:
+            break
+    return evs
+
+
+# Generic investigative angles appended to the entity name. Never search the
+# bare name: live, a bare-entity query timed out against the 1.2M-doc store
+# while these narrower variants returned fast (prototype finding 2026-07-27).
+_DOSSIER_ANGLES = [
+    "role and relationship",
+    "testimony deposition statement",
+    "travel flights schedule properties",
+    "court filing charges indictment",
+    "financial records payments transactions",
+    "correspondence emails communication",
+]
+
+
+# The search backend serializes embeddings; firing the whole fan-out at once
+# trips 500s / read-timeouts (observed live 2026-07-27). Bound concurrency and
+# retry once on a transient failure.
+_SEARCH_CONCURRENCY = int(os.getenv("ZEUS_EPSTEIN_SEARCH_CONCURRENCY", "3") or 3)
+
+
+async def _search_one(
+    client: EpsteinClient,
+    query: str,
+    *,
+    doc_type: str | None = None,
+    n_results: int = 8,
+    retries: int = 1,
+) -> list[EpsteinHit]:
+    for attempt in range(retries + 1):
+        try:
+            r = await client.search(query, doc_type=doc_type, n_results=n_results)
+            return [EpsteinHit.from_api(x) for x in r.get("results", []) or []]
+        except EpsteinError as exc:
+            if attempt < retries:
+                await asyncio.sleep(1.0 + attempt)
+                continue
+            logger.warning("epstein search failed (%s): %s", query, exc)
+    return []
+
+
+async def _search_fanout(
+    client: EpsteinClient,
+    queries: list[str],
+    *,
+    doc_type: str | None = None,
+    n_results: int = 8,
+    concurrency: int | None = None,
+) -> list[EpsteinHit]:
+    """Run searches under a concurrency bound so the embedding backend keeps up."""
+    sem = asyncio.Semaphore(concurrency or _SEARCH_CONCURRENCY)
+
+    async def _guard(q: str) -> list[EpsteinHit]:
+        async with sem:
+            return await _search_one(client, q, doc_type=doc_type, n_results=n_results)
+
+    batches = await asyncio.gather(*[_guard(q) for q in queries])
+    return [h for b in batches for h in b]
+
+
+def _dossier_subqueries(name: str, connections: list[str], max_subqueries: int) -> list[str]:
+    """Entity name crossed with generic angles first, then the strongest graph
+    connections. Deterministic and dependency-free."""
+    subs = [f"{name} {angle}".strip() for angle in _DOSSIER_ANGLES]
+    for conn in connections:
+        subs.append(f"{name} {conn}".strip())
+    # Dedupe preserving order.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for s in subs:
+        if s.lower() in seen:
+            continue
+        seen.add(s.lower())
+        ordered.append(s)
+    return ordered[:max_subqueries]
 
 
 async def run_research(
@@ -368,6 +540,178 @@ async def run_research(
     )
 
 
+# ------------------------------------------------------------------------- #
+# Component B: entity dossier
+# ------------------------------------------------------------------------- #
+@dataclass
+class DossierResult:
+    """Structured entity dossier. `to_markdown()` renders the cited profile;
+    raw fields let Kairos / persistence / tests inspect the evidence."""
+
+    entity: str
+    safety_rules: str
+    base_url: str | None
+    graph_available: bool
+    subqueries: list[str] = field(default_factory=list)
+    evidence: list[EpsteinHit] = field(default_factory=list)
+    connections: list[str] = field(default_factory=list)
+    timeline: list[dict[str, str]] = field(default_factory=list)
+    doc_types: list[str] = field(default_factory=list)
+    confidence: str = "low"
+    gaps: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def citations(self) -> list[dict[str, str]]:
+        seen: set[str] = set()
+        out: list[dict[str, str]] = []
+        for h in self.evidence:
+            if h.document_id and h.document_id not in seen:
+                seen.add(h.document_id)
+                out.append({"document_id": h.document_id, "source_label": h.source_label})
+        return out
+
+    def to_markdown(self) -> str:
+        lines: list[str] = [f"# Entity Dossier: {self.entity}", ""]
+        lines.append(
+            "> Sensitive legal corpus (victims + unproven allegations). Name "
+            "co-occurrence is a signal about where to read, NOT an accusation or "
+            "a relationship. Allegations remain allegations; victim identities "
+            "and redacted content are never inferred. Every substantive statement "
+            "is cited by document_id."
+        )
+        lines.append("")
+        if self.error:
+            lines.append(f"**Error:** {self.error}")
+            return "\n".join(lines)
+
+        access = "graph + search" if self.graph_available else "search-only (graph unavailable)"
+        lines.append(f"- **Access mode:** {access}")
+        lines.append(f"- **Evidence:** {len(self.evidence)} deduped excerpts; "
+                     f"doc_types: {', '.join(self.doc_types) or 'n/a'}")
+        lines.append(f"- **Confidence:** {self.confidence}")
+        lines.append("")
+
+        if self.timeline:
+            lines.append("## Timeline (graph-derived; corroborate against cited evidence)")
+            for e in self.timeline:
+                date = e["date"] or "undated"
+                etype = f" ({e['event_type']})" if e["event_type"] else ""
+                desc = e["description"][:240].replace("\n", " ").strip()
+                lines.append(f"- **{date}**{etype}: {desc}")
+            lines.append("")
+
+        if self.connections:
+            lines.append("## Connections (co-occurrence signal — NOT involvement)")
+            lines.append(", ".join(self.connections))
+            lines.append("")
+
+        if self.evidence:
+            lines.append("## Notable excerpts (cited)")
+            for i, h in enumerate(self.evidence[:15], 1):
+                lines.append(f"{i}. [{h.citation()}] {h.text[:280].strip()}")
+            lines.append("")
+
+        cits = self.citations()
+        if cits:
+            lines.append("## Citations")
+            for i, c in enumerate(cits, 1):
+                lines.append(f"[{i}] {c['document_id']} ({c['source_label'] or 'corpus'})")
+            lines.append("")
+
+        if self.gaps:
+            lines.append("## Gaps / caveats")
+            for g in self.gaps:
+                lines.append(f"- {g}")
+        return "\n".join(lines)
+
+
+async def run_entity_dossier(
+    name: str,
+    *,
+    depth: int = 1,
+    doc_type: str | None = None,
+    n_results: int = 8,
+    max_subqueries: int = 8,
+    max_connections: int = 15,
+    client: EpsteinClient | None = None,
+) -> DossierResult:
+    """Build a cited dossier for one entity: graph neighborhood (degrade on 503)
+    -> planned sub-queries (never the bare name) -> fan-out search -> timeline
+    from graph events -> confidence + gaps. Read-only."""
+    client = client or get_epstein_client()
+    if client is None:
+        return DossierResult(
+            entity=name, safety_rules=_FALLBACK_SAFETY, base_url=None,
+            graph_available=False,
+            error="Epstein research capability disabled (ZEUS_EPSTEIN_ENABLED=0).",
+        )
+
+    safety_rules = _FALLBACK_SAFETY
+    graph_available = False
+    doc_type_keys: set[str] = set()
+    try:
+        cap = await client.capabilities()
+        safety_rules = str(cap.get("safety_rules") or _FALLBACK_SAFETY)
+        graph_available = bool(cap.get("graph_available"))
+        doc_type_keys = {str(k) for k in (cap.get("doc_types") or {})}
+    except EpsteinError as exc:
+        logger.warning("epstein capabilities failed: %s", exc)
+
+    gaps: list[str] = []
+    connections: list[str] = []
+    timeline: list[dict[str, str]] = []
+
+    # 1. graph neighborhood (best-effort; degrade on 503).
+    if graph_available:
+        try:
+            d = await client.entity(name, depth=depth)
+            sg = d.get("subgraph", {}) or {}
+            connections = _graph_people(
+                sg, exclude=name, doc_type_keys=doc_type_keys
+            )[:max_connections]
+            timeline = _graph_events(sg)
+        except EpsteinError as exc:
+            if exc.status == 503:
+                gaps.append("Entity graph unavailable (503); connections/timeline "
+                            "are search-derived only.")
+                graph_available = False
+            else:
+                logger.warning("epstein entity failed (%s): %s", name, exc)
+    else:
+        gaps.append("Graph not available; connections/timeline are search-derived only.")
+
+    # 2. plan sub-queries (name x angles, then top connections) and fan out
+    # under a concurrency bound so the embedding backend keeps up.
+    subqueries = _dossier_subqueries(name, connections, max_subqueries)
+    all_hits = await _search_fanout(
+        client, subqueries, doc_type=doc_type, n_results=n_results
+    )
+    evidence = _dedupe_hits(all_hits)[: n_results * 2]
+
+    if not evidence:
+        gaps.append("No excerpts retrieved; the name may be absent or spelled "
+                    "differently in the corpus.")
+
+    doc_types = sorted({h.doc_type for h in evidence if h.doc_type})
+    distinct_docs = len({h.document_id for h in evidence if h.document_id})
+    top_score = max((h.score for h in evidence), default=0.0)
+    gaps.append("Co-occurrence in documents is not proof of involvement.")
+
+    return DossierResult(
+        entity=name,
+        safety_rules=safety_rules,
+        base_url=client.resolved_base,
+        graph_available=graph_available,
+        subqueries=subqueries,
+        evidence=evidence,
+        connections=connections,
+        timeline=timeline,
+        doc_types=doc_types,
+        confidence=_confidence(distinct_docs, top_score, graph_available and bool(connections)),
+        gaps=gaps,
+    )
+
+
 def _write_allowed() -> bool:
     return os.getenv("ZEUS_MCP_ALLOW_WRITE", "false").strip().lower() in (
         "1",
@@ -375,6 +719,46 @@ def _write_allowed() -> bool:
         "yes",
         "on",
     )
+
+
+async def submit_corpus_finding(
+    *,
+    kind: str,
+    subject: str,
+    body_md: str,
+    citations: list[dict[str, Any]],
+    confidence: str | None = None,
+    gaps: list[str] | None = None,
+    job_id: str | None = None,
+    client: EpsteinClient | None = None,
+) -> dict[str, Any]:
+    """Second sink: POST a finding to the epstein service's gated
+    /api/research/findings as a `proposed` case-context proposal.
+
+    Best-effort and never raises. Gated twice: by ZEUS_MCP_ALLOW_WRITE (the same
+    switch as mnemosyne persistence) AND by the client carrying a write key
+    (ZEUS_EPSTEIN_WRITE_API_KEY); without both, this is a no-op. Requires at least
+    one citation. The finding never mutates the corpus; a human accepts it before
+    any context/claims reflection."""
+    if not _write_allowed():
+        return {"submitted": False, "reason": "ZEUS_MCP_ALLOW_WRITE is false"}
+    if not citations:
+        return {"submitted": False, "reason": "no citations; nothing to submit"}
+    client = client or get_epstein_client()
+    if client is None:
+        return {"submitted": False, "reason": "epstein client disabled"}
+    if not client.write_enabled:
+        return {"submitted": False, "reason": "no write key (ZEUS_EPSTEIN_WRITE_API_KEY unset)"}
+    provenance = {"agent": "epstein_research", "job_id": job_id or "", "base_url": client.resolved_base or ""}
+    try:
+        row = await client.submit_finding(
+            kind=kind, subject=subject, body_md=body_md, citations=citations,
+            confidence=confidence, gaps=gaps, provenance=provenance,
+        )
+    except EpsteinError as exc:
+        logger.warning("submit_corpus_finding failed: %s", exc)
+        return {"submitted": False, "reason": f"submit failed: {exc}"}
+    return {"submitted": True, "finding_id": row.get("finding_id"), "status": row.get("status")}
 
 
 async def persist_findings(
@@ -438,4 +822,297 @@ async def persist_findings(
     except Exception as exc:  # noqa: BLE001
         logger.warning("persist_findings failed: %s", exc)
         return {"persisted": False, "reason": f"store error: {exc}"}
-    return {"persisted": True, "source_id": source_id, "citations": len(citations)}
+
+    # Second sink: also submit to the epstein service's gated /findings, if a
+    # write key is configured. Best-effort; a failure here does not undo the
+    # mnemosyne persistence above.
+    corpus = await submit_corpus_finding(
+        kind="question",
+        subject=result.question,
+        body_md=body,
+        citations=citations,
+        confidence=result.confidence,
+        gaps=result.gaps,
+        job_id=result.job_id,
+    )
+    return {
+        "persisted": True,
+        "source_id": source_id,
+        "citations": len(citations),
+        "corpus_finding": corpus,
+    }
+
+
+# ------------------------------------------------------------------------- #
+# Component C: connection map
+# ------------------------------------------------------------------------- #
+@dataclass
+class ConnectionMapResult:
+    """How two or more entities connect through the corpus graph + evidence.
+    `to_markdown()` renders the writeup; `to_graph()` emits a neutral
+    {nodes, edges} export. Every relation is co-occurrence or explicitly cited;
+    the corpus graph has no contradiction edge, so none is implied."""
+
+    entities: list[str]
+    safety_rules: str
+    base_url: str | None
+    graph_available: bool
+    pairs: list[dict[str, Any]] = field(default_factory=list)
+    confidence: str = "low"
+    gaps: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def citations(self) -> list[dict[str, str]]:
+        seen: set[str] = set()
+        out: list[dict[str, str]] = []
+        for p in self.pairs:
+            for h in p.get("evidence", []) or []:
+                if h.document_id and h.document_id not in seen:
+                    seen.add(h.document_id)
+                    out.append({"document_id": h.document_id, "source_label": h.source_label})
+        return out
+
+    def to_graph(self) -> dict[str, Any]:
+        node_ids: dict[str, dict[str, Any]] = {}
+        for e in self.entities:
+            node_ids[e] = {"id": e, "role": "subject"}
+        edges: list[dict[str, Any]] = []
+        for p in self.pairs:
+            for mid in p.get("intermediaries", []) or []:
+                node_ids.setdefault(mid, {"id": mid, "role": "intermediary"})
+            edges.append({
+                "source": p["a"],
+                "target": p["b"],
+                "connected": bool(p.get("connected")),
+                "relation": "co-occurrence",
+                "intermediaries": p.get("intermediaries", []),
+                "evidence": [
+                    {"document_id": h.document_id, "source_label": h.source_label}
+                    for h in (p.get("evidence", []) or [])
+                ],
+                "events": p.get("events", []),
+            })
+        return {"nodes": list(node_ids.values()), "edges": edges}
+
+    def to_markdown(self) -> str:
+        lines: list[str] = [f"# Connection Map: {' <-> '.join(self.entities)}", ""]
+        lines.append(
+            "> Sensitive legal corpus (victims + unproven allegations). Edges are "
+            "document CO-OCCURRENCE or explicitly-cited relations, NEVER "
+            "accusations. Allegations remain allegations; victim identities and "
+            "redacted content are never inferred."
+        )
+        lines.append("")
+        if self.error:
+            lines.append(f"**Error:** {self.error}")
+            return "\n".join(lines)
+
+        access = "graph + search" if self.graph_available else "search-only (graph unavailable)"
+        lines.append(f"- **Access mode:** {access}")
+        lines.append(f"- **Confidence:** {self.confidence}")
+        lines.append("")
+
+        for p in self.pairs:
+            state = "connected" if p.get("connected") else "no graph path found"
+            lines.append(f"## {p['a']} <-> {p['b']} — {state}")
+            mids = p.get("intermediaries", []) or []
+            if mids:
+                lines.append(f"- **Intermediaries (co-occurrence):** {', '.join(mids)}")
+            for ev in (p.get("events", []) or [])[:5]:
+                date = ev.get("date") or "undated"
+                desc = (ev.get("description") or "")[:200].replace("\n", " ").strip()
+                lines.append(f"- **{date}**: {desc}")
+            evidence = p.get("evidence", []) or []
+            if evidence:
+                lines.append("- **Cited evidence:**")
+                for h in evidence[:5]:
+                    lines.append(f"  - [{h.citation()}] {h.text[:200].strip()}")
+            else:
+                lines.append("- No excerpt retrieved for this pair (graph "
+                             "co-occurrence only, if any).")
+            lines.append("")
+
+        cits = self.citations()
+        if cits:
+            lines.append("## Citations")
+            for i, c in enumerate(cits, 1):
+                lines.append(f"[{i}] {c['document_id']} ({c['source_label'] or 'corpus'})")
+            lines.append("")
+
+        if self.gaps:
+            lines.append("## Gaps / caveats")
+            for g in self.gaps:
+                lines.append(f"- {g}")
+        return "\n".join(lines)
+
+
+def _connection_people(connection: dict[str, Any], *, a: str, b: str,
+                       doc_type_keys: set[str]) -> list[str]:
+    """Named intermediaries on a connection path, excluding the two endpoints."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for n in connection.get("nodes", []) or []:
+        nm = n.get("name")
+        if not nm:
+            continue
+        nm = str(nm).strip()
+        low = nm.lower()
+        if low in seen or low in _ROLE_STOPWORDS:
+            continue
+        if _related_names(nm, a) or _related_names(nm, b):
+            continue
+        if not _plausible_entity(nm, doc_type_keys):
+            continue
+        seen.add(low)
+        out.append(nm)
+    return out
+
+
+async def run_connection_map(
+    names: list[str],
+    *,
+    depth: int = 2,
+    n_results: int = 6,
+    client: EpsteinClient | None = None,
+) -> ConnectionMapResult:
+    """Map how 2+ entities connect: pairwise graph paths (co-occurrence) plus
+    scoped cited evidence per pair. Read-only; degrades to evidence-only when the
+    graph is down."""
+    clean = [str(n).strip() for n in names if str(n).strip()]
+    # Dedupe preserving order.
+    entities = list(dict.fromkeys(clean))
+    if len(entities) < 2:
+        return ConnectionMapResult(
+            entities=entities, safety_rules=_FALLBACK_SAFETY, base_url=None,
+            graph_available=False,
+            error="A connection map needs at least two distinct entities.",
+        )
+
+    client = client or get_epstein_client()
+    if client is None:
+        return ConnectionMapResult(
+            entities=entities, safety_rules=_FALLBACK_SAFETY, base_url=None,
+            graph_available=False,
+            error="Epstein research capability disabled (ZEUS_EPSTEIN_ENABLED=0).",
+        )
+
+    safety_rules = _FALLBACK_SAFETY
+    graph_available = False
+    doc_type_keys: set[str] = set()
+    try:
+        cap = await client.capabilities()
+        safety_rules = str(cap.get("safety_rules") or _FALLBACK_SAFETY)
+        graph_available = bool(cap.get("graph_available"))
+        doc_type_keys = {str(k) for k in (cap.get("doc_types") or {})}
+    except EpsteinError as exc:
+        logger.warning("epstein capabilities failed: %s", exc)
+
+    gaps: list[str] = []
+    graph_down_noted = False
+    sem = asyncio.Semaphore(_SEARCH_CONCURRENCY)
+
+    async def _pair(a: str, b: str) -> dict[str, Any]:
+        nonlocal graph_down_noted
+        async with sem:
+            connected = False
+            intermediaries: list[str] = []
+            events: list[dict[str, str]] = []
+            if graph_available:
+                try:
+                    d = await client.entity(a, depth=depth, related_to=b)
+                    conn = d.get("connection") or {}
+                    connected = bool(conn.get("connected"))
+                    intermediaries = _connection_people(
+                        conn, a=a, b=b, doc_type_keys=doc_type_keys
+                    )
+                    events = _graph_events(conn, limit=5)
+                except EpsteinError as exc:
+                    if exc.status == 503 and not graph_down_noted:
+                        gaps.append("Entity graph unavailable (503); pairs rely on "
+                                    "scoped search evidence only.")
+                        graph_down_noted = True
+                    elif exc.status != 503:
+                        logger.warning("connection %s<->%s failed: %s", a, b, exc)
+            # Scoped cited evidence for the pair (independent of the graph).
+            evidence = _dedupe_hits(
+                await _search_one(client, f"{a} {b}", n_results=n_results)
+            )
+        return {
+            "a": a, "b": b, "connected": connected,
+            "intermediaries": intermediaries, "events": events, "evidence": evidence,
+        }
+
+    pairs = await asyncio.gather(
+        *[_pair(a, b) for a, b in itertools.combinations(entities, 2)]
+    )
+
+    if not graph_available and not graph_down_noted:
+        gaps.append("Graph not available; edges are scoped-search co-occurrence only.")
+    gaps.append("Edges are document co-occurrence, not proof of a relationship or "
+                "involvement.")
+
+    connected_pairs = sum(1 for p in pairs if p["connected"])
+    distinct_docs = len({
+        h.document_id for p in pairs for h in p["evidence"] if h.document_id
+    })
+    top_score = max(
+        (h.score for p in pairs for h in p["evidence"]), default=0.0
+    )
+    confidence = _confidence(distinct_docs, top_score, connected_pairs > 0)
+
+    return ConnectionMapResult(
+        entities=entities,
+        safety_rules=safety_rules,
+        base_url=client.resolved_base,
+        graph_available=graph_available,
+        pairs=list(pairs),
+        confidence=confidence,
+        gaps=gaps,
+    )
+
+
+# ------------------------------------------------------------------------- #
+# Component D: shared report-to-disk writer (used by tools + the Kronos job)
+# ------------------------------------------------------------------------- #
+_REPORT_SUBDIRS = {
+    "question": "",
+    "entity_dossier": "dossiers",
+    "connection_map": "maps",
+}
+
+
+def _slug(text: str, max_len: int = 60) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return s[:max_len] or "untitled"
+
+
+def _reports_root() -> Path:
+    return Path(
+        os.getenv("ZEUS_EPSTEIN_REPORT_DIR")
+        or os.getenv("ZEUS_DEEP_RESEARCH_DIR", "/home/chris/zeus/docs/research")
+    )
+
+
+def write_research_report(
+    kind: str,
+    subject: str,
+    markdown: str,
+    *,
+    sidecar: dict[str, Any] | None = None,
+    when: str | None = None,
+) -> Path:
+    """Write a report to `ZEUS_EPSTEIN_REPORT_DIR/<subdir>/<date>-epstein-<slug>.md`,
+    routed by kind (question -> root, entity_dossier -> dossiers/, connection_map
+    -> maps/). An optional `sidecar` dict is written alongside as .json (used for
+    the connection-map graph export). Returns the markdown path."""
+    day = when or datetime.now(timezone.utc).date().isoformat()
+    sub = _REPORT_SUBDIRS.get(kind, "")
+    root = _reports_root() / sub if sub else _reports_root()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"{day}-epstein-{_slug(subject)}.md"
+    path.write_text(markdown, encoding="utf-8")
+    if sidecar is not None:
+        path.with_suffix(".json").write_text(
+            json.dumps(sidecar, indent=2, default=str), encoding="utf-8"
+        )
+    return path

@@ -112,10 +112,14 @@ class EpsteinClient:
         base_url: str = "",
         *,
         api_key: str = "",
+        write_api_key: str = "",
         candidates: tuple[str, ...] = _DEFAULT_CANDIDATES,
     ) -> None:
         self._configured_base = base_url.rstrip("/") if base_url else ""
         self._api_key = api_key.strip()
+        # Separate, stricter credential for the findings write routes. The write
+        # path is closed by default server-side; without this key writes 403.
+        self._write_api_key = write_api_key.strip()
         self._candidates = candidates
         self._resolved_base: str | None = self._configured_base or None
         self._resolve_lock = asyncio.Lock()
@@ -126,6 +130,15 @@ class EpsteinClient:
         if self._api_key:
             return {"Authorization": f"Bearer {self._api_key}"}
         return None
+
+    def _write_headers(self) -> dict[str, str] | None:
+        if self._write_api_key:
+            return {"Authorization": f"Bearer {self._write_api_key}"}
+        return None
+
+    @property
+    def write_enabled(self) -> bool:
+        return bool(self._write_api_key)
 
     async def _base(self) -> str:
         """Return the working base URL, probing candidates once if needed."""
@@ -161,12 +174,14 @@ class EpsteinClient:
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         timeout: float = _FAST_TIMEOUT,
+        write: bool = False,
     ) -> Any:
         base = await self._base()
         url = f"{base}{path}"
+        headers = self._write_headers() if write else self._headers()
         try:
             async with httpx.AsyncClient(
-                timeout=timeout, headers=self._headers(), follow_redirects=True
+                timeout=timeout, headers=headers, follow_redirects=True
             ) as client:
                 resp = await client.request(method, url, json=json, params=params)
         except httpx.HTTPError as exc:
@@ -316,6 +331,56 @@ class EpsteinClient:
         """GET /api/research/jobs — recent jobs."""
         return await self._request("GET", "/api/research/jobs")
 
+    async def submit_finding(
+        self,
+        *,
+        kind: str,
+        subject: str,
+        body_md: str,
+        citations: list[dict[str, Any]],
+        confidence: str | None = None,
+        gaps: list[str] | None = None,
+        provenance: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/research/findings — store a cited case-context proposal.
+
+        WRITE route: requires the write bearer (ZEUS_EPSTEIN_WRITE_API_KEY); the
+        server refuses (403) without a write key provisioned. Citations are
+        required. The finding lands as `proposed`; it never mutates the corpus and
+        is not reflected into context/claims files until a human accepts it."""
+        payload: dict[str, Any] = {
+            "kind": kind,
+            "subject": subject,
+            "body_md": body_md,
+            "citations": citations,
+            "gaps": gaps or [],
+        }
+        if confidence:
+            payload["confidence"] = confidence
+        if provenance:
+            payload["provenance"] = provenance
+        return await self._request(
+            "POST", "/api/research/findings", json=payload, write=True
+        )
+
+    async def list_findings(
+        self, *, limit: int = 50, status: str | None = None
+    ) -> dict[str, Any]:
+        """GET /api/research/findings — recent findings (read access)."""
+        params: dict[str, Any] = {"limit": max(1, min(200, int(limit)))}
+        if status:
+            params["status"] = status
+        return await self._request("GET", "/api/research/findings", params=params)
+
+    async def set_finding_status(self, finding_id: str, status: str) -> dict[str, Any]:
+        """POST /api/research/findings/{id}/accept — set review status. WRITE route."""
+        return await self._request(
+            "POST",
+            f"/api/research/findings/{finding_id}/accept",
+            json={"status": status},
+            write=True,
+        )
+
 
 _client_singleton: EpsteinClient | None = None
 _initialised = False
@@ -326,7 +391,8 @@ def get_epstein_client() -> EpsteinClient | None:
 
     - ZEUS_EPSTEIN_ENABLED (default "0")
     - ZEUS_EPSTEIN_BASE_URL (optional; skips probing when set)
-    - ZEUS_EPSTEIN_API_KEY (optional bearer token)
+    - ZEUS_EPSTEIN_API_KEY (optional read bearer token)
+    - ZEUS_EPSTEIN_WRITE_API_KEY (optional; required for findings write-back)
     """
     global _client_singleton, _initialised
     if _initialised:
@@ -334,11 +400,13 @@ def get_epstein_client() -> EpsteinClient | None:
     if _env_bool("ZEUS_EPSTEIN_ENABLED", False):
         base = os.getenv("ZEUS_EPSTEIN_BASE_URL", "").strip()
         api_key = os.getenv("ZEUS_EPSTEIN_API_KEY", "").strip()
-        _client_singleton = EpsteinClient(base, api_key=api_key)
+        write_api_key = os.getenv("ZEUS_EPSTEIN_WRITE_API_KEY", "").strip()
+        _client_singleton = EpsteinClient(base, api_key=api_key, write_api_key=write_api_key)
         logger.info(
-            "epstein research client enabled (base=%s, auth=%s)",
+            "epstein research client enabled (base=%s, auth=%s, write=%s)",
             base or "probe",
             "bearer" if api_key else "open",
+            "on" if write_api_key else "off",
         )
     _initialised = True
     return _client_singleton

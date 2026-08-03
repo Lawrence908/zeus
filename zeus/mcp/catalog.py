@@ -450,6 +450,43 @@ MCP_TOOLS: list[McpToolSpec] = [
             "required": ["question"],
         },
     ),
+    McpToolSpec(
+        name="epstein_entity_dossier",
+        description=(
+            "Cited dossier for one entity: graph connections + dated timeline + "
+            "fanned-out cited excerpts + confidence + gaps. Degrades to "
+            "search-only when the graph is down. Co-occurrence is a signal, never "
+            "an accusation."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "doc_type": {"type": "string"},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 3},
+                "write_report": {"type": "boolean"},
+            },
+            "required": ["name"],
+        },
+    ),
+    McpToolSpec(
+        name="epstein_connection_map",
+        description=(
+            "Map how 2+ entities connect: pairwise graph paths (co-occurrence), "
+            "named intermediaries, scoped cited evidence per pair, and a "
+            "{nodes, edges} graph export. Edges are co-occurrence or "
+            "explicitly-cited relations, never accusations."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "names": {"type": "array", "items": {"type": "string"}},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 3},
+                "write_report": {"type": "boolean"},
+            },
+            "required": ["names"],
+        },
+    ),
 ]
 
 

@@ -21,6 +21,8 @@ tools:
   - epstein_search
   - epstein_document
   - epstein_entity
+  - epstein_entity_dossier
+  - epstein_connection_map
   - epstein_research_start
   - epstein_research_result
   - epstein_research

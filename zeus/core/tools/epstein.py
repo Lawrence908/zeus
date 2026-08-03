@@ -1,6 +1,6 @@
 # zeus/core/tools/epstein.py — Chat-path mirrors of the epstein_* MCP tools.
 #
-# Six read-only tools over the external epstein research API (the ~1.3M-doc
+# Read-only tools over the external epstein research API (the ~1.3M-doc
 # DOJ/court corpus lives entirely in that separate service; Zeus proxies it
 # live and stores nothing). Registered into the process-local chat tool
 # registry so the SAME tools fire from the chat path (QueryEngine.query when
@@ -562,6 +562,140 @@ async def _research_handler(args: dict[str, Any]) -> ToolResult:
 
 
 # --------------------------------------------------------------------------
+# epstein_entity_dossier — cited profile of one entity (Component B)
+# --------------------------------------------------------------------------
+_DOSSIER_SPEC = ToolSpec(
+    name="epstein_entity_dossier",
+    description=(
+        "Build a cited DOSSIER for one entity (person/org) in the corpus: graph "
+        "neighborhood (co-occurrence connections + a dated timeline), plus "
+        "fanned-out cited excerpts, an explicit confidence level, and named "
+        "gaps. Degrades to search-only when the graph is down. Set write_report "
+        "to also save a markdown report to the research dir. Use this for "
+        "'profile X' / 'what do we have on X' asks. SAFETY: name co-occurrence "
+        "is a signal about where to read, NEVER an accusation or a relationship; "
+        "allegations stay labeled; victim identities and redacted content are "
+        "never inferred; every claim cites document_id + source_label."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Entity to profile"},
+            "doc_type": {"type": "string", "description": "Optional doc_type filter"},
+            "depth": {"type": "integer", "minimum": 1, "maximum": 3},
+            "write_report": {
+                "type": "boolean",
+                "description": "Also write a markdown report to the research dir",
+            },
+        },
+        "required": ["name"],
+    },
+    timeout_seconds=90.0,
+    cacheable=False,
+)
+
+
+async def _dossier_handler(args: dict[str, Any]) -> ToolResult:
+    client, err = _client_or_error(_DOSSIER_SPEC.name)
+    if err:
+        return err
+    name = str(args.get("name", "")).strip()
+    if not name:
+        return _err(_DOSSIER_SPEC.name, "epstein_entity_dossier requires 'name'.")
+    from zeus.orchestration.epstein_research import run_entity_dossier, write_research_report
+
+    try:
+        result = await run_entity_dossier(
+            name,
+            doc_type=args.get("doc_type"),
+            depth=int(args.get("depth") or 1),
+            client=client,
+        )
+    except Exception as exc:  # noqa: BLE001 - never crash the turn
+        logger.warning("epstein_entity_dossier failed: %s", exc)
+        return _err(_DOSSIER_SPEC.name, f"epstein_entity_dossier failed: {exc}")
+
+    content = _SAFETY_BANNER + "\n" + result.to_markdown()
+    if args.get("write_report") and not result.error:
+        try:
+            path = write_research_report("entity_dossier", result.entity, result.to_markdown())
+            content += f"\n\n_Report written to {path}._"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("dossier report write failed: %s", exc)
+    return ToolResult(
+        call_id="", name=_DOSSIER_SPEC.name, content=content, is_error=bool(result.error)
+    )
+
+
+# --------------------------------------------------------------------------
+# epstein_connection_map — how 2+ entities connect (Component C)
+# --------------------------------------------------------------------------
+_MAP_SPEC = ToolSpec(
+    name="epstein_connection_map",
+    description=(
+        "Map how TWO OR MORE entities connect through the corpus: pairwise graph "
+        "paths (co-occurrence), named intermediaries, and scoped cited evidence "
+        "per pair. Set write_report to also save a markdown report plus a "
+        "{nodes, edges} JSON graph export to the research dir. Use for 'how are X "
+        "and Y connected' asks. SAFETY: edges are document CO-OCCURRENCE or "
+        "explicitly-cited relations, NEVER accusations; there is no contradiction "
+        "edge in this corpus; allegations stay labeled; victim identities are "
+        "never inferred."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Two or more entity names to connect",
+            },
+            "depth": {"type": "integer", "minimum": 1, "maximum": 3},
+            "write_report": {
+                "type": "boolean",
+                "description": "Also write a markdown report + JSON graph export",
+            },
+        },
+        "required": ["names"],
+    },
+    timeout_seconds=120.0,
+    cacheable=False,
+)
+
+
+async def _map_handler(args: dict[str, Any]) -> ToolResult:
+    client, err = _client_or_error(_MAP_SPEC.name)
+    if err:
+        return err
+    names = [str(n).strip() for n in (args.get("names") or []) if str(n).strip()]
+    if len(names) < 2:
+        return _err(_MAP_SPEC.name, "epstein_connection_map requires at least two names.")
+    from zeus.orchestration.epstein_research import run_connection_map, write_research_report
+
+    try:
+        result = await run_connection_map(
+            names, depth=int(args.get("depth") or 2), client=client
+        )
+    except Exception as exc:  # noqa: BLE001 - never crash the turn
+        logger.warning("epstein_connection_map failed: %s", exc)
+        return _err(_MAP_SPEC.name, f"epstein_connection_map failed: {exc}")
+
+    content = _SAFETY_BANNER + "\n" + result.to_markdown()
+    if args.get("write_report") and not result.error:
+        try:
+            path = write_research_report(
+                "connection_map", "-".join(result.entities),
+                result.to_markdown(), sidecar=result.to_graph(),
+            )
+            content += f"\n\n_Report + graph export written to {path}._"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("connection map report write failed: %s", exc)
+    return ToolResult(
+        call_id="", name=_MAP_SPEC.name, content=content, is_error=bool(result.error)
+    )
+
+
+# --------------------------------------------------------------------------
 # registration
 # --------------------------------------------------------------------------
 _TOOLS = [
@@ -572,11 +706,13 @@ _TOOLS = [
     (_START_SPEC, _start_handler),
     (_RESULT_SPEC, _result_handler),
     (_RESEARCH_SPEC, _research_handler),
+    (_DOSSIER_SPEC, _dossier_handler),
+    (_MAP_SPEC, _map_handler),
 ]
 
 
 def register() -> None:
-    """Register the six read-only Epstein tools (only when the capability is on).
+    """Register the read-only Epstein tools (only when the capability is on).
 
     Gated by ZEUS_EPSTEIN_ENABLED so the tools don't appear in the chat/Kairos
     tool surface when the capability is disabled.

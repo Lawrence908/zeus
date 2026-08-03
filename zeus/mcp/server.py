@@ -22,8 +22,10 @@ from zeus.mcp.tools import (
     capitolscope_sector_flow,
     capitolscope_ticker,
     epstein_capabilities,
+    epstein_connection_map,
     epstein_document,
     epstein_entity,
+    epstein_entity_dossier,
     epstein_research,
     epstein_research_result,
     epstein_research_start,
@@ -282,6 +284,27 @@ async def epstein_research_tool(
         depth=depth,
         wait_seconds=wait_seconds,
     )
+
+
+@mcp.tool(name="epstein_entity_dossier")
+async def epstein_entity_dossier_tool(
+    name: str,
+    doc_type: str | None = None,
+    depth: int = 1,
+    write_report: bool = False,
+):
+    return await epstein_entity_dossier(
+        name=name, doc_type=doc_type, depth=depth, write_report=write_report
+    )
+
+
+@mcp.tool(name="epstein_connection_map")
+async def epstein_connection_map_tool(
+    names: list[str],
+    depth: int = 2,
+    write_report: bool = False,
+):
+    return await epstein_connection_map(names=names, depth=depth, write_report=write_report)
 
 
 def main() -> None:

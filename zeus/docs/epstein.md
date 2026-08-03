@@ -44,9 +44,9 @@ prose is missing.
 
 | Piece | File |
 |---|---|
-| Reference client (7 endpoints, base-URL probe, optional bearer) | `zeus/memory/epstein.py` |
-| Chat-path tools (7) | `zeus/core/tools/epstein.py` |
-| MCP tools (7) | `zeus/mcp/tools.py` (+ `zeus/mcp/server.py`) |
+| Reference client (read + findings-write endpoints, base-URL probe, read/write bearers) | `zeus/memory/epstein.py` |
+| Chat-path tools (9) | `zeus/core/tools/epstein.py` |
+| MCP tools (9) | `zeus/mcp/tools.py` (+ `zeus/mcp/server.py`) |
 | Research workflow + write-gated persistence | `zeus/orchestration/epstein_research.py` |
 | Agent manifest | `zeus/orchestration/agents/epstein_researcher.yaml` |
 | Kairos dispatch arms (read-only) | `zeus/orchestration/daemon.py` |

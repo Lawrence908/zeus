@@ -601,3 +601,74 @@ async def epstein_research(
         "error": result.error,
         "_safety": _EPSTEIN_SAFETY,
     }
+
+
+async def epstein_entity_dossier(
+    *,
+    name: str,
+    doc_type: str | None = None,
+    depth: int = 1,
+    write_report: bool = False,
+) -> dict[str, Any]:
+    """Cited DOSSIER for one entity: graph connections + dated timeline +
+    fanned-out cited excerpts + confidence + gaps. Degrades to search-only when
+    the graph is down. Co-occurrence is a signal, NEVER an accusation; allegations
+    stay labeled; victim identities are never inferred."""
+    _epstein_client()  # gate on ZEUS_EPSTEIN_ENABLED
+    from zeus.orchestration.epstein_research import run_entity_dossier, write_research_report
+
+    result = await run_entity_dossier(name, doc_type=doc_type, depth=depth)
+    report_path = None
+    if write_report and not result.error:
+        report_path = str(
+            write_research_report("entity_dossier", result.entity, result.to_markdown())
+        )
+    return {
+        "entity": result.entity,
+        "dossier_markdown": result.to_markdown(),
+        "connections": result.connections,
+        "timeline": result.timeline,
+        "citations": result.citations(),
+        "confidence": result.confidence,
+        "gaps": result.gaps,
+        "graph_available": result.graph_available,
+        "report_path": report_path,
+        "error": result.error,
+        "_safety": _EPSTEIN_SAFETY,
+    }
+
+
+async def epstein_connection_map(
+    *,
+    names: list[str],
+    depth: int = 2,
+    write_report: bool = False,
+) -> dict[str, Any]:
+    """Map how 2+ entities connect: pairwise graph paths (co-occurrence), named
+    intermediaries, and scoped cited evidence per pair, plus a {nodes, edges}
+    graph export. Edges are co-occurrence or explicitly-cited relations, NEVER
+    accusations; there is no contradiction edge in this corpus."""
+    _epstein_client()  # gate on ZEUS_EPSTEIN_ENABLED
+    from zeus.orchestration.epstein_research import run_connection_map, write_research_report
+
+    result = await run_connection_map(names, depth=depth)
+    report_path = None
+    if write_report and not result.error:
+        report_path = str(
+            write_research_report(
+                "connection_map", "-".join(result.entities),
+                result.to_markdown(), sidecar=result.to_graph(),
+            )
+        )
+    return {
+        "entities": result.entities,
+        "map_markdown": result.to_markdown(),
+        "graph": result.to_graph(),
+        "citations": result.citations(),
+        "confidence": result.confidence,
+        "gaps": result.gaps,
+        "graph_available": result.graph_available,
+        "report_path": report_path,
+        "error": result.error,
+        "_safety": _EPSTEIN_SAFETY,
+    }
