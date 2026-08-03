@@ -44,6 +44,8 @@ _DEFAULT_APPS: list[dict[str, Any]] = [
     {"id": "network", "title": "Network", "icon": "wifi", "kind": "Network"},
     {"id": "notepad", "title": "Notepad", "icon": "edit-3", "kind": "Notepad"},
     {"id": "calendar", "title": "Calendar", "icon": "calendar", "kind": "Calendar"},
+    # Private branch only (epstein): read-only corpus workbench. Never merge to main.
+    {"id": "epstein", "title": "Epstein Research", "icon": "search", "kind": "Epstein"},
 ]
 
 

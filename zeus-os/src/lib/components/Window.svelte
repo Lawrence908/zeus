@@ -29,6 +29,7 @@
   import Calendar from '$lib/apps/Calendar.svelte';
   import Images from '$lib/apps/Images.svelte';
   import VoiceOrb from '$lib/apps/VoiceOrb.svelte';
+  import Epstein from '$lib/apps/Epstein.svelte';
   import Placeholder from '$lib/apps/Placeholder.svelte';
 
   export let leaf: LeafNode;
@@ -68,6 +69,7 @@
     Calendar,
     Images,
     VoiceOrb,
+    Epstein,
     Placeholder
   };
   $: Comp = components[leaf.app.kind] ?? Placeholder;

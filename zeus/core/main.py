@@ -22,6 +22,7 @@ from zeus.core.newsletter import router as newsletter_router
 from zeus.core.query import QueryEngine, _run_llm, _active_model_name, _chat_use_claude, _ollama_model, set_ollama_model
 from zeus.core.actions import router as actions_router
 from zeus.core.calendar import router as calendar_router
+from zeus.core.epstein_router import router as epstein_router  # private branch only; never merge to main
 from zeus.core.inbox import router as inbox_router
 from zeus.core.mesh import router as mesh_router
 from zeus.core.vault import router as vault_router
@@ -306,6 +307,7 @@ app.include_router(inbox_router)
 app.include_router(mesh_router)
 app.include_router(actions_router)
 app.include_router(calendar_router)
+app.include_router(epstein_router)  # private branch only; never merge to main
 app.include_router(zeus_os_router)
 
 app.mount(
