@@ -152,3 +152,28 @@ jobs:
     max_retries: 1
     tags: [pheme, news, daily]
     enabled: true
+
+  - id: nightly-retrieval-eval
+    name: Nightly Retrieval Eval (Themis)
+    description: >
+      Scores the accepted retrieval-eval suite (tests/retrieval_eval_queries/,
+      pending/ excluded) against the live stack: overall + per-layer
+      hit@1/5/10/MRR@10 plus the layer_miss category. Fail-open per query.
+      Persists the full report to zeus/data/retrieval_eval.json and returns the
+      summary to the run store. Read-only w.r.t. the suite and the baseline
+      (append-only + human-accepted; see docs/themis-spec.md). Runs at 4am,
+      after the 2am knowledge ingest, so it scores the freshly rebuilt corpus.
+      Seeded DISABLED; regression alerting + minting are separate items.
+    category: maintenance
+    schedule:
+      cron: "0 4 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.retrieval_eval.run_retrieval_eval
+    params:
+      top_k: 10
+      out_path: zeus/data/retrieval_eval.json
+    safety_policy: standard
+    timeout_seconds: 1800
+    max_retries: 0
+    tags: [retrieval, eval, themis, nightly]
+    enabled: false
