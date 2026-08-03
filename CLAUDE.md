@@ -18,7 +18,7 @@ Zeus is a self-hosted, voice-first, privacy-preserving AI assistant built from p
 | Safety (Aegis) | `zeus/safety/policy_engine.py` + YAML policies | In-process regex/keyword rules on LLM output and tool payloads. Policies under `zeus/safety/policies/`: `standard`, `personal`, `voice`, `ingest`, `memory`, `code_execution`, `citation_required`, `default`. Optional NemoClaw + OpenShell OS sandbox runs on the host (see `docs/nemoclaw-ops.md`). |
 | Background agent | `zeus/orchestration/daemon.py` (Kairos) | Observe / decide / act / update loop. Gated by `ZEUS_KAIROS_ENABLED`. Default tool allowlist is read-only (`ZEUS_KAIROS_TOOL_ALLOWLIST`, currently `zeus_memory_search`). Every tool call passes `aegis_bus_pre_hook` before dispatch. |
 | STT | WhisperLiveKit (Docker, port 9090) | SimulStreaming, real-time. |
-| TTS | Voicebox REST API with LuxTTS engine | Voice cloning, 150x realtime. Host-managed. |
+| TTS | Kokoro-FastAPI (`zeus-tts`) | OpenAI-style `/v1/audio/speech`, CPU (no VRAM), bundled Kokoro-82M weights. Client is `zeus/voice/tts.py` (`VoiceboxTTS`); browser proxy is `/voice/tts` gated by `ZEUS_VOICE_TTS_ENABLED`. |
 | Wake word | openWakeWord | CPU, passive trigger. |
 | Sessions | `zeus/core/sessions.py` | In-memory by default; `ZEUS_SESSION_BACKEND=sqlite` switches to `SQLiteSessionStorage` at `zeus/data/sessions.db`. Rolling summary at `ZEUS_SESSION_SUMMARY_AT_TURNS` (200), keep-raw at `ZEUS_SESSION_KEEP_RAW_TURNS` (150). |
 | Vector DB | Qdrant 1.15+ (Docker, port 6333) | Two collections: `zeus_memories` (bi-temporal facts) and `zeus_knowledge` (dense + optional sparse BM25 vectors). |

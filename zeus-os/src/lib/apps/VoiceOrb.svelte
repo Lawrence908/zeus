@@ -4,7 +4,7 @@
 
   import { createPhaosOrb, type OrbHandle, type VoiceStateName } from '$lib/voice/orb';
   import { mediaBlobToWav16kMono, pickMediaRecorderMime } from '$lib/voice/audioWav';
-  import { subscribeVoiceState, voiceInteract, synthesize } from '$lib/api/voice';
+  import { subscribeVoiceState, voiceInteractStream } from '$lib/api/voice';
   import {
     voiceState,
     voiceLevel,
@@ -33,6 +33,15 @@
   let mediaStream: MediaStream | null = null;
   let mediaRecorder: MediaRecorder | null = null;
   let chunks: Blob[] = [];
+
+  // Voice turns share one session so spoken conversation has continuity.
+  let sessionId: string | undefined;
+
+  // Sequential playback queue: streamed sentences arrive as self-contained WAVs
+  // and must play strictly in order, one at a time.
+  let audioQueue: Blob[] = [];
+  let queueDraining = false;
+  let queueDoneResolve: (() => void) | null = null;
 
   // ── live audio level analysis ──
   // While recording we compute RMS from the mic locally so the orb reacts to
@@ -216,21 +225,37 @@
     });
   }
 
-  async function speakReply(text: string): Promise<void> {
-    voiceState.set('speaking');
+  /** Push a streamed sentence WAV and start draining if idle. */
+  function enqueueAudio(wav: Blob): void {
+    audioQueue.push(wav);
+    if (uiState !== 'speaking') voiceState.set('speaking');
+    if (!queueDraining) void drainAudioQueue();
+  }
+
+  /** Play queued sentence WAVs strictly in order until the queue empties. */
+  async function drainAudioQueue(): Promise<void> {
+    queueDraining = true;
     try {
-      const wav = await synthesize(text);
-      if (wav) {
-        await playWavAnalyzed(wav);
-      } else {
-        await speakBrowserFallback(text);
+      while (audioQueue.length) {
+        const next = audioQueue.shift()!;
+        try {
+          await playWavAnalyzed(next);
+        } catch {
+          /* skip a chunk that fails to play rather than stalling the queue */
+        }
       }
-    } catch {
-      await speakBrowserFallback(text);
     } finally {
-      stopLevelLoop();
-      voiceState.set('idle');
+      queueDraining = false;
+      queueDoneResolve?.();
     }
+  }
+
+  /** Resolve once every queued (and in-flight) chunk has finished playing. */
+  function waitForQueueDrain(): Promise<void> {
+    if (!queueDraining && audioQueue.length === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      queueDoneResolve = resolve;
+    });
   }
 
   async function startRecording(): Promise<void> {
@@ -305,22 +330,41 @@
 
     try {
       const wav = await mediaBlobToWav16kMono(blob);
-      const result = await voiceInteract(wav);
+      audioQueue = [];
+      queueDoneResolve = null;
+      let transcriptText = '';
+      let modelUsed: string | undefined;
+
+      const out = await voiceInteractStream(wav, sessionId, {
+        onTranscript: (t) => {
+          transcriptText = t;
+          statusHint = t ? `“${t.slice(0, 60)}”` : '';
+        },
+        onAudio: (_seq, chunk) => enqueueAudio(chunk),
+        onDone: (info) => {
+          if (info.session_id) sessionId = info.session_id;
+          modelUsed = info.model_used;
+        },
+        onError: (d) => notify({ title: 'Voice error', body: d.slice(0, 140), kind: 'err' })
+      });
+
+      // Let any streamed sentence audio finish playing.
+      await waitForQueueDrain();
+      // Zero server audio (TTS down/slow) → speak the text in the browser.
+      if (out.audioCount === 0 && out.reply) {
+        voiceState.set('speaking');
+        await speakBrowserFallback(out.reply);
+      }
+
       pushVoiceTurn({
         id: newId(),
-        transcript: result.transcript,
-        reply: result.assistant_message,
-        model: result.model_used,
-        contextSources: result.context_sources,
-        sessionId: result.session_id,
+        transcript: out.transcript || transcriptText,
+        reply: out.reply,
+        model: modelUsed,
+        sessionId,
         ts: Date.now()
       });
-      statusHint = result.transcript ? `“${result.transcript.slice(0, 60)}”` : '';
-      if (result.assistant_message) {
-        await speakReply(result.assistant_message);
-      } else {
-        voiceState.set('idle');
-      }
+      voiceState.set('idle');
     } catch (e) {
       statusHint = e instanceof Error ? e.message : String(e);
       notify({ title: 'Voice error', body: statusHint.slice(0, 140), kind: 'err' });

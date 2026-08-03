@@ -126,31 +126,47 @@ class OrpheusPipeline:
     async def run_forever(self) -> None:
         logger.info("orpheus: listening for wake word…")
         while True:
-            self.wake.listen()
-            await self.emitter.emit("wake_detected")
+            try:
+                await self._run_turn()
+            except Exception:  # noqa: BLE001 — one bad turn must not kill the daemon
+                logger.exception("orpheus: turn failed; returning to idle")
+                try:
+                    await self.emitter.emit("idle")
+                except Exception:  # noqa: BLE001 — emitter is best-effort
+                    logger.debug("orpheus: failed to emit idle after error", exc_info=True)
 
-            await self.emitter.emit("listening", audio_level=0.0)
-            transcript = ""
-            async for evt in self.stt.transcribe(audio_source=self.mic_stream()):
-                transcript = str(evt.get("text") or "").strip()
-                if transcript:
-                    await self.emitter.emit("listening", metadata={"partial_transcript": transcript})
-                if evt.get("is_final"):
-                    break
+    async def _run_turn(self) -> None:
+        self.wake.listen()
+        await self.emitter.emit("wake_detected")
 
-            transcript = transcript.strip()
-            if not transcript:
-                await self.emitter.emit("idle")
-                continue
+        await self.emitter.emit("listening", audio_level=0.0)
+        transcript = ""
+        async for evt in self.stt.transcribe(audio_source=self.mic_stream()):
+            transcript = str(evt.get("text") or "").strip()
+            if transcript:
+                await self.emitter.emit("listening", metadata={"partial_transcript": transcript})
+            if evt.get("is_final"):
+                break
 
-            await self.emitter.emit("processing", metadata={"final_transcript": transcript})
-            token_stream = self.llm_stream(transcript)
-
-            await self.emitter.emit("speaking")
-            async for wav_bytes in self.tts.speak_streaming(token_stream):
-                self.play_audio_wav(wav_bytes)
-
+        transcript = transcript.strip()
+        if not transcript:
             await self.emitter.emit("idle")
+            return
+
+        await self.emitter.emit("processing", metadata={"final_transcript": transcript})
+        token_stream = self.llm_stream(transcript)
+
+        await self.emitter.emit("speaking")
+        spoke = False
+        async for wav_bytes in self.tts.speak_streaming(token_stream):
+            spoke = True
+            self.play_audio_wav(wav_bytes)
+        if not spoke:
+            # TTS unreachable or the reply was empty: log so a silent orb is
+            # explainable rather than mysterious.
+            logger.warning("orpheus: no audio played for transcript %r", transcript[:80])
+
+        await self.emitter.emit("idle")
 
 
 async def main() -> None:
