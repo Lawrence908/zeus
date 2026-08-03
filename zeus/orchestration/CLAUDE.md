@@ -121,16 +121,6 @@ Conditionally safe (one write, low blast radius):
 
 - `olympian_inbox_append` — append a one-line note to `~/.zeus/inbox.md`. Add only when there is a clear "Kairos leaves itself a note" use case, and only with `ZEUS_MCP_ALLOW_WRITE=1`.
 
-Conditionally safe (read-only, external corpus, double-gated):
-
-- `epstein_capabilities`, `epstein_search`, `epstein_entity`, `epstein_research_result` — read-only proxy to the external Epstein research service (`_dispatch_epstein_*` in `daemon.py`). Blast radius: outbound queries to the corpus API only; no write path to that service is exposed to Kairos, and each arm additionally no-ops unless `ZEUS_EPSTEIN_ENABLED=1`. Add these to let the autonomous daemon investigate on its own initiative, e.g.:
-
-  ```
-  ZEUS_KAIROS_TOOL_ALLOWLIST=zeus_memory_search,epstein_search,epstein_research_result
-  ```
-
-  `epstein_research_start` is intentionally NOT dispatch-wired for Kairos (it kicks a heavy GPU job); scheduled deep runs belong in the Kronos job `zeus.kronos.jobs.epstein_research.run_epstein_research`.
-
 Never add to the default allowlist:
 
 - `olympian_action_run` — arbitrary script execution. The risk is unbounded by allowlist alone; gate behind a dedicated `ZEUS_KAIROS_ALLOW_ACTIONS=1` check before adding.
