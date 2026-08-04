@@ -1,0 +1,13 @@
+# scripts/epstein-sync-exclude.txt — commits sync-epstein.sh must NEVER cherry-pick.
+#
+# One commit per line (full or short hash; blank lines and #comments ignored).
+# The mainline (zeus-os) carries commits that intentionally do not belong on the
+# private `epstein` branch — above all the commit that REMOVES the Epstein code
+# from mainline. Cherry-picking it here would delete the very code this branch
+# exists to hold. List those commits here.
+#
+# You can also keep a commit out of the sync without touching this file by adding
+# a line "[epstein-sync-skip]" anywhere in that commit's message on mainline.
+
+# epstein: remove the corpus researcher from the mainline branch
+2dd17069df41965127340f1cfcec6d8dd3ee2c2a
