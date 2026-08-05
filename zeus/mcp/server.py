@@ -7,9 +7,20 @@ Run:
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
+# Load .env so tools that read os.getenv (e.g. CAPITOLSCOPE_SIGNALS_KEY) work
+# regardless of how the stdio MCP server is launched.
+load_dotenv()
+
 from zeus.mcp.tools import (
+    capitolscope_active_tickers,
+    capitolscope_context_pack,
+    capitolscope_digest,
+    capitolscope_leaderboard,
+    capitolscope_sector_flow,
+    capitolscope_ticker,
     kronos_create_job,
     olympian_action_list,
     olympian_action_run,
@@ -18,10 +29,12 @@ from zeus.mcp.tools import (
     olympian_inbox_append,
     olympian_server_health,
     olympian_status_read,
+    olympian_twitter_post,
     zeus_calendar_today,
     zeus_image_generate,
     zeus_ingest_trigger,
     zeus_memory_search,
+    zeus_news_search,
     zeus_newsletter_latest,
     zeus_profile,
     zeus_query,
@@ -163,6 +176,55 @@ async def kronos_create_job_tool(
         max_retries=max_retries,
         job_id=job_id,
     )
+
+
+@mcp.tool(name="zeus_news_search")
+async def zeus_news_search_tool(
+    query: str,
+    source: str | None = None,
+    topic: str | None = None,
+    entity: str | None = None,
+    since: str | None = None,
+    top_k: int = 8,
+):
+    return await zeus_news_search(
+        query=query, source=source, topic=topic, entity=entity, since=since, top_k=top_k
+    )
+
+
+@mcp.tool(name="olympian_twitter_post")
+async def olympian_twitter_post_tool(text: str, thread: list[str] | None = None):
+    return await olympian_twitter_post(text=text, thread=thread)
+
+
+@mcp.tool(name="capitolscope_digest")
+async def capitolscope_digest_tool(days: int = 7):
+    return await capitolscope_digest(days=days)
+
+
+@mcp.tool(name="capitolscope_active_tickers")
+async def capitolscope_active_tickers_tool(days: int = 90, limit: int = 25):
+    return await capitolscope_active_tickers(days=days, limit=limit)
+
+
+@mcp.tool(name="capitolscope_context_pack")
+async def capitolscope_context_pack_tool(days: int = 7):
+    return await capitolscope_context_pack(days=days)
+
+
+@mcp.tool(name="capitolscope_ticker")
+async def capitolscope_ticker_tool(ticker: str, days: int = 180, limit: int = 60):
+    return await capitolscope_ticker(ticker=ticker, days=days, limit=limit)
+
+
+@mcp.tool(name="capitolscope_sector_flow")
+async def capitolscope_sector_flow_tool(days: int = 90):
+    return await capitolscope_sector_flow(days=days)
+
+
+@mcp.tool(name="capitolscope_leaderboard")
+async def capitolscope_leaderboard_tool(limit: int = 20):
+    return await capitolscope_leaderboard(limit=limit)
 
 
 def main() -> None:

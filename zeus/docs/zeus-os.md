@@ -1,6 +1,6 @@
 # Zeus OS
 
-Hyprland-style tiling window manager that runs in a browser. Side-by-side with the React dashboard at `zeus/frontend/` — Zeus OS is the spatial, keyboard-driven surface; the React app stays as the data-dense fallback.
+Hyprland-style tiling window manager that runs in a browser. Side-by-side with the React dashboard at `zeus/frontend/` - Zeus OS is the spatial, keyboard-driven surface; the React app stays as the data-dense fallback.
 
 ## URLs
 
@@ -84,7 +84,7 @@ Notes:
 
 ## Phase 1.5 runbook (host-shell PTY + GPU stats)
 
-Phase 1 ships a container `bash -i` — useful but only sees container paths. Phase 1.5 upgrades the PTY to a real host shell over SSH from inside the container, and lights up `nvidia-smi` for GPU stats over the same channel.
+Phase 1 ships a container `bash -i` - useful but only sees container paths. Phase 1.5 upgrades the PTY to a real host shell over SSH from inside the container, and lights up `nvidia-smi` for GPU stats over the same channel.
 
 ### One-time host setup
 
@@ -114,7 +114,7 @@ The repo's `compose.override.yaml` already handles the wiring when `ZEUS_OS_PTY_
 - Adds `extra_hosts: ["host.docker.internal:host-gateway"]` so the container can resolve the docker host.
 - Sets `ZEUS_OS_PTY_HOST_SSH=1`, `ZEUS_OS_PTY_SSH_HOST`, `ZEUS_OS_PTY_SSH_IDENTITY`, `ZEUS_OS_GPU_SSH=1`.
 
-Recreate the container (not just restart — extra_hosts and new mounts need a fresh container):
+Recreate the container (not just restart - extra_hosts and new mounts need a fresh container):
 
 ```sh
 docker compose -f /home/chris/zeus/compose.yaml up -d --force-recreate zeus-core
@@ -127,7 +127,7 @@ docker compose -f /home/chris/zeus/compose.yaml up -d --force-recreate zeus-core
 
 ### Security note
 
-The key restrictions tier the trust: the *only* IP allowed to use this key is the Docker bridge, the container's `~/.ssh/` is bind-mounted read-only, forwarding is disabled. If the container is compromised the attacker gets host shell as `chris` but only from inside that same container — not the lateral tailnet movement they'd get with an unrestricted key. The Tailscale-only network exposure of Zeus core itself is the outer fence; this is the inner one.
+The key restrictions tier the trust: the *only* IP allowed to use this key is the Docker bridge, the container's `~/.ssh/` is bind-mounted read-only, forwarding is disabled. If the container is compromised the attacker gets host shell as `chris` but only from inside that same container - not the lateral tailnet movement they'd get with an unrestricted key. The Tailscale-only network exposure of Zeus core itself is the outer fence; this is the inner one.
 
 ### Operational
 
@@ -137,7 +137,7 @@ The key restrictions tier the trust: the *only* IP allowed to use this key is th
 
 ## Roadmap
 
-- **Phase 1** — tiling WM shell, Terminal (container PTY), Chat, System Monitor, File Manager, theme switcher, mobile shell. Placeholder windows for everything else so the launcher feels complete. ✓ shipped
-- **Phase 1.5 (now)** — host-shell PTY via SSH from the container; nvidia-smi GPU stats over the same channel; restore-on-reload (sessions persisted in `~/.zeus/zeus-os/sessions.json`).
-- **Phase 2** — plain-markdown Obsidian vault setup + viewer, Monaco code editor (lazy-loaded chunk), Home Assistant + Linear panels, Caddy `zeus-os.chrislawrence.ca`.
-- **Phase 3** — image viewer, htop-style process manager, Tailscale peer list, scratchpad notepad, Google Calendar panel.
+- **Phase 1** - tiling WM shell, Terminal (container PTY), Chat, System Monitor, File Manager, theme switcher, mobile shell. Placeholder windows for everything else so the launcher feels complete. ✓ shipped
+- **Phase 1.5 (now)** - host-shell PTY via SSH from the container; nvidia-smi GPU stats over the same channel; restore-on-reload (sessions persisted in `~/.zeus/zeus-os/sessions.json`).
+- **Phase 2** - plain-markdown Obsidian vault setup + viewer, Monaco code editor (lazy-loaded chunk), Home Assistant + Linear panels, Caddy `zeus-os.chrislawrence.ca`.
+- **Phase 3** - image viewer, htop-style process manager, Tailscale peer list, scratchpad notepad, Google Calendar panel.

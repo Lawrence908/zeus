@@ -107,3 +107,78 @@ def clear_invocations() -> None:
 
 def buffer_size() -> int:
     return len(_BUFFER)
+
+
+def _percentile(sorted_vals: list[int], q: float) -> int:
+    if not sorted_vals:
+        return 0
+    idx = min(len(sorted_vals) - 1, int(round(q * (len(sorted_vals) - 1))))
+    return sorted_vals[idx]
+
+
+def metrics_summary(*, window_seconds: float | None = None) -> dict[str, Any]:
+    """Aggregate the invocation ring buffer for /admin/metrics.
+
+    Rolls the recorded chat-path tool calls into overall + per-tool counts,
+    error / cache-hit / Aegis-reject rates, and duration p50/p95. Pass
+    window_seconds to restrict to recent calls (e.g. last 15 min); None uses
+    the whole buffer (bounded by _MAX_INVOCATIONS).
+    """
+    entries = list(_BUFFER)
+    if window_seconds is not None:
+        cutoff = time.time() - window_seconds
+        entries = [e for e in entries if e.ts >= cutoff]
+
+    total = len(entries)
+    base: dict[str, Any] = {
+        "total": total,
+        "buffer_max": _MAX_INVOCATIONS,
+        "window_seconds": window_seconds,
+        "oldest_ts": entries[0].ts if entries else None,
+        "newest_ts": entries[-1].ts if entries else None,
+    }
+    if total == 0:
+        base.update(
+            {
+                "error_rate": 0.0,
+                "cache_hit_rate": 0.0,
+                "aegis_reject_count": 0,
+                "latency_ms_p50": 0,
+                "latency_ms_p95": 0,
+                "per_tool": {},
+            }
+        )
+        return base
+
+    errors = sum(1 for e in entries if e.is_error)
+    cache_hits = sum(1 for e in entries if e.cache_hit)
+    aegis_rejects = sum(1 for e in entries if e.aegis_rejected)
+    durations = sorted(e.duration_ms for e in entries)
+
+    per_tool: dict[str, dict[str, Any]] = {}
+    for name in {e.tool for e in entries}:
+        group = [e for e in entries if e.tool == name]
+        g_durations = sorted(e.duration_ms for e in group)
+        per_tool[name] = {
+            "calls": len(group),
+            "errors": sum(1 for e in group if e.is_error),
+            "cache_hits": sum(1 for e in group if e.cache_hit),
+            "aegis_rejects": sum(1 for e in group if e.aegis_rejected),
+            "latency_ms_p50": _percentile(g_durations, 0.50),
+            "latency_ms_p95": _percentile(g_durations, 0.95),
+        }
+
+    base.update(
+        {
+            "error_rate": round(errors / total, 4),
+            "cache_hit_rate": round(cache_hits / total, 4),
+            "aegis_reject_count": aegis_rejects,
+            "latency_ms_p50": _percentile(durations, 0.50),
+            "latency_ms_p95": _percentile(durations, 0.95),
+            # Busiest tools first so a dashboard table reads top-down.
+            "per_tool": dict(
+                sorted(per_tool.items(), key=lambda kv: kv[1]["calls"], reverse=True)
+            ),
+        }
+    )
+    return base

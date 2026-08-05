@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 from zeus.ingest.privacy import classify_chunk
 from zeus.ingest.types import Chunk
 from zeus.memory.library import KnowledgeChunk, KnowledgeStore, get_knowledge_store
+from zeus.memory.news import NewsItem, NewsStore, get_news_store
 from zeus.memory.store import AddResult, MemoryStore, get_memory_store
 
 logger = logging.getLogger("iris")
@@ -120,6 +121,15 @@ def _resolve_knowledge(
     return get_knowledge_store()
 
 
+def _resolve_news(dry_run: bool, injected: NewsStore | None) -> NewsStore | None:
+    """Return NewsStore for live ingest, or None for dry_run."""
+    if dry_run:
+        return None
+    if injected is not None:
+        return injected
+    return get_news_store()
+
+
 def _chunk_to_knowledge(chunk: Chunk, privacy_level: str) -> KnowledgeChunk:
     """Map a pipeline Chunk (mem0-shaped) onto a KnowledgeChunk for raw RAG store."""
     src_label = chunk.source or "unknown"
@@ -176,6 +186,39 @@ def _store_chunk_knowledge(
         raise RuntimeError(f"knowledge store accepted 0 chunks (skipped={result.skipped})")
 
 
+def _chunk_to_news(chunk: Chunk, privacy_level: str) -> NewsItem:
+    """Map a pipeline Chunk onto a NewsItem. News sources put item fields in metadata."""
+    src_label = chunk.source or "unknown"
+    if ":" in src_label:
+        source_kind, source_id = src_label.split(":", 1)
+    else:
+        source_kind, source_id = src_label, src_label
+    md = dict(chunk.metadata or {})
+    return NewsItem(
+        text=chunk.text,
+        title=str(md.pop("title", "") or ""),
+        source=source_kind,
+        source_id=source_id,
+        url=str(md.pop("url", "") or "") or None,
+        published_at=str(md.pop("published_at", "") or ""),
+        ingested_at="",  # payload() stamps now
+        entities=[str(e) for e in md.pop("entities", []) or []],
+        topics=[str(t) for t in md.pop("topics", []) or []],
+        bias=str(md.pop("bias", "") or "") or None,
+        metadata={**md, "privacy_level": privacy_level, "user_id": chunk.user_id},
+    )
+
+
+def _store_chunk_news(store: NewsStore, chunk: Chunk, privacy_level: str) -> None:
+    """Blocking news upsert. Raises on failure so the retry loop can catch it."""
+    item = _chunk_to_news(chunk, privacy_level)
+    result = store.add_items([item])
+    if result.errors:
+        raise RuntimeError(result.errors[0])
+    if result.added == 0 and result.unchanged == 0:
+        raise RuntimeError(f"news store accepted 0 items (skipped={result.skipped})")
+
+
 def _use_rich_progress(ingest_ui: Literal["auto", "rich", "plain"]) -> bool:
     if ingest_ui == "plain":
         return False
@@ -191,6 +234,7 @@ async def run_ingest(
     *,
     memory: MemoryStore | None = None,
     knowledge: KnowledgeStore | None = None,
+    news: NewsStore | None = None,
     ingest_ui: Literal["auto", "rich", "plain"] = "auto",
     console: Console | None = None,
 ) -> list[IngestResult]:
@@ -201,11 +245,14 @@ async def run_ingest(
     """
     memory_store: MemoryStore | None = None
     knowledge_store: KnowledgeStore | None = None
+    news_store: NewsStore | None = None
     targets = {getattr(s, "target", "memory") for s in sources}
     if "memory" in targets:
         memory_store = _resolve_memory(dry_run, memory)
     if "knowledge" in targets:
         knowledge_store = _resolve_knowledge(dry_run, knowledge)
+    if "news" in targets:
+        news_store = _resolve_news(dry_run, news)
     results: list[IngestResult] = []
     use_progress = _use_rich_progress(ingest_ui)
     progress_cm = nullcontext(None)
@@ -256,154 +303,172 @@ async def run_ingest(
                     description=f"{source_name} [{source_target}] · chunk 0 · starting…",
                 )
 
-            async for chunk in source.chunks():
-                total += 1
-                if dry_run:
-                    logger.debug(
-                        "[dry_run] %s: %r…",
-                        chunk.source,
-                        chunk.text[:80],
-                    )
-                    stored += 1
-                    if progress is not None and task_id is not None:
-                        snippet = (chunk.text[:56] + "…") if len(chunk.text) > 56 else chunk.text
-                        progress.update(
-                            task_id,
-                            description=f"{source_name} · chunk {total} · {snippet}",
+            source_iter_error: str | None = None
+            try:
+                async for chunk in source.chunks():
+                    total += 1
+                    if dry_run:
+                        logger.debug(
+                            "[dry_run] %s: %r…",
+                            chunk.source,
+                            chunk.text[:80],
                         )
-                    continue
-
-                chunk_t0 = time.monotonic()
-                privacy_level = classify_chunk(chunk)
-                transient_attempt = 0
-                max_transient = _ingest_transient_max_retries()
-                prompt_mode = _ingest_prompt_mode()
-                backoff = 2.0
-                backoff_cap = 60.0
-                logged_transient_header = False
-
-                while True:
-                    try:
-                        if source_target == "knowledge":
-                            await asyncio.to_thread(
-                                _store_chunk_knowledge,
-                                knowledge_store,
-                                chunk,
-                                privacy_level.value,
-                            )
-                            k_ops["ADD"] += 1
-                        else:
-                            if memory_store is None:
-                                raise RuntimeError("memory target selected but no MemoryStore configured")
-                            mem_result = await _store_chunk_memory(
-                                memory_store, chunk, privacy_level.value
-                            )
-                            _tally_memory_result(mem_result, mem_ops)
-                            if mem_result.errors:
-                                errors.extend(mem_result.errors)
                         stored += 1
-                        chunk_dt = time.monotonic() - chunk_t0
-                        snippet = (
-                            (chunk.text[:56] + "…") if len(chunk.text) > 56 else chunk.text
-                        )
-                        if use_progress and progress is not None and task_id is not None:
+                        if progress is not None and task_id is not None:
+                            snippet = (chunk.text[:56] + "…") if len(chunk.text) > 56 else chunk.text
                             progress.update(
                                 task_id,
-                                description=(
-                                    f"{source_name} · chunk {total} · {chunk_dt:.1f}s · {snippet}"
-                                ),
+                                description=f"{source_name} · chunk {total} · {snippet}",
                             )
-                        else:
-                            logger.info(
-                                "iris: [%s] stored chunk in %.1fs — %s: %r…",
-                                total,
-                                chunk_dt,
-                                chunk.source,
-                                chunk.text[:60],
-                            )
-                        break
-                    except Exception as e:
-                        if not _is_transient_ingest_error(e):
-                            errors.append(f"{chunk.source}: {e}")
-                            logger.warning(
-                                "iris: [%s] failed to store chunk — %s", total, e
-                            )
-                            break
+                        continue
 
-                        transient_attempt += 1
-                        if max_transient and transient_attempt > max_transient:
-                            errors.append(
-                                f"{chunk.source}: {e} "
-                                f"(gave up after {max_transient} transient retries; "
-                                "raise IRIS_INGEST_TRANSIENT_MAX_RETRIES or unset for unlimited)"
-                            )
-                            logger.warning(
-                                "iris: [%s] transient retries exhausted (%s) — %s",
-                                total,
-                                max_transient,
-                                e,
-                            )
-                            break
+                    chunk_t0 = time.monotonic()
+                    privacy_level = classify_chunk(chunk)
+                    transient_attempt = 0
+                    max_transient = _ingest_transient_max_retries()
+                    prompt_mode = _ingest_prompt_mode()
+                    backoff = 2.0
+                    backoff_cap = 60.0
+                    logged_transient_header = False
 
-                        if not logged_transient_header:
-                            logger.warning(
-                                "iris: [%s] transient failure (same chunk will retry) — %s",
-                                total,
-                                e,
-                            )
-                            logged_transient_header = True
-                        elif transient_attempt % 5 == 0:
-                            logger.info(
-                                "iris: [%s] still retrying transient error "
-                                "(attempt %s) — %s",
-                                total,
-                                transient_attempt,
-                                e,
-                            )
-
-                        tty = sys.stdin.isatty()
-                        want_prompt = False
-                        if prompt_mode == "never":
-                            pass
-                        elif prompt_mode == "always":
-                            want_prompt = transient_attempt >= 1 and transient_attempt % 5 == 0
-                        elif prompt_mode == "auto" and tty:
-                            # First prompt after a few automatic backoffs, then occasionally.
-                            want_prompt = transient_attempt >= 3 and (
-                                transient_attempt == 3
-                                or (transient_attempt - 3) % 12 == 0
-                            )
-                        if want_prompt:
-                            retry = await _prompt_retry_or_skip(total, chunk.source)
-                            if not retry:
-                                errors.append(
-                                    f"{chunk.source}: {e} (skipped after user chose n)"
+                    while True:
+                        try:
+                            if source_target == "knowledge":
+                                await asyncio.to_thread(
+                                    _store_chunk_knowledge,
+                                    knowledge_store,
+                                    chunk,
+                                    privacy_level.value,
                                 )
-                                logger.warning(
-                                    "iris: [%s] chunk skipped after transient failures",
+                                k_ops["ADD"] += 1
+                            elif source_target == "news":
+                                await asyncio.to_thread(
+                                    _store_chunk_news,
+                                    news_store,
+                                    chunk,
+                                    privacy_level.value,
+                                )
+                                k_ops["ADD"] += 1
+                            else:
+                                if memory_store is None:
+                                    raise RuntimeError("memory target selected but no MemoryStore configured")
+                                mem_result = await _store_chunk_memory(
+                                    memory_store, chunk, privacy_level.value
+                                )
+                                _tally_memory_result(mem_result, mem_ops)
+                                if mem_result.errors:
+                                    errors.extend(mem_result.errors)
+                            stored += 1
+                            chunk_dt = time.monotonic() - chunk_t0
+                            snippet = (
+                                (chunk.text[:56] + "…") if len(chunk.text) > 56 else chunk.text
+                            )
+                            if use_progress and progress is not None and task_id is not None:
+                                progress.update(
+                                    task_id,
+                                    description=(
+                                        f"{source_name} · chunk {total} · {chunk_dt:.1f}s · {snippet}"
+                                    ),
+                                )
+                            else:
+                                logger.info(
+                                    "iris: [%s] stored chunk in %.1fs — %s: %r…",
                                     total,
+                                    chunk_dt,
+                                    chunk.source,
+                                    chunk.text[:60],
+                                )
+                            break
+                        except Exception as e:
+                            if not _is_transient_ingest_error(e):
+                                errors.append(f"{chunk.source}: {e}")
+                                logger.warning(
+                                    "iris: [%s] failed to store chunk — %s", total, e
                                 )
                                 break
 
-                        sleep_s = min(backoff, backoff_cap)
-                        backoff = min(backoff * 2.0, backoff_cap)
-                        if use_progress and progress is not None and task_id is not None:
-                            snip = (
-                                (chunk.text[:40] + "…")
-                                if len(chunk.text) > 40
-                                else chunk.text
-                            )
-                            progress.update(
-                                task_id,
-                                description=(
-                                    f"{source_name} · chunk {total} · "
-                                    f"waiting {sleep_s:.0f}s · retry {transient_attempt} · {snip}"
-                                ),
-                            )
-                        await asyncio.sleep(sleep_s)
+                            transient_attempt += 1
+                            if max_transient and transient_attempt > max_transient:
+                                errors.append(
+                                    f"{chunk.source}: {e} "
+                                    f"(gave up after {max_transient} transient retries; "
+                                    "raise IRIS_INGEST_TRANSIENT_MAX_RETRIES or unset for unlimited)"
+                                )
+                                logger.warning(
+                                    "iris: [%s] transient retries exhausted (%s) — %s",
+                                    total,
+                                    max_transient,
+                                    e,
+                                )
+                                break
 
+                            if not logged_transient_header:
+                                logger.warning(
+                                    "iris: [%s] transient failure (same chunk will retry) — %s",
+                                    total,
+                                    e,
+                                )
+                                logged_transient_header = True
+                            elif transient_attempt % 5 == 0:
+                                logger.info(
+                                    "iris: [%s] still retrying transient error "
+                                    "(attempt %s) — %s",
+                                    total,
+                                    transient_attempt,
+                                    e,
+                                )
+
+                            tty = sys.stdin.isatty()
+                            want_prompt = False
+                            if prompt_mode == "never":
+                                pass
+                            elif prompt_mode == "always":
+                                want_prompt = transient_attempt >= 1 and transient_attempt % 5 == 0
+                            elif prompt_mode == "auto" and tty:
+                                # First prompt after a few automatic backoffs, then occasionally.
+                                want_prompt = transient_attempt >= 3 and (
+                                    transient_attempt == 3
+                                    or (transient_attempt - 3) % 12 == 0
+                                )
+                            if want_prompt:
+                                retry = await _prompt_retry_or_skip(total, chunk.source)
+                                if not retry:
+                                    errors.append(
+                                        f"{chunk.source}: {e} (skipped after user chose n)"
+                                    )
+                                    logger.warning(
+                                        "iris: [%s] chunk skipped after transient failures",
+                                        total,
+                                    )
+                                    break
+
+                            sleep_s = min(backoff, backoff_cap)
+                            backoff = min(backoff * 2.0, backoff_cap)
+                            if use_progress and progress is not None and task_id is not None:
+                                snip = (
+                                    (chunk.text[:40] + "…")
+                                    if len(chunk.text) > 40
+                                    else chunk.text
+                                )
+                                progress.update(
+                                    task_id,
+                                    description=(
+                                        f"{source_name} · chunk {total} · "
+                                        f"waiting {sleep_s:.0f}s · retry {transient_attempt} · {snip}"
+                                    ),
+                                )
+                            await asyncio.sleep(sleep_s)
+
+            except Exception as exc:
+                # Source-level failure (auth, network, parse): record and
+                # continue with the remaining sources instead of aborting
+                # the whole run (2026-07-27: unreachable Canary URL killed
+                # the 7am Pheme digest job).
+                source_iter_error = f"{source_name}: source failed: {exc}"
+                errors.append(source_iter_error)
+                logger.error("iris: %s", source_iter_error)
             elapsed = time.monotonic() - t_start
-            if source_target == "knowledge" and errors:
+            if source_target in ("knowledge", "news") and errors:
                 k_ops["ERROR"] += len(errors)
             result = IngestResult(
                 source=source_name,

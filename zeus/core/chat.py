@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -37,6 +38,10 @@ class ChatMessageRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=32000)
     max_tokens: int | None = Field(None, ge=64, le=4096)
     use_context: bool = True
+    # When true, replies use the terse TTS-oriented voice_system prompt while
+    # still going through the full tool loop + Aegis + sessions (Orpheus uses
+    # this via /chat/stream to get tool/Aegis/session parity with text chat).
+    voice: bool = False
 
 
 class ChatMessageResponse(BaseModel):
@@ -154,6 +159,7 @@ async def chat_message(body: ChatMessageRequest, request: Request) -> ChatMessag
             use_context=body.use_context,
             max_tokens=max_out,
             source="chat",
+            voice=body.voice,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Query failed: {e}") from e
@@ -415,25 +421,12 @@ async def classify_message(body: ClassifyRequest) -> ChatClassification:
     )
 
 
-@router.post("/voice/interact")
-async def voice_interact(
-    request: Request,
-    audio: UploadFile = File(...),
-    session_id: str | None = Form(default=None),
-    use_context: bool = Form(default=True),
-    max_tokens: int = Form(default=256),
-) -> dict[str, Any]:
-    """
-    Non-wake-word voice interaction endpoint.
+async def _transcribe_upload(wav_bytes: bytes) -> str:
+    """STT a WAV upload → transcript, or raise a descriptive HTTPException.
 
-    Accepts a WAV upload + optional session_id, runs STT -> QueryEngine ->
-    returns transcript + text response. session_id is threaded through so
-    voice turns share history with the text chat session.
-    TTS/audio return is intentionally deferred until Voicebox is standardized.
+    Prefers the REST path (vad_filter=False, keeps short clips) when
+    WHISPER_REST_URL is set; falls back to the WebSocket transcriber.
     """
-    engine = _query_engine(request)
-
-    wav_bytes = await audio.read()
     if not wav_bytes:
         raise HTTPException(status_code=400, detail="empty audio upload")
 
@@ -475,12 +468,37 @@ async def voice_interact(
             hint = f"{hint} (REST error: {rest_err})"
         raise HTTPException(status_code=422, detail=hint)
 
+    return transcript
+
+
+@router.post("/voice/interact")
+async def voice_interact(
+    request: Request,
+    audio: UploadFile = File(...),
+    session_id: str | None = Form(default=None),
+    use_context: bool = Form(default=True),
+    max_tokens: int = Form(default=256),
+) -> dict[str, Any]:
+    """
+    Non-wake-word voice interaction endpoint.
+
+    Accepts a WAV upload + optional session_id, runs STT -> QueryEngine ->
+    returns transcript + text response. session_id is threaded through so
+    voice turns share history with the text chat session.
+    TTS/audio return is intentionally deferred until Voicebox is standardized.
+    """
+    engine = _query_engine(request)
+
+    wav_bytes = await audio.read()
+    transcript = await _transcribe_upload(wav_bytes)
+
     result = await engine.query(
         transcript,
         session_id=session_id,
         use_context=use_context,
         max_tokens=max_tokens,
         source="voice_interact",
+        voice=True,
     )
 
     sess = await engine.sessions.get(result.session_id)
@@ -534,6 +552,22 @@ def _sse_phase_event(detail: str) -> str:
     return f"data: {json.dumps({'type': 'phase', 'detail': detail})}\n\n"
 
 
+def _sse_transcript_event(text: str) -> bytes:
+    return f"data: {json.dumps({'type': 'transcript', 'text': text})}\n\n".encode("utf-8")
+
+
+def _sse_audio_event(seq: int, wav_bytes: bytes) -> bytes:
+    # Each sentence is a self-contained WAV, base64'd so the browser can enqueue
+    # and play it the moment it arrives — no MediaSource assembly needed.
+    payload = {
+        "type": "audio",
+        "seq": seq,
+        "format": "wav",
+        "data": base64.b64encode(wav_bytes).decode("ascii"),
+    }
+    return f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+
+
 @router.post("/chat/stream")
 async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingResponse:
     memory = getattr(request.app.state, "memory", None)
@@ -562,8 +596,9 @@ async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingRe
                 session_id_out,
                 use_context=body.use_context,
                 max_tokens=max_out,
-                source="chat",
+                source="voice" if body.voice else "chat",
                 tool_calls_out=tool_calls,
+                voice=body.voice,
             ):
                 accumulated.append(chunk)
                 yield _sse_token_event(chunk).encode("utf-8")
@@ -581,6 +616,103 @@ async def chat_stream(body: ChatMessageRequest, request: Request) -> StreamingRe
                 tool_calls=tool_calls or None,
             ).encode("utf-8")
         except Exception as e:
+            yield _sse_error_event(str(e)).encode("utf-8")
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/voice/interact/stream")
+async def voice_interact_stream(
+    request: Request,
+    audio: UploadFile = File(...),
+    session_id: str | None = Form(default=None),
+    use_context: bool = Form(default=True),
+    max_tokens: int = Form(default=512),
+) -> StreamingResponse:
+    """Streaming voice turn: STT once, then pipeline LLM → per-sentence TTS.
+
+    Emits SSE events: ``transcript`` (once), ``token`` (text as generated),
+    ``audio`` (one self-contained WAV per sentence, as soon as it synthesizes),
+    ``done`` (session/model/latency), ``error``. The browser plays each audio
+    chunk on arrival, so sentence 1 speaks while sentence 2 is still generating —
+    dropping first-audio latency from "whole reply" to "first sentence".
+
+    Aegis / tools / session parity comes from reusing ``query_stream(voice=True)``,
+    the same path as ``/chat/stream``. STT reuses ``_transcribe_upload``. TTS
+    failures skip the affected sentence (via ``VoiceboxTTS._synthesize_safe``); a
+    turn with zero audio events tells the client to fall back to browser speech.
+    """
+    from zeus.voice.tts import VoiceboxTTS
+
+    engine = _query_engine(request)
+    wav_bytes = await audio.read()
+    # STT errors surface as HTTPException before the stream opens (clean 4xx/5xx).
+    transcript = await _transcribe_upload(wav_bytes)
+
+    session = await engine.sessions.get_or_create(session_id, metadata={"source": "voice"})
+    session_id_out = session.id
+    tts = VoiceboxTTS()
+
+    async def event_iter() -> AsyncIterator[bytes]:
+        t0 = time.monotonic()
+        try:
+            yield b": stream-open\n\n"
+            yield _sse_transcript_event(transcript)
+
+            accumulated: list[str] = []
+            tool_calls: list[dict] = []
+            buffer = ""
+            seq = 0
+            async for chunk in engine.query_stream(
+                transcript,
+                session_id_out,
+                use_context=use_context,
+                max_tokens=max_tokens,
+                source="voice",
+                tool_calls_out=tool_calls,
+                voice=True,
+            ):
+                accumulated.append(chunk)
+                yield _sse_token_event(chunk).encode("utf-8")
+                buffer += chunk
+                # Flush every completed sentence to TTS, keep the trailing partial.
+                sentences = tts._split_sentences(buffer)
+                if len(sentences) > 1:
+                    for sentence in sentences[:-1]:
+                        wav = await tts._synthesize_safe(sentence)
+                        if wav:
+                            seq += 1
+                            yield _sse_audio_event(seq, wav)
+                    buffer = sentences[-1]
+
+            tail = buffer.strip()
+            if tail:
+                wav = await tts._synthesize_safe(tail)
+                if wav:
+                    seq += 1
+                    yield _sse_audio_event(seq, wav)
+
+            reply = "".join(accumulated)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            sess = await engine.sessions.get(session_id_out)
+            topic = effective_session_topic(sess) if sess else None
+            yield _sse_done_event(
+                session_id=session_id_out,
+                latency_ms=latency_ms,
+                model_used=_active_model_name(),
+                topic=topic,
+                token_estimate=max(len(reply) // 4, 0),
+                tool_calls=tool_calls or None,
+            ).encode("utf-8")
+        except Exception as e:  # noqa: BLE001 — surface as an SSE error frame
             yield _sse_error_event(str(e)).encode("utf-8")
 
     return StreamingResponse(

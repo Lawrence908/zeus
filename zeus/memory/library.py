@@ -95,7 +95,7 @@ class KnowledgeStore:
         self.ollama_url = (
             ollama_url or os.getenv("OLLAMA_URL", "http://localhost:11435")
         ).rstrip("/")
-        self.embed_model = embed_model or os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text")
+        self.embed_model = embed_model or os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text:v1.5")
         self._client = QdrantClient(url=self.qdrant_url)
         self._ensured = False
         self._bm25 = None  # lazy fastembed.SparseTextEmbedding
@@ -199,8 +199,13 @@ class KnowledgeStore:
         if self._bm25 is None:
             from fastembed import SparseTextEmbedding
 
-            self._bm25 = SparseTextEmbedding("Qdrant/bm25")
-            logger.info("loaded BM25 sparse encoder (Qdrant/bm25)")
+            # Persist the model to a mounted dir (default under zeus/data, which
+            # is a persistent bind mount) so a container recreate doesn't wipe it
+            # to ephemeral /tmp and trigger a blocking re-download of the BM25
+            # model on the next hybrid query (LAB-NEW-G fastembed-cache fragility).
+            cache_dir = os.getenv("ZEUS_FASTEMBED_CACHE_DIR", "zeus/data/fastembed_cache")
+            self._bm25 = SparseTextEmbedding("Qdrant/bm25", cache_dir=cache_dir)
+            logger.info("loaded BM25 sparse encoder (Qdrant/bm25), cache_dir=%s", cache_dir)
         return self._bm25
 
     def _embed_sparse(self, texts: list[str]) -> list[qmodels.SparseVector]:

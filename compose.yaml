@@ -95,9 +95,37 @@ services:
     networks:
       - web
 
-  # --- Orpheus TTS: Voicebox/LuxTTS ---
-  # Not defined here yet (no stable public image). Run Voicebox on the same host
-  # as Orpheus and point VOICEBOX_URL at it (see zeus/docs/orpheus-spec.md).
+  # --- Orpheus TTS: Kokoro-FastAPI (OpenAI-compatible /v1/audio/speech) ---
+  # CPU image: keeps the 3080 free for Whisper + Ollama. Kokoro-82M is fast on
+  # CPU (well above realtime for short replies) and bundles its weights, so no
+  # first-run download. Browser orb and host Orpheus both reach it via
+  # ZEUS_TTS_URL=http://tts:8880. Host-published on 5050 for the host pipeline.
+  tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.6.0
+    container_name: zeus-tts
+    ports:
+      - "${ZEUS_TTS_PORT:-5050}:8880"
+    environment:
+      - USE_GPU=false
+      # daedalus is a busy 24-core host (Minecraft/neo4j/netdata baseline). Torch
+      # defaults to one thread PER CORE per request, so concurrent synths caused a
+      # run-queue meltdown (load 70+). Bound each synth to a few threads; combined
+      # with the cpus cap below it stays a good citizen. Short replies still synth
+      # well above realtime.
+      - OMP_NUM_THREADS=4
+      - MKL_NUM_THREADS=4
+      - TORCH_NUM_THREADS=4
+      - NUMEXPR_NUM_THREADS=4
+    cpus: 6.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8880/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - web
 
   # --- Aegis: NemoClaw + OpenShell (LAB-119) ---
   # Not a compose service: NVIDIA ships NemoClaw via host installer (Node + Docker
@@ -120,10 +148,24 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - WHISPER_URL=ws://whisper:9090
       - WHISPER_REST_URL=http://whisper:8000
+      # Server-side TTS for the browser voice orb (/voice/tts proxy). Kokoro
+      # speaks OpenAI-style /v1/audio/speech; overrides the legacy VOICEBOX_URL.
+      - ZEUS_VOICE_TTS_ENABLED=1
+      - ZEUS_TTS_URL=http://tts:8880
+      - ZEUS_TTS_VOICE=${ZEUS_TTS_VOICE:-af_heart}
       # Olympian tools loop back to Core via HTTP; inside the container Core
       # listens on 8000, NOT the host-published 8203. Without this override
       # every olympian_* call dies with "connection refused".
       - ZEUS_CORE_URL=http://127.0.0.1:8000
+      # Written .md artifacts (briefings, research reports) must land on the
+      # writable, host-persisted mount. /app/zeus itself is bind-mounted
+      # read-only (dev hot-edit), so only /app/zeus/data (rw, = host
+      # zeus/zeus/data) can be written. The code defaults
+      # (/home/chris/zeus/docs/...) are container-internal and ephemeral. The
+      # knowledge-store ingest is durable either way.
+      - ZEUS_BRIEFINGS_DIR=/app/zeus/data/briefings
+      - ZEUS_DEEP_RESEARCH_DIR=/app/zeus/data/research
+      - ZEUS_SCRUTINY_WATCH_DB=/app/zeus/data/scrutiny_watch.db
     volumes:
       - zeus_data:/app/zeus/data
     depends_on:

@@ -8,7 +8,7 @@ Host-native voice pipeline: wake word to STT to chat LLM to TTS to speaker. Root
 |------|------|
 | `wake.py` | `WakeWordDetector` using openWakeWord; blocking `listen()` until threshold crossed |
 | `stt.py` | `WhisperSTT` WebSocket client; `transcribe_wav_rest()` for WAV-upload mode |
-| `tts.py` | `VoiceboxTTS` REST client; `speak_streaming()` buffers tokens into sentences |
+| `tts.py` | `VoiceboxTTS` client for Kokoro-FastAPI (`/v1/audio/speech`); `speak_streaming()` buffers tokens into sentences, skips a failed sentence rather than aborting |
 | `state.py` | `VoiceStateHub`, `VoiceStateEmitter`, protocol types |
 | `pipeline.py` | `OrpheusPipeline.run_forever()` orchestrator; wake to STT to QueryEngine to TTS |
 
@@ -30,8 +30,12 @@ Host-native voice pipeline: wake word to STT to chat LLM to TTS to speaker. Root
 | `WHISPER_USE_VAD` | `true` | Silero VAD for end-of-utterance |
 | `WHISPER_RECV_TIMEOUT_SEC` | `90` | Receive timeout |
 | `WHISPER_LANGUAGE` | `en` | Lock to skip auto-detect overhead |
-| `VOICEBOX_URL` | `http://localhost:5050` | Voicebox REST |
-| `ORPHEUS_VOICE_ID` | (unset) | Cloned voice handle |
+| `ZEUS_TTS_URL` | `http://tts:8880` | TTS base URL (Kokoro-FastAPI, OpenAI-style `/v1/audio/speech`). Falls back to `VOICEBOX_URL` if set. |
+| `ZEUS_TTS_VOICE` | `af_heart` | Kokoro voice id (`af_*`/`am_*`/`bf_*`…). `ORPHEUS_VOICE_ID` honored if it looks like a voice id. |
+| `ZEUS_TTS_MODEL` | `kokoro` | TTS model name |
+| `ZEUS_TTS_FORMAT` | `wav` | `response_format`; pipeline + orb both expect WAV |
+| `ZEUS_TTS_SPEED` | `1.0` | Speed multiplier |
+| `ZEUS_VOICE_TTS_ENABLED` | `0` | Set `1` on `zeus-core` to enable the `/voice/tts` browser proxy |
 | `WAKE_WORD_MODEL` | `hey_jarvis` | Use `hey_jarvis` until a custom `hey_zeus` is trained |
 | `WAKE_WORD_THRESHOLD` | `0.5` | Raise to `0.7` if false positives in background noise |
 | `WAKE_WORD_INFERENCE_FRAMEWORK` | `onnx` | `onnx` or `tflite` |
@@ -64,6 +68,8 @@ curl -F audio=@sample.wav http://localhost:8203/voice/interact
 | `qwen2.5:7b-instruct` Q4_K_M | ~5.5 GB |
 | Activations / KV scratch | ~0.3 GB |
 | **Total** | **~9.1 GB** |
+
+TTS (Kokoro-82M) runs on **CPU** (`zeus-tts` container, `USE_GPU=false`), so it costs no VRAM. It is well above realtime for short replies; move it to the GPU image only if CPU latency becomes the bottleneck.
 
 Margin ~0.9 GB. If you want `medium` Whisper to free ~1.5 GB, fine; latency impact is minor.
 

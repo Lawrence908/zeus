@@ -143,7 +143,7 @@ def _fmt_duration(seconds: float) -> str:
     return f"{minutes}m {secs}s"
 
 
-def _apply_config_overrides(sources: list, ingest_cfg) -> list:
+def _apply_config_overrides(sources: list, ingest_cfg, cli_args=None) -> list:
     """Apply target overrides from zeus/ingest/config.yaml onto built sources.
 
     Each source class has a class-level ``target`` default from task D; the
@@ -166,6 +166,8 @@ def _apply_config_overrides(sources: list, ingest_cfg) -> list:
         "GoogleCalendarSource": "gcal",
         "DocsSource": "docs",
         "KiwixZimSource": "kiwix_zim",
+        "CanaryNewsSource": "canary",
+        "CapitolScopeNewsSource": "capitolscope",
     }
     for source in sources:
         key = CLASS_TO_KEY.get(type(source).__name__)
@@ -181,6 +183,13 @@ def _apply_config_overrides(sources: list, ingest_cfg) -> list:
                 source.books = set(src_cfg.books)
             if src_cfg.max_zim_mb is not None:
                 source.max_zim_mb = src_cfg.max_zim_mb
+        if key in ("canary", "capitolscope"):
+            # CLI --news-days-back wins when passed explicitly; config fills the default.
+            cli_days = getattr(cli_args, "news_days_back", None)
+            if src_cfg.days_back is not None and (cli_days is None or cli_days == 3):
+                source.days_back = max(1, src_cfg.days_back)
+            if key == "canary" and src_cfg.limit is not None:
+                source.limit = max(1, min(src_cfg.limit, 200))
     return sources
 
 
@@ -401,6 +410,36 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
                 )
             )
 
+    if args.source in ("canary", "all"):
+        from zeus.ingest.sources.canary import CanaryNewsSource
+
+        try:
+            sources.append(
+                CanaryNewsSource(
+                    days_back=args.news_days_back,
+                    user_id=args.user_id,
+                )
+            )
+        except Exception as exc:
+            if args.source == "canary":
+                fail_hard(f"canary config invalid: {exc}")
+            logger.warning("skipping canary - %s", exc)
+
+    if args.source in ("capitolscope", "all"):
+        from zeus.ingest.sources.capitolscope import CapitolScopeNewsSource
+
+        try:
+            sources.append(
+                CapitolScopeNewsSource(
+                    days_back=args.news_days_back,
+                    user_id=args.user_id,
+                )
+            )
+        except Exception as exc:
+            if args.source == "capitolscope":
+                fail_hard(f"capitolscope config invalid: {exc}")
+            logger.warning("skipping capitolscope - %s", exc)
+
     if args.source in ("newsletter", "all"):
         try:
             nl_cfg = NewsletterSource.from_env()
@@ -427,13 +466,15 @@ def build_sources(args, *, cli_mode: bool = True) -> list:
 def build_sources_for_trigger(
     source: str,
     *,
-    user_id: str = "user",
+    user_id: str | None = None,
     chunk_size: int = 512,
     chunk_overlap: int = 64,
 ) -> list:
     """Build ingest sources for a named trigger (MCP / HTTP). Raises ValueError on failure."""
     from types import SimpleNamespace
 
+    if user_id is None:
+        user_id = os.getenv("ZEUS_USER_ID", "user")
     args = SimpleNamespace(
         source=source,
         path=None,
@@ -446,6 +487,7 @@ def build_sources_for_trigger(
         git_max_commits=500,
         gcal_days_back=90,
         gcal_days_forward=30,
+        news_days_back=3,
         config=None,
         no_config=False,
         target="both",
@@ -480,7 +522,7 @@ async def main(args, *, log_console: object | None = None) -> None:
             sys.exit(1)
 
     sources = build_sources(args)
-    sources = _apply_config_overrides(sources, ingest_cfg)
+    sources = _apply_config_overrides(sources, ingest_cfg, args)
     sources = _filter_sources_by_target(sources, args.target)
 
     if not sources:
@@ -733,7 +775,7 @@ Examples:
         "--source",
         choices=["context_pack", "markdown", "chatgpt", "email",
                  "obsidian", "git", "gcal", "bookmarks", "newsletter",
-                 "docs", "kiwix_zim", "all"],
+                 "docs", "kiwix_zim", "canary", "capitolscope", "all"],
         default="all",
         help="Which source type to ingest (default: all, includes zeus/data/raw/context_pack.md and project docs)",
     )
@@ -777,8 +819,8 @@ Examples:
     )
     p.add_argument(
         "--user-id",
-        default="user",
-        help="Memory partition key (default: user; ZEUS_USER_ID env overrides)",
+        default=os.getenv("ZEUS_USER_ID", "user"),
+        help="Memory partition key (default: ZEUS_USER_ID env, else 'user')",
     )
     p.add_argument(
         "--email-limit",
@@ -816,9 +858,15 @@ Examples:
     )
     p.add_argument(
         "--target",
-        choices=["memory", "knowledge", "both"],
+        choices=["memory", "knowledge", "news", "both"],
         default="both",
-        help="Only run sources routed to this layer (default: both)",
+        help="Only run sources routed to this layer (default: both = all layers)",
+    )
+    p.add_argument(
+        "--news-days-back",
+        type=int,
+        default=3,
+        help="Days back for news sources (canary, capitolscope; default: 3)",
     )
     p.add_argument(
         "--verbose",

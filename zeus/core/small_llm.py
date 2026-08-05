@@ -579,6 +579,7 @@ async def small_llm_call(
     response_format: type[BaseModel] | Literal["text"] = "text",
     min_privacy_tier: Literal[1, 2] = 2,
     model_hint: str | None = None,
+    providers: list[str] | None = None,
     caller: str | None = None,
 ) -> SmallLLMResult:
     """Route a small-task LLM call through the tier-filtered provider chain.
@@ -586,8 +587,18 @@ async def small_llm_call(
     Fallback on transient error (429/5xx/timeout/JSON-validation). At most one
     attempt per provider; on structured-output ValidationError we do one
     in-provider repair-retry before moving on.
+
+    `providers` hard-pins the chain to the given provider names (in order),
+    overriding DEFAULT_CHAIN — use it to keep a call fully local (e.g.
+    providers=["ollama"]) instead of the soft `model_hint`, which only selects
+    the model *within* whichever provider the chain reaches first. Unknown or
+    disabled names in the list are skipped by the normal per-provider guards.
     """
-    chain = [name.strip() for name in DEFAULT_CHAIN if name.strip()]
+    chain = (
+        [name.strip() for name in providers if name.strip()]
+        if providers
+        else [name.strip() for name in DEFAULT_CHAIN if name.strip()]
+    )
     errors: list[str] = []
     attempts = 0
     last_text = ""

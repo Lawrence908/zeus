@@ -95,3 +95,85 @@ jobs:
     max_retries: 0
     tags: [research, weekly, example]
     enabled: false
+
+  - id: daily-scrutiny-watch
+    name: Daily Scrutiny Watch
+    description: |
+      Catches CapitolScope scrutiny + herding-cluster signals each morning,
+      dedups against zeus/data/scrutiny_watch.db, LLM-triages new/intensifying
+      signals, and auto-escalates only standouts (triage score >= threshold)
+      into one-off deep_research jobs. Everything below the bar is flagged with
+      a ready-to-run topic. Writes zeus/docs/briefings/<date>-scrutiny-watch.md
+      plus inbox + knowledge writeback.
+
+      Auto-escalation spawns web-research runs that spend search-API + small_llm
+      budget, threshold-gated (score >= escalate_threshold) and hard-capped at
+      max_escalations per cycle. Requires ZEUS_KRONOS_ALLOW_WRITE=1 so
+      escalations can POST deep_research jobs. Reviewed + validated end-to-end
+      2026-07-26; enabled.
+    category: research
+    schedule:
+      cron: "0 8 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.scrutiny_watch.run_scrutiny_watch
+    params:
+      days: 7
+      escalate_threshold: 8
+      max_escalations: 2
+      cooldown_days: 14
+      depth: standard
+      only_new: true
+      providers: [ollama]   # hard-pin triage to local Ollama (free); null = DEFAULT_CHAIN
+      model_hint: ollama
+    safety_policy: standard
+    timeout_seconds: 120
+    max_retries: 1
+    tags: [research, capitolscope, scrutiny, daily]
+    enabled: true
+
+  - id: pheme-daily-digest
+    name: Pheme Daily News Digest
+    description: >
+      Pheme news pipeline: ingest Canary + CapitolScope into zeus_news,
+      retention sweep, staged local-Ollama analysis (extract, cluster, thread,
+      correlate, rank, synthesize), then delivery - Telegram push to the news
+      chat and Twitter via the approval gate (autopost only when
+      PHEME_TWITTER_AUTOPOST=1). Digest hour comes from PHEME_DIGEST_HOUR at
+      seed time; edit the live job via /kronos to change it later.
+    category: briefing
+    schedule:
+      cron: "0 ${PHEME_DIGEST_HOUR:-7} * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.pheme.run_daily_digest
+    params:
+      news_days_back: 2
+    safety_policy: pheme
+    timeout_seconds: 3600
+    max_retries: 1
+    tags: [pheme, news, daily]
+    enabled: true
+
+  - id: nightly-retrieval-eval
+    name: Nightly Retrieval Eval (Themis)
+    description: >
+      Scores the accepted retrieval-eval suite (tests/retrieval_eval_queries/,
+      pending/ excluded) against the live stack: overall + per-layer
+      hit@1/5/10/MRR@10 plus the layer_miss category. Fail-open per query.
+      Persists the full report to zeus/data/retrieval_eval.json and returns the
+      summary to the run store. Read-only w.r.t. the suite and the baseline
+      (append-only + human-accepted; see docs/themis-spec.md). Runs at 4am,
+      after the 2am knowledge ingest, so it scores the freshly rebuilt corpus.
+      Seeded DISABLED; regression alerting + minting are separate items.
+    category: maintenance
+    schedule:
+      cron: "0 4 * * *"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.retrieval_eval.run_retrieval_eval
+    params:
+      top_k: 10
+      out_path: zeus/data/retrieval_eval.json
+    safety_policy: standard
+    timeout_seconds: 1800
+    max_retries: 0
+    tags: [retrieval, eval, themis, nightly]
+    enabled: false

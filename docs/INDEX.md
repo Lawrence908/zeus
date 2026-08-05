@@ -32,6 +32,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [ZEUS_LINEAR_TICKET_PLAN.md](ZEUS_LINEAR_TICKET_PLAN.md) | ticket | Authoritative Linear ticket + project plan. Do not regenerate. |
 | [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) | bootstrap | Prompt for AI collaborators (Cursor, Claude Code) working on the Zeus codebase. |
 | [memory-architecture-plan.md](memory-architecture-plan.md) | product | Three-layer memory plan (Mnemosyne / Library / Reference), migration runbook. Phase 1 shipped. |
+| [themis-spec.md](themis-spec.md) | product | Retrieval eval harness worker: per-layer scoring, `layer_miss`, weekly minting with bias guards. Records the 3 resolved blocker decisions (keyword+judge oracle, doc-identity anchor, Kairos/small-LLM/CI split). Overlaps LAB-NEW-D. |
 | [kronos-backend-plan.md](kronos-backend-plan.md) | product | Kronos scheduler subsystem plan: job registry, asyncio loop, three dispatch modes, REST + MCP, Aegis-gated execution. |
 | [kronos-frontend-plan.md](kronos-frontend-plan.md) | product | `/jobs` dashboard plan for the React SPA: jobs table, detail drawer, cron builder, live execution feed. |
 | [kronos-job-catalog.md](kronos-job-catalog.md) | ticket | Brainstorm of useful scheduled jobs grouped by domain, with tools each needs (existing vs to-build) and a recommended build order. Use as the planning surface when picking the next Kronos work item. |
@@ -52,10 +53,15 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [deployment.md](../zeus/docs/deployment.md) | ops | Deployment runbook (daedalus today, Olympus target): compose, first ingest, monitoring. |
 | [ingest-guide.md](../zeus/docs/ingest-guide.md) | product | Priority order for feeding Iris; memory vs knowledge routing; retrieval eval. |
 | [kronos-job-guide.md](../zeus/docs/kronos-job-guide.md) | product | How to create a Kronos job: every field explained, three creation surfaces, recipes, troubleshooting. Use this as agent context when authoring jobs. |
+| [congressional-scrutiny-job.md](../zeus/docs/congressional-scrutiny-job.md) | product | Weekly CapitolScope congressional-trading brief job: context-pack synthesis + news digest on local Ollama, inbox + knowledge writeback. |
+| [scrutiny-watch-job.md](../zeus/docs/scrutiny-watch-job.md) | product | Daily CapitolScope scrutiny-watch job: catch/dedup/triage signals, threshold-gated auto-escalation into deep_research, durable-path deploy notes. |
 | [ingest-paths.md](../zeus/docs/ingest-paths.md) | ops | `zeus/data/raw/` layout, symlink table, cron patterns. |
 | [mcp-server-spec.md](../zeus/docs/mcp-server-spec.md) | product | MCP tool catalog (`zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_memory_search`, `zeus_ingest_trigger`). |
 | [meshtastic-bridge.md](../zeus/docs/meshtastic-bridge.md) | product | LoRa mesh into `/chat/message` via MQTT uplink + Node-RED + TCP sender sidecar. Topics, session id, allowlist, Aegis wiring. |
+| [mesh-outbound-spec.md](../zeus/docs/mesh-outbound-spec.md) | product | Outbound direction: `/mesh/notify` choke point, Kairos proactive push, read-only break-glass `!commands`. Gates, quiet hours, dedupe, mesh Aegis policy, audit. |
 | [model-comparison.md](../zeus/docs/model-comparison.md) | product | Measured tok/s, TTFT, VRAM fit per Ollama model on the 3080. |
+| [pheme.md](../zeus/docs/pheme.md) | product | Pheme news subsystem: `zeus_news` store, Canary + CapitolScope ingest, staged local pipeline, Kronos daily digest, breaking observer, Telegram push, gated Twitter. |
+| [pheme-twitter-setup.md](../zeus/docs/pheme-twitter-setup.md) | ops | One-time X/Twitter OAuth2 setup for Pheme: developer-app values, `.env` keys, `scripts/twitter_oauth_setup.py` token bootstrap, verification, troubleshooting. |
 | [zeus-os.md](../zeus/docs/zeus-os.md) | product | Tiling-WM web shell: SvelteKit frontend at `zeus-os/`, FastAPI bridge at `zeus/core/zeus_os/`, served at `/os/`. Keymap, env vars, phase plan. |
 | [obsidian-livesync-ingest.md](../zeus/docs/obsidian-livesync-ingest.md) | ops | CouchDB to local vault to ingest: LiveSync CLI setup, headless troubleshooting. |
 | [orpheus-spec.md](../zeus/docs/orpheus-spec.md) | product | Voice pipeline: wake, STT, TTS, streaming LLM, Phaos emitter. |
@@ -78,5 +84,5 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 
 - **TODO: resolve.** CLAUDE.md previously named `olympian_file_read`, `olympian_search`, `olympian_memory_search`, `olympian_shell` as first-class tools. The shipped MCP tools are `zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_memory_search`, `zeus_ingest_trigger`; `zeus/mcp/olympian_tools.py` does not exist. The current CLAUDE.md text has been updated to match shipped state; Linear ticket LAB-328 tracks the olympian tool pack if it is ever built.
 - **TODO: resolve.** `zeus/core/static/chat.html` + `zeus/core/static/admin.html` + `viz/` are still served alongside the React SPA in `zeus/core/static/app/`. The spec docs call the React SPA primary; no ticket yet for removing the static pages.
-- **TODO: resolve.** "Olympus" is referenced as the production target throughout the docs; in practice the always-on host is whichever box the deployer currently runs (the example deployment uses a workstation host called "daedalus"). The deployment runbook covers either topology — pick a host-name convention once a permanent production box is in place.
+- **TODO: resolve.** "Olympus" is referenced as the production target throughout the docs; in practice the always-on host is whichever box the deployer currently runs (the example deployment uses a workstation host called "daedalus"). The deployment runbook covers either topology - pick a host-name convention once a permanent production box is in place.
 - **TODO: resolve.** `zeus/docs/model-comparison.md:94` retains one historical `mem0` reference (explaining a past Telegram retrieval bug). Kept intentionally; flag if the narrative becomes confusing to new readers.

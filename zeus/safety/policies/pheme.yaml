@@ -1,0 +1,35 @@
+name: pheme
+description: >
+  Outbound gate for Pheme news delivery (Telegram push and Twitter posts).
+  Twitter is a public, irreversible surface: block prompt-injection artifacts,
+  leaked secrets, personal identifiers, and trading-advice phrasing before
+  anything leaves the machine.
+rules:
+  - name: prompt_injection_attempt
+    pattern: '(?i)(ignore previous instructions|disregard your system prompt|act as .{0,40} without restrictions|you are now .{0,30}jailbroken)'
+    action: reject
+    message: "Prompt injection pattern detected in outbound news content."
+  - name: leaked_secret
+    pattern: '(?i)(api[_-]?key|bearer|password|secret|token)\s*[:=]\s*[A-Za-z0-9_\-\.]{16,}'
+    action: reject
+    message: "Credential-shaped string in outbound news content."
+  - name: private_identifier
+    pattern: '(?i)\b(ssn|social security|passport number|date of birth)\b\s*[:#]?\s*\d'
+    action: reject
+    message: "Personal identifier in outbound news content."
+  - name: home_address_leak
+    pattern: '(?i)\b\d{1,5}\s+\w+\s+(street|st\.|avenue|ave\.|road|rd\.)\b.{0,40}\b(home|my house|address)\b'
+    action: reject
+    message: "Address-shaped personal detail in outbound news content."
+  - name: investment_advice
+    pattern: '(?i)\b(you should (buy|sell|short)|guaranteed (returns|profit)|financial advice)\b'
+    action: reject
+    message: "Trading-advice phrasing is not allowed on public Pheme output."
+  - name: shell_payload
+    pattern: '(?i)(rm\s+-rf|curl\s+[^\s]+\s*\|\s*(ba)?sh|sudo\s+)'
+    action: reject
+    message: "Shell-command payload in outbound news content."
+  - name: profanity_check
+    pattern: '(?i)\b(fuck|shit|bitch)\b'
+    action: flag_for_review
+    message: ""

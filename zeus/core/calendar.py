@@ -47,6 +47,76 @@ def _limit() -> int:
         return 10
 
 
+def _stale_hours() -> float:
+    try:
+        return max(1.0, float(os.getenv("ZEUS_CALENDAR_STALE_HOURS", "48")))
+    except (TypeError, ValueError):
+        return 48.0
+
+
+def _last_gcal_sync() -> str | None:
+    """Newest `created_at` among gcal-sourced memory points = last ingest write.
+
+    Scrolls the small zeus_memories collection (payload-projected) rather than
+    relying on the semantic hits, so staleness is accurate even when today's
+    query surfaces no events. ISO-8601 strings compare lexicographically.
+    """
+    try:
+        from zeus.memory.store import get_memory_store
+
+        store = get_memory_store()
+        client = store._client
+        collection = store.collection
+    except Exception as exc:  # noqa: BLE001 (health signal must never raise)
+        logger.warning("last_gcal_sync: store unavailable: %s", exc)
+        return None
+
+    newest: str | None = None
+    offset = None
+    try:
+        while True:
+            points, offset = client.scroll(
+                collection_name=collection,
+                limit=256,
+                with_payload=["source", "created_at"],
+                with_vectors=False,
+                offset=offset,
+            )
+            for p in points:
+                pl = p.payload or {}
+                if str(pl.get("source") or "").startswith("gcal"):
+                    ca = str(pl.get("created_at") or "")
+                    if ca and (newest is None or ca > newest):
+                        newest = ca
+            if offset is None:
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("last_gcal_sync: scroll failed: %s", exc)
+        return None
+    return newest
+
+
+def _staleness(last_sync: str | None) -> tuple[bool, str]:
+    """(stale, reason). Stale when never synced or older than ZEUS_CALENDAR_STALE_HOURS."""
+    if not last_sync:
+        return True, "no Google Calendar events have ever been ingested"
+    from datetime import timezone
+
+    try:
+        dt = datetime.fromisoformat(last_sync)
+    except ValueError:
+        return True, f"unparseable last sync timestamp: {last_sync!r}"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+    if age_h > _stale_hours():
+        return True, (
+            f"gcal data is stale: last synced {last_sync} ({age_h:.0f}h ago). "
+            "Re-auth + re-ingest may be needed (see project_gcal_reauth)."
+        )
+    return False, ""
+
+
 @router.get("/calendar/today")
 async def calendar_today() -> dict[str, Any]:
     """List today's calendar events from ingested gcal facts. Backs zeus_calendar_today."""
@@ -94,8 +164,13 @@ async def calendar_today() -> dict[str, Any]:
         if len(events) >= _limit():
             break
 
+    last_sync = _last_gcal_sync()
+    stale, stale_reason = _staleness(last_sync)
     return {
         "date": today,
         "event_count": len(events),
         "events": events,
+        "last_sync": last_sync,
+        "stale": stale,
+        "stale_reason": stale_reason,
     }

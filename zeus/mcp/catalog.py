@@ -300,6 +300,45 @@ MCP_TOOLS: list[McpToolSpec] = [
             "properties": {},
         },
     ),
+    McpToolSpec(
+        name="zeus_news_search",
+        description=(
+            "Deep-dive search over the Pheme news layer (zeus_news): "
+            "consolidated Canary OSINT articles and CapitolScope "
+            "congressional-trading signals over time, with source / topic / "
+            "entity / date filters. Use for 'what has the news said about X'."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "source": {"type": "string", "enum": ["canary", "capitolscope"]},
+                "topic": {"type": "string"},
+                "entity": {"type": "string"},
+                "since": {"type": "string"},
+                "top_k": {"type": "integer", "default": 8},
+            },
+            "required": ["query"],
+        },
+    ),
+    McpToolSpec(
+        name="olympian_twitter_post",
+        description=(
+            "Post a tweet (plus optional reply thread) to the configured "
+            "X/Twitter account. Public and irreversible: double-gated by "
+            "ZEUS_MCP_ALLOW_WRITE and PHEME_TWITTER_ENABLED; every tweet "
+            "passes the Aegis 'pheme' policy before send."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "thread": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["text"],
+        },
+        write_gated=True,
+    ),
 ]
 
 
