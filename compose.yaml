@@ -145,7 +145,11 @@ services:
       - .env
     environment:
       - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_URL=http://ollama:11434
+      # Routed through the ollama-gateway front-door (separate stack, same
+      # homelab-web network): prefers Apollo's RTX 5080, fails back to the local
+      # zeus-ollama 3080. Both nodes share nomic-embed-text + qwen2.5:7b-instruct
+      # tags so embeddings and chat survive failover. Was http://ollama:11434.
+      - OLLAMA_URL=http://ollama-gateway:11440
       - WHISPER_URL=ws://whisper:9090
       - WHISPER_REST_URL=http://whisper:8000
       # Server-side TTS for the browser voice orb (/voice/tts proxy). Kokoro
