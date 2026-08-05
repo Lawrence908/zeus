@@ -290,6 +290,32 @@ async def zeus_calendar_today() -> dict[str, Any]:
         return r.json() or {}
 
 
+async def zeus_image_generate(
+    *,
+    prompt: str,
+    negative_prompt: str = "",
+    width: int = 1024,
+    height: int = 1024,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Generate an image from a text prompt via the local ComfyUI GPUs (Apollo
+    RTX 5080 FLUX primary, daedalus RTX 3080 SDXL fallback). Returns a URL to the
+    finished PNG. Gated by ZEUS_IMAGE_ENABLED on the server; writes only an image
+    file, so no ZEUS_MCP_ALLOW_WRITE gate. Generation can take up to a minute."""
+    payload: dict[str, Any] = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "width": width,
+        "height": height,
+    }
+    if seed is not None:
+        payload["seed"] = seed
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{_core_url()}/images/generate", json=payload, timeout=210.0)
+        r.raise_for_status()
+        return r.json() or {}
+
+
 async def zeus_newsletter_latest() -> dict[str, Any]:
     """Return the most recent newsletter digest entry (compact form)."""
     async with httpx.AsyncClient() as client:
