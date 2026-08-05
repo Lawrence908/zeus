@@ -40,6 +40,7 @@ from zeus.mcp.tools import (
     olympian_status_read,
     olympian_twitter_post,
     zeus_calendar_today,
+    zeus_image_generate,
     zeus_ingest_trigger,
     zeus_memory_search,
     zeus_news_search,
@@ -127,6 +128,23 @@ async def olympian_action_run_tool(name: str, args: list[str] | None = None):
 @mcp.tool(name="zeus_calendar_today")
 async def zeus_calendar_today_tool():
     return await zeus_calendar_today()
+
+
+@mcp.tool(name="zeus_image_generate")
+async def zeus_image_generate_tool(
+    prompt: str,
+    negative_prompt: str = "",
+    width: int = 1024,
+    height: int = 1024,
+    seed: int | None = None,
+):
+    return await zeus_image_generate(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        width=width,
+        height=height,
+        seed=seed,
+    )
 
 
 @mcp.tool(name="zeus_newsletter_latest")

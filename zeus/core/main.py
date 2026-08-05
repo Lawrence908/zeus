@@ -22,6 +22,7 @@ from zeus.core.newsletter import router as newsletter_router
 from zeus.core.query import QueryEngine, _run_llm, _active_model_name, _chat_use_claude, _ollama_model, set_ollama_model
 from zeus.core.actions import router as actions_router
 from zeus.core.calendar import router as calendar_router
+from zeus.core.comfyui import router as images_router
 from zeus.core.epstein_router import router as epstein_router  # private branch only; never merge to main
 from zeus.core.inbox import router as inbox_router
 from zeus.core.mesh import router as mesh_router
@@ -123,12 +124,14 @@ async def lifespan(app: FastAPI):
     from zeus.core.tools.server_health import register as _register_server_health
     from zeus.core.tools.status_read import register as _register_status_read
     from zeus.core.tools.web_search import register_if_configured as _register_web_search
+    from zeus.core.tools.image_generate import register_if_configured as _register_image_generate
     from zeus.core.tools.deep_research import register as _register_deep_research
     from zeus.core.tools.news_search import register as _register_news_search
     from zeus.core.tools.epstein import register as _register_epstein
 
     _register_current_time()
     _register_web_search()
+    _register_image_generate()
     _register_status_read()
     _register_server_health()
     _register_file_read()
@@ -307,6 +310,7 @@ app.include_router(inbox_router)
 app.include_router(mesh_router)
 app.include_router(actions_router)
 app.include_router(calendar_router)
+app.include_router(images_router)
 app.include_router(epstein_router)  # private branch only; never merge to main
 app.include_router(zeus_os_router)
 
@@ -314,6 +318,17 @@ app.mount(
     "/static",
     StaticFiles(directory=str(_STATIC_DIR)),
     name="static",
+)
+
+# Generated images (Pygmalion). POST /images/generate is served by images_router
+# (included above, so it wins for that exact path); this mount serves the PNG
+# files by GET. images_dir() creates the host-persisted dir if missing.
+from zeus.core.comfyui import images_dir as _images_dir  # noqa: E402
+
+app.mount(
+    "/images",
+    StaticFiles(directory=str(_images_dir())),
+    name="images",
 )
 
 # Serve React SPA assets (built by zeus/frontend via `npm run build`)
