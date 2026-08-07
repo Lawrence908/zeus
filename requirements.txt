@@ -16,7 +16,10 @@ python-dotenv>=1.0.0
 rich>=13.0.0
 anthropic>=0.30.0
 websockets>=12.0
-mcp>=1.0.0
+# Capped below 2.0.0: mcp 2.0.0 restructured the package and dropped the
+# `mcp.server.fastmcp` import path that zeus/mcp/server.py depends on. Stay on
+# the 1.x FastMCP API until the server is ported.
+mcp>=1.2.0,<2.0.0
 python-multipart>=0.0.14
 pyyaml>=6.0
 # Sprint 9 — Observability + Scheduled Ingest
