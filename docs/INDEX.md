@@ -39,6 +39,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [nemoclaw-ops.md](nemoclaw-ops.md) | ops | NemoClaw + OpenShell templated runbook: SSH tunnels, inference routing, policies, backups. Fill in your own host names and paths. |
 | [claude-code-architecture-notes.md](claude-code-architecture-notes.md) | product | External analysis of Claude Code architecture patterns that informed Zeus's design. |
 | [zeus-mcp-tool-expansion-prompt.md](zeus-mcp-tool-expansion-prompt.md) | bootstrap | Triage prompt for a Claude Code session to review candidate MCP tools, flag safety/deps, and pick which ones become Linear tickets. |
+| [ci.md](ci.md) | ops | CI/CD pipeline: GitHub Actions jobs (backend ruff+pytest, frontend builds, docker build), the mock-based-suite invariant, report-only coverage, and the ruff check-only burn-down list. |
 
 ## zeus/docs/ (product and subsystem design)
 

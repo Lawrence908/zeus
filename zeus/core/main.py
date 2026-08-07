@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -637,5 +637,4 @@ async def spa_fallback(path: str) -> FileResponse:
     """Serve React SPA for all non-API routes. Registered last so it never shadows API routes."""
     if _SPA_INDEX.is_file():
         return FileResponse(str(_SPA_INDEX), media_type="text/html")
-    from fastapi import HTTPException
     raise HTTPException(status_code=503, detail="Frontend not built. Run `npm run build` in zeus/frontend/.")

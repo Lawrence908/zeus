@@ -201,6 +201,8 @@ def test_tools_register_only_when_enabled(monkeypatch):
         "epstein_search",
         "epstein_document",
         "epstein_entity",
+        "epstein_entity_dossier",
+        "epstein_connection_map",
         "epstein_research_start",
         "epstein_research_result",
         "epstein_research",
@@ -337,9 +339,13 @@ def test_plausible_entity_filters_source_labels():
     assert not _plausible_entity("court-filing", keys)
 
 
-def test_workflow_disabled_returns_error():
+def test_workflow_disabled_returns_error(monkeypatch):
     from zeus.orchestration.epstein_research import run_research
 
+    # Hermetic: an earlier test may leave ZEUS_EPSTEIN_ENABLED set in the
+    # environment, so clear it and drop the cached singleton before asserting
+    # the disabled path.
+    monkeypatch.delenv("ZEUS_EPSTEIN_ENABLED", raising=False)
     ep.reset_epstein_client()
     r = asyncio.run(run_research("q", client=None))
     assert r.error and "disabled" in r.error
@@ -409,7 +415,7 @@ def test_kronos_job_fans_out(monkeypatch):
             }
         )
     )
-    assert out["questions"] == 3
+    assert out["subjects"] == 3
     assert len(out["results"]) == 3
     assert all(r["confidence"] == "medium" for r in out["results"])
 
