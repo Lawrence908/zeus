@@ -24,6 +24,7 @@ from zeus.core.actions import router as actions_router
 from zeus.core.calendar import router as calendar_router
 from zeus.core.comfyui import router as images_router
 from zeus.core.inbox import router as inbox_router
+from zeus.core.mesh import router as mesh_router
 from zeus.core.vault import router as vault_router
 from zeus.core.runtime_settings import RuntimeSettings
 from zeus.core.session_storage import SQLiteSessionStorage
@@ -140,6 +141,7 @@ async def lifespan(app: FastAPI):
     from zeus.core.tools.image_generate import register_if_configured as _register_image_generate
     from zeus.core.tools.deep_research import register as _register_deep_research
     from zeus.core.tools.swarm import register as _register_swarm_tools
+    from zeus.core.tools.news_search import register as _register_news_search
 
     _register_current_time()
     _register_web_search()
@@ -154,6 +156,7 @@ async def lifespan(app: FastAPI):
     _register_newsletter_latest()
     _register_deep_research()
     _register_swarm_tools()  # swarm_status/propose/approve/answer (if ZEUS_SWARM_ENABLED)
+    _register_news_search()
     app.state.tools_registered = [spec.name for spec in tool_registry.list_specs()]
 
     # Observability — query log ring buffer
@@ -420,6 +423,7 @@ app.include_router(swarm_router)
 app.include_router(newsletter_router)
 app.include_router(vault_router)
 app.include_router(inbox_router)
+app.include_router(mesh_router)
 app.include_router(actions_router)
 app.include_router(calendar_router)
 app.include_router(images_router)

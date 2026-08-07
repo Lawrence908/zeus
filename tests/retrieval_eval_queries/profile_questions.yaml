@@ -1,0 +1,29 @@
+# tests/retrieval_eval_queries/profile_questions.yaml
+#
+# Ground-truth queries whose answer should come from the Profile or Memories
+# block: stable, extracted facts about the user (identity, preferences,
+# current projects, relationships), sourced from context_pack / gcal into
+# MemoryStore (zeus_memories) rather than the bulk Knowledge corpus.
+#
+# expected_layer: profile  -> a keyword hit in Profile or Memories counts.
+#   A hit that appears only in the Knowledge block is a `layer_miss` here:
+#   the fact was found, but from the wrong layer, which is the exact signal
+#   that profile retrieval or its sub-budget needs attention.
+#
+# SEED SET — UNVERIFIED. These were not migrated from the original 30 (which
+# are all Knowledge-layer). They exist so the per-layer harness exercises both
+# layers. The expected_keywords are plausible but have NOT been checked against
+# the live MemoryStore, so treat their scores as provisional until a human
+# validates each against actual retrievable facts (Themis action item: promote
+# from a pending/ review queue). Grow this file toward the same size as
+# knowledge_questions.yaml before trusting per-layer profile metrics.
+
+- query: "What are the user's plain-text and formatting preferences?"
+  expected_keywords: [plain, text, prefer]
+  expected_layer: profile
+- query: "What is the user currently working on?"
+  expected_keywords: [zeus, project, building]
+  expected_layer: profile
+- query: "What hardware does the user run their homelab on?"
+  expected_keywords: [proxmox, gpu, homelab]
+  expected_layer: profile

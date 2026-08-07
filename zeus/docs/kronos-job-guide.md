@@ -12,7 +12,7 @@ Anything time-anchored in Zeus belongs here: morning briefings, nightly ingest, 
 
 All three paths land in the same DB row via `POST /kronos/jobs`. Pick by audience.
 
-### 1. UI — the `/jobs` page
+### 1. UI - the `/jobs` page
 
 Click **+ New Job** in the header. Fill the form. Submit. Drawer opens on the new job. Best for human authoring.
 
@@ -20,13 +20,13 @@ Fields are explained below; the form auto-derives a slug-style `id` from the nam
 
 Requires `ZEUS_KRONOS_ALLOW_WRITE=1`.
 
-### 2. Chat — the `kronos_create_job` MCP tool
+### 2. Chat - the `kronos_create_job` MCP tool
 
 Tell Zeus "remind me", "every Friday at 5", "schedule a", "each morning". The model will call `kronos_create_job(name, cron|run_at, executor|agent, params, ...)`. See `zeus/mcp/tools.py` for the full signature.
 
 Requires `ZEUS_MCP_ALLOW_WRITE=1` and (for the action runner family) `ZEUS_KRONOS_ALLOW_WRITE=1` server-side.
 
-### 3. HTTP — `POST /kronos/jobs`
+### 3. HTTP - `POST /kronos/jobs`
 
 ```bash
 curl -X POST http://localhost:8203/kronos/jobs \
@@ -36,7 +36,7 @@ curl -X POST http://localhost:8203/kronos/jobs \
 
 Body is the full `JobDefinition` JSON. Returns 201 with the created row, 409 if the id already exists. Use this for scripts, CI, agents that aren't routed through MCP.
 
-### Bonus — seed YAML
+### Bonus - seed YAML
 
 Edit `zeus/data/kronos.yaml` and restart `zeus-core`. The registry runs **insert-or-skip by id** on every boot, so existing jobs are never clobbered. Seed YAML is the right place for the canonical "this environment always wants these jobs" set; live edits should go through the API.
 
@@ -114,7 +114,7 @@ Use this when the work logically belongs to an existing olympian (e.g., have `ir
 1. `ZEUS_KRONOS_SHELL_ENABLED=1`
 2. `ZEUS_KRONOS_SHELL_ALLOWLIST` is a comma-separated list of regex patterns; the command must match at least one.
 
-Hard kill on timeout. Aegis post-filter on stdout. **Test new allowlist patterns with a manual `POST /kronos/jobs/{id}/run` before letting them on the schedule** — `re.search` is used (anchored fullmatch is your responsibility) and a typo in the regex silently rejects everything.
+Hard kill on timeout. Aegis post-filter on stdout. **Test new allowlist patterns with a manual `POST /kronos/jobs/{id}/run` before letting them on the schedule** - `re.search` is used (anchored fullmatch is your responsibility) and a typo in the regex silently rejects everything.
 
 ## Recipes
 
@@ -229,7 +229,7 @@ Every run carries a `correlation_id` (12-char hex) that's logged by both the sch
 
 | Env | Default | Purpose |
 |-----|---------|---------|
-| `ZEUS_KRONOS_ENABLED` | `0` | Master switch — start the scheduler in lifespan |
+| `ZEUS_KRONOS_ENABLED` | `0` | Master switch - start the scheduler in lifespan |
 | `ZEUS_KRONOS_DB_PATH` | `zeus/data/kronos.db` | SQLite path |
 | `ZEUS_KRONOS_TICK_SECONDS` | `30` | Scheduler tick |
 | `ZEUS_KRONOS_MAX_CONCURRENT` | `3` | Semaphore for concurrent dispatched jobs |

@@ -68,6 +68,8 @@ async def metrics(request: Request) -> dict[str, Any]:
         if recent else None
     )
 
+    from zeus.core.tools.recorder import metrics_summary as _tool_metrics
+
     return {
         "uptime_seconds": round(time.time() - boot_time, 1),
         "agents": runtime.get_status() if runtime else {},
@@ -76,6 +78,7 @@ async def metrics(request: Request) -> dict[str, Any]:
         "recent_queries": recent[-20:],  # last 20 for dashboard table
         "scheduler": scheduler_info,
         "kronos": await _kronos_metrics(request),
+        "tools": _tool_metrics(),
     }
 
 
@@ -239,11 +242,15 @@ async def tools_directory(request: Request) -> dict[str, Any]:
     the frontend can render chat/MCP side-by-side or filtered.
     """
     from zeus.core.tools import registry as tool_registry
-    from zeus.core.tools import tools_enabled, tools_max_calls
+    from zeus.core.tools import tools_allowlist, tools_enabled, tools_max_calls
     from zeus.mcp.catalog import MCP_TOOLS, current_mcp_write_enabled
 
     tools: list[dict[str, Any]] = []
 
+    # None => every registered tool is allowed; otherwise only the named set can
+    # fire this turn (ZEUS_TOOLS_ALLOWLIST). Surface per-tool so the UI can grey
+    # out registered-but-blocked tools.
+    allow = tools_allowlist()
     for spec in tool_registry.list_specs():
         tools.append(
             {
@@ -255,6 +262,7 @@ async def tools_directory(request: Request) -> dict[str, Any]:
                 "aegis_policy": spec.aegis_policy,
                 "timeout_seconds": spec.timeout_seconds,
                 "write_gated": False,
+                "allowed": allow is None or spec.name in allow,
             }
         )
 
@@ -281,6 +289,10 @@ async def tools_directory(request: Request) -> dict[str, Any]:
             "enabled": tools_enabled(),
             "max_calls_per_query": tools_max_calls(),
             "count": sum(1 for t in tools if t["source"] == "chat"),
+            "allowlist": sorted(allow) if allow is not None else None,
+            "allowed_count": sum(
+                1 for t in tools if t["source"] == "chat" and t["allowed"]
+            ),
         },
         "mcp": {
             "write_enabled": mcp_write_live,

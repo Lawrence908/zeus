@@ -525,10 +525,27 @@ async def _collect_retrieval_context(
             logger.warning("reference search failed: %s", exc)
             return []
 
+    async def _news_task() -> list[dict]:
+        # Opt-in (ZEUS_NEWS_IN_CONTEXT=1): ordinary chat is not diluted by
+        # news; the zeus_news_search tool is the primary deep-dive path.
+        if not use_context or os.getenv("ZEUS_NEWS_IN_CONTEXT", "0").strip() not in ("1", "true", "yes"):
+            return []
+        try:
+            from zeus.memory.search import search_news
+
+            return await asyncio.to_thread(search_news, message, 4)
+        except Exception as exc:
+            logger.warning("news search failed: %s", exc)
+            return []
+
     t_retrieve = time.monotonic()
-    facts, mem_results, know_results, ref_results = await asyncio.gather(
-        _prof_task(), _mem_task(), _know_task(), _ref_task()
+    facts, mem_results, know_results, ref_results, news_results = await asyncio.gather(
+        _prof_task(), _mem_task(), _know_task(), _ref_task(), _news_task()
     )
+    if news_results:
+        # Rendered inside the knowledge block with per-item [news] labels;
+        # sub-budget stays the knowledge 45% share.
+        know_results = [*know_results, *news_results]
     _log_timing("retrieval.parallel", (time.monotonic() - t_retrieve) * 1000)
 
     if facts:
@@ -599,19 +616,67 @@ def _build_system_prompt(
     )
 
 
+def _build_voice_system_prompt(
+    *,
+    profile_section: str,
+    memory_section: str,
+    conversation_section: str,
+    knowledge_section: str = "",
+    reference_section: str = "",
+    tools_section: str = "",
+) -> str:
+    """Voice-tone system prompt (voice_system.md) carrying the same retrieval +
+    tool context as the chat prompt.
+
+    Lets the voice path reuse QueryEngine's retrieval, tool loop, Aegis, and
+    sessions while keeping TTS-friendly brevity. The voice template has no
+    per-section placeholders, so the four labelled blocks are folded into one
+    `CONTEXT` and the tool list is appended only when tools are enabled.
+    """
+    parts: list[str] = []
+    for label, body in (
+        ("Profile", profile_section),
+        ("Memories", memory_section),
+        ("Knowledge", knowledge_section),
+        ("Reference", reference_section),
+        ("Conversation", conversation_section),
+    ):
+        body = (body or "").strip()
+        if body:
+            parts.append(f"### {label}\n{body}")
+    context = "\n\n".join(parts) or "(No retrieved context for this query.)"
+
+    rendered = render_prompt(
+        "voice_system",
+        context=context,
+        model_name=_active_model_name(),
+        provider="Anthropic Claude" if _chat_use_claude() else "Ollama (local)",
+    )
+    tools_section = (tools_section or "").strip()
+    if tools_section:
+        rendered += (
+            "\n\n## Tools\n"
+            "Call a tool when it helps answer, then speak a short spoken-style "
+            "reply from the result.\n" + tools_section
+        )
+    return rendered
+
+
 def _build_tools_section() -> str:
     """Format the registered-tools list for the system prompt when tools are enabled.
 
     Returns an empty string when tools are disabled or no tools are registered
     so the chat_system.md template falls back to "(No tools available for this turn.)".
     """
-    from zeus.core.tools import registry as tool_registry
-    from zeus.core.tools import tools_enabled
+    from zeus.core.tools import allowed_tool_specs, tools_enabled
 
-    if not (tools_enabled() and tool_registry.available()):
+    if not tools_enabled():
+        return ""
+    specs = allowed_tool_specs()
+    if not specs:
         return ""
     lines: list[str] = []
-    for spec in tool_registry.list_specs():
+    for spec in specs:
         # First sentence of the description is usually the most load-bearing —
         # keep the whole thing for Qwen since it needs the forceful "you must
         # call this" language that lives in the full description.
@@ -653,6 +718,7 @@ class QueryEngine:
         max_tokens: int = 512,
         stream: bool = False,
         source: str = "chat",
+        voice: bool = False,
     ) -> QueryResult:
         _ = stream
         t0 = time.monotonic()
@@ -687,7 +753,8 @@ class QueryEngine:
             max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
-        system = _build_system_prompt(
+        _prompt_builder = _build_voice_system_prompt if voice else _build_system_prompt
+        system = _prompt_builder(
             profile_section=profile_section,
             memory_section=memory_section,
             conversation_section=conversation_section,
@@ -702,18 +769,18 @@ class QueryEngine:
 
         # Tool-use path (ZEUS_TOOLS_ENABLED=1). Skips the reflection loop when
         # any tool fired -- a tool-informed reply is treated as authoritative.
-        from zeus.core.tools import registry as tool_registry
-        from zeus.core.tools import tools_enabled, tools_max_calls
+        from zeus.core.tools import allowed_tool_specs, tools_enabled, tools_max_calls
 
         tool_calls_out: list[dict] = []
         skip_reflection = False
-        if tools_enabled() and tool_registry.available():
+        _tool_specs = allowed_tool_specs() if tools_enabled() else []
+        if _tool_specs:
             from zeus.core.tools.loop import run_tool_loop
 
             loop_result = await run_tool_loop(
                 system=system,
                 user_prompt=current_prompt,
-                tools=tool_registry.list_specs(),
+                tools=_tool_specs,
                 max_tokens=max_tokens,
                 max_calls=tools_max_calls(),
                 use_claude=_chat_use_claude(),
@@ -788,6 +855,7 @@ class QueryEngine:
         max_tokens: int = 512,
         source: str = "chat",
         tool_calls_out: list[dict] | None = None,
+        voice: bool = False,
     ) -> AsyncIterator[str]:
         """Stream a reply chunk-by-chunk.
 
@@ -828,7 +896,8 @@ class QueryEngine:
             max_tokens=conversation_token_budget,
         )
         _log_timing("sessions.get_context_window", (time.monotonic() - t_conv) * 1000)
-        system = _build_system_prompt(
+        _prompt_builder = _build_voice_system_prompt if voice else _build_system_prompt
+        system = _prompt_builder(
             profile_section=profile_section,
             memory_section=memory_section,
             conversation_section=conversation_section,
@@ -848,16 +917,16 @@ class QueryEngine:
         # The model's final turn is what the user sees; tool calls flow back
         # to the caller through tool_calls_out so the SSE done event can carry
         # them and the Chat UI can render the collapsible tool-call card.
-        from zeus.core.tools import registry as tool_registry
-        from zeus.core.tools import tools_enabled, tools_max_calls
+        from zeus.core.tools import allowed_tool_specs, tools_enabled, tools_max_calls
 
-        if tools_enabled() and tool_registry.available():
+        _tool_specs = allowed_tool_specs() if tools_enabled() else []
+        if _tool_specs:
             from zeus.core.tools.loop import run_tool_loop
 
             loop_result = await run_tool_loop(
                 system=system,
                 user_prompt=current_prompt,
-                tools=tool_registry.list_specs(),
+                tools=_tool_specs,
                 max_tokens=max_tokens,
                 max_calls=tools_max_calls(),
                 use_claude=_chat_use_claude(),

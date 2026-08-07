@@ -840,3 +840,147 @@ class TestQueryEngineToolIntegration:
         # Reflection should have run because no tool fired and reply was empty.
         assert reflect_llm_called >= 1
         assert result.tool_calls == []
+
+
+class TestToolAllowlist:
+    """ZEUS_TOOLS_ALLOWLIST filters which registered tools the model sees."""
+
+    def _reset_registry(self) -> None:
+        registry.clear()
+        register_current_time()  # registers "current_time"
+
+        async def _noop(args: dict) -> ToolResult:
+            return ToolResult(call_id="", name="second_tool", content="ok")
+
+        registry.register(
+            ToolSpec(
+                name="second_tool",
+                description="A second tool for allowlist tests.",
+                parameters={"type": "object", "properties": {}},
+            ),
+            _noop,
+        )
+
+    def test_no_allowlist_returns_all(self) -> None:
+        from zeus.core.tools import allowed_tool_specs, tools_allowlist
+
+        self._reset_registry()
+        with patch.dict("os.environ", {}, clear=False):
+            os_env = __import__("os").environ
+            os_env.pop("ZEUS_TOOLS_ALLOWLIST", None)
+            assert tools_allowlist() is None
+            names = {s.name for s in allowed_tool_specs()}
+        assert names == {"current_time", "second_tool"}
+
+    def test_allowlist_filters_and_ignores_unknown(self) -> None:
+        from zeus.core.tools import allowed_tool_specs, tools_allowlist
+
+        self._reset_registry()
+        with patch.dict(
+            "os.environ",
+            {"ZEUS_TOOLS_ALLOWLIST": " current_time , bogus "},
+            clear=False,
+        ):
+            assert tools_allowlist() == {"current_time", "bogus"}
+            names = [s.name for s in allowed_tool_specs()]
+        assert names == ["current_time"]
+
+    def test_empty_after_filter_returns_none(self) -> None:
+        from zeus.core.tools import allowed_tool_specs
+
+        self._reset_registry()
+        with patch.dict(
+            "os.environ", {"ZEUS_TOOLS_ALLOWLIST": "nonexistent"}, clear=False
+        ):
+            assert allowed_tool_specs() == []
+
+
+class TestToolMetrics:
+    """recorder.metrics_summary() rolls the ring buffer up for /admin/metrics."""
+
+    def test_empty_buffer(self) -> None:
+        from zeus.core.tools import recorder
+
+        recorder.clear_invocations()
+        s = recorder.metrics_summary()
+        assert s["total"] == 0
+        assert s["error_rate"] == 0.0
+        assert s["per_tool"] == {}
+
+    def test_rollup_counts_rates_and_percentiles(self) -> None:
+        from zeus.core.tools import recorder
+
+        recorder.clear_invocations()
+        for i in range(4):
+            recorder.record_invocation(
+                tool="current_time",
+                args={},
+                content="ok",
+                is_error=False,
+                cache_hit=(i % 2 == 0),
+                duration_ms=100,
+            )
+        recorder.record_invocation(
+            tool="web_search",
+            args={},
+            content="boom",
+            is_error=True,
+            cache_hit=False,
+            duration_ms=900,
+            aegis_rejected=True,
+        )
+        s = recorder.metrics_summary()
+        assert s["total"] == 5
+        assert s["error_rate"] == 0.2
+        assert s["cache_hit_rate"] == 0.4
+        assert s["aegis_reject_count"] == 1
+        # Busiest tool first.
+        assert next(iter(s["per_tool"])) == "current_time"
+        assert s["per_tool"]["current_time"]["calls"] == 4
+        assert s["per_tool"]["web_search"]["errors"] == 1
+        recorder.clear_invocations()
+
+    def test_window_filters_old_entries(self) -> None:
+        from zeus.core.tools import recorder
+
+        recorder.clear_invocations()
+        recorder.record_invocation(
+            tool="current_time", args={}, content="ok",
+            is_error=False, cache_hit=False, duration_ms=10,
+        )
+        # A negative window puts the cutoff in the future, excluding the entry.
+        assert recorder.metrics_summary(window_seconds=-1.0)["total"] == 0
+        assert recorder.metrics_summary(window_seconds=3600)["total"] == 1
+        recorder.clear_invocations()
+
+
+class TestVoiceSystemPrompt:
+    """_build_voice_system_prompt gives voice tone + retrieval + tools context."""
+
+    def test_folds_context_and_appends_tools(self) -> None:
+        from zeus.core.query import _build_voice_system_prompt
+
+        p = _build_voice_system_prompt(
+            profile_section="User likes tea.",
+            memory_section="",
+            conversation_section="Earlier: hi",
+            knowledge_section="",
+            reference_section="",
+            tools_section="- `current_time` — the time.",
+        )
+        assert "User likes tea." in p          # profile folded into CONTEXT
+        assert "Earlier: hi" in p               # conversation folded in
+        assert "## Tools" in p                  # tools appended
+        assert "current_time" in p
+
+    def test_no_tools_section_when_empty(self) -> None:
+        from zeus.core.query import _build_voice_system_prompt
+
+        p = _build_voice_system_prompt(
+            profile_section="",
+            memory_section="",
+            conversation_section="",
+            tools_section="",
+        )
+        assert "## Tools" not in p
+        assert "(No retrieved context for this query.)" in p

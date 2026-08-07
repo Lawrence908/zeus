@@ -1,0 +1,337 @@
+{
+  "summary": {
+    "n_cases": 17,
+    "n_needs_tool_runnable": 11,
+    "n_no_tool": 6,
+    "selection_accuracy": 1.0,
+    "false_positive_rate": 0.0,
+    "answer_hit_rate": 1.0,
+    "n_errors": 0,
+    "latency_ms_p50": 5456,
+    "latency_ms_p95": 12613,
+    "config": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b-instruct-q4_K_M",
+      "max_calls": 3,
+      "registered_tools": [
+        "current_time",
+        "web_search",
+        "olympian_status_read",
+        "olympian_server_health",
+        "olympian_file_read",
+        "olympian_file_search",
+        "olympian_inbox_append",
+        "olympian_action_list",
+        "olympian_action_run",
+        "zeus_calendar_today",
+        "zeus_newsletter_latest",
+        "deep_research",
+        "zeus_news_search"
+      ],
+      "host": "daedalus",
+      "ts": "2026-07-27T04:52:42+0000"
+    }
+  },
+  "per_case": [
+    {
+      "prompt": "What time is it right now?",
+      "band": "needs_tool",
+      "called_tools": [
+        "current_time"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 7379,
+      "error": "",
+      "reply_preview": "It's currently 9:50:53 PM Pacific Daylight Time on Sunday, July 26, 2026.",
+      "expected_tools": [
+        "current_time"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "What's today's date and the current day of the week?",
+      "band": "needs_tool",
+      "called_tools": [
+        "current_time"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 5383,
+      "error": "",
+      "reply_preview": "Today's date and day of the week are Sunday, July 26, 2026. The current time is 21:50:58 Pacific Daylight Time.",
+      "expected_tools": [
+        "current_time"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "What's on my calendar today?",
+      "band": "needs_tool",
+      "called_tools": [
+        "zeus_calendar_today"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 7051,
+      "error": "",
+      "reply_preview": "It looks like there are no calendar events scheduled for today, July 26, 2026. If you need to add any events or if the calendar hasn't been updated recently, yo",
+      "expected_tools": [
+        "zeus_calendar_today"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "Do I have any meetings scheduled for today?",
+      "band": "needs_tool",
+      "called_tools": [
+        "zeus_calendar_today"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 5456,
+      "error": "",
+      "reply_preview": "It looks like you have no meetings scheduled for today, July 26, 2026. The calendar might not be up-to-date if it hasn't been refreshed recently. You can run `p",
+      "expected_tools": [
+        "zeus_calendar_today"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "Search my news index for anything about congressional trading.",
+      "band": "needs_tool",
+      "called_tools": [
+        "zeus_news_search"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 18302,
+      "error": "",
+      "reply_preview": "Here are some recent entries from the CapitolScope congressional trading signals related to your query:\n\n1. **Congressional Trading Window (2026-06-26 to 2026-0",
+      "expected_tools": [
+        "zeus_news_search",
+        "web_search"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "What recent news do you have about AI regulation?",
+      "band": "needs_tool",
+      "called_tools": [
+        "web_search"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 10738,
+      "error": "",
+      "reply_preview": "Here are some recent developments in AI regulation:\n\n1. **The White House** has issued an Executive Order 14179 of January 23, 2025, aimed at revoking previous ",
+      "expected_tools": [
+        "zeus_news_search",
+        "web_search"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "Look up the current weather in London on the web.",
+      "band": "needs_tool",
+      "called_tools": [
+        "web_search"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 8587,
+      "error": "",
+      "reply_preview": "Here are a few current weather reports for London:\n\n- **The Weather Channel**: The forecast indicates clear skies with gentle breezes. The temperature is expect",
+      "expected_tools": [
+        "web_search"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "Find files in my notes that mention the Aegis safety policy.",
+      "band": "needs_tool",
+      "called_tools": [
+        "olympian_file_search"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 5396,
+      "error": "",
+      "reply_preview": "I couldn't find any files mentioning the Aegis safety policy in your notes. Would you like to create a new note on this topic or search again with different key",
+      "expected_tools": [
+        "olympian_file_search"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "What's in my latest newsletter digest?",
+      "band": "needs_tool",
+      "called_tools": [
+        "zeus_newsletter_latest"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 5878,
+      "error": "",
+      "reply_preview": "The latest digest from your newsletter includes several key points:\n\n- AI companies Nvidia and Microsoft have joined forces to push open-source AI in a letter t",
+      "expected_tools": [
+        "zeus_newsletter_latest"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "Are all my homelab services healthy right now?",
+      "band": "needs_tool",
+      "called_tools": [
+        "olympian_server_health"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 9692,
+      "error": "",
+      "reply_preview": "The server is currently running with a load average of 51.9, 61.71, and 73.97 over the last one, five, and fifteen-minute periods respectively. Memory usage is ",
+      "expected_tools": [
+        "olympian_server_health"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "Read my status file and tell me what it says.",
+      "band": "needs_tool",
+      "called_tools": [
+        "olympian_status_read"
+      ],
+      "n_calls": 1,
+      "iterations": 2,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 12613,
+      "error": "",
+      "reply_preview": "Your status file indicates that you are currently focusing on the Olympian tool pack, which has just landed. You plan to sit on this for a few days and capture ",
+      "expected_tools": [
+        "olympian_status_read"
+      ],
+      "correct_selection": true,
+      "called_any_tool": true,
+      "runnable": true
+    },
+    {
+      "prompt": "Hey, how are you doing today?",
+      "band": "no_tool",
+      "called_tools": [],
+      "n_calls": 0,
+      "iterations": 1,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 2888,
+      "error": "",
+      "reply_preview": "I'm always here to assist you, Chris! How can I help you today? If you want to know the current time or date, just let me know.",
+      "false_positive": false
+    },
+    {
+      "prompt": "Thanks, that was really helpful!",
+      "band": "no_tool",
+      "called_tools": [],
+      "n_calls": 0,
+      "iterations": 1,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 2481,
+      "error": "",
+      "reply_preview": "You're welcome! If you have any more questions or need further assistance, feel free to ask. What would you like to do next?",
+      "false_positive": false
+    },
+    {
+      "prompt": "Tell me a short one-line joke.",
+      "band": "no_tool",
+      "called_tools": [],
+      "n_calls": 0,
+      "iterations": 1,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 2163,
+      "error": "",
+      "reply_preview": "Why don't scientists trust atoms? Because they make up everything.",
+      "false_positive": false
+    },
+    {
+      "prompt": "Summarize in one sentence what you can help me with.",
+      "band": "no_tool",
+      "called_tools": [],
+      "n_calls": 0,
+      "iterations": 1,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 3296,
+      "error": "",
+      "reply_preview": "I can assist with scheduling tasks, answering questions, managing your calendar, searching your notes and the web, running server diagnostics, and more\u2014basicall",
+      "false_positive": false
+    },
+    {
+      "prompt": "Explain what a vector database is in two sentences.",
+      "band": "no_tool",
+      "called_tools": [],
+      "n_calls": 0,
+      "iterations": 1,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 2976,
+      "error": "",
+      "reply_preview": "A vector database stores data points as vectors in multi-dimensional space, allowing for efficient similarity searches based on proximity rather than exact matc",
+      "false_positive": false
+    },
+    {
+      "prompt": "What does the acronym HTTP stand for?",
+      "band": "no_tool",
+      "called_tools": [],
+      "n_calls": 0,
+      "iterations": 1,
+      "truncated": false,
+      "answer_hit": true,
+      "latency_ms": 2935,
+      "error": "",
+      "reply_preview": "HTTP stands for Hypertext Transfer Protocol. This is the protocol used to transfer data over the web, defining how messages are formatted and transmitted, and w",
+      "false_positive": false
+    }
+  ]
+}

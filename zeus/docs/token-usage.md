@@ -2,7 +2,7 @@
 
 ## Where the data lives
 
-A single SQLite table — `zeus/data/small_llm_usage.db`, table `usage` — holds every model call's tokens, cost, latency, and outcome. Schema:
+A single SQLite table - `zeus/data/small_llm_usage.db`, table `usage` - holds every model call's tokens, cost, latency, and outcome. Schema:
 
 | column      | type    | notes |
 |-------------|---------|-------|
@@ -22,8 +22,8 @@ Indexed on `ts` and `(provider, ts)`.
 
 ## Writers (current)
 
-- `zeus/core/small_llm.py` — `_log_usage()` writes for every `small_llm_call()` (fact extraction, titles, classifiers, etc.).
-- `zeus/core/query.py` — chat-path Claude / Ollama calls log here too (see `_log_chat_usage` helper). Caller is one of `chat.run_llm`, `chat.run_llm_stream`, `chat.run_llm_with_tools`.
+- `zeus/core/small_llm.py` - `_log_usage()` writes for every `small_llm_call()` (fact extraction, titles, classifiers, etc.).
+- `zeus/core/query.py` - chat-path Claude / Ollama calls log here too (see `_log_chat_usage` helper). Caller is one of `chat.run_llm`, `chat.run_llm_stream`, `chat.run_llm_with_tools`.
 
 ## Reader (current)
 
@@ -73,4 +73,4 @@ Once local-model output starts producing actual code commits / PRs / docs, we wa
 - A Kronos job rolls up `(period, local_tokens, lines_added, files_touched)`.
 - Token Usage app gains a "productivity" panel showing tokens → output ratios.
 
-Out of scope for Phase 2a — file this under future work in the Linear plan when ready.
+Out of scope for Phase 2a - file this under future work in the Linear plan when ready.

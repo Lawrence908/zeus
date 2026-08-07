@@ -233,6 +233,9 @@ zeus/data/*.db-wal
 zeus/data/audio/
 zeus/data/newsletters/
 
+# Zeus — fastembed BM25 model cache (persistent across container recreates, LAB-NEW-G)
+zeus/data/fastembed_cache/
+
 # Zeus — per-deployer personalized prompts and workspace files.
 # Generic templates are under zeus/prompts/templates/ and
 # zeus/safety/workspace-templates/ (tracked). These overrides dirs hold
@@ -255,3 +258,11 @@ compose.override.yaml
 
 # Claude Code per-repo settings (local to each developer)
 .claude/
+
+# Zeus - generated brief/report artifacts (runtime output, not docs)
+zeus/data/briefings/
+zeus/data/research/
+zeus/data/pheme/
+
+# Generated deep-research artifacts (dossiers, maps): output, not repo docs
+docs/research/
