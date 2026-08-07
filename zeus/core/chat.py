@@ -684,10 +684,10 @@ async def voice_interact_stream(
                 yield _sse_token_event(chunk).encode("utf-8")
                 buffer += chunk
                 # Flush every completed sentence to TTS, keep the trailing partial.
-                sentences = tts._split_sentences(buffer)
+                sentences = tts.split_sentences(buffer)
                 if len(sentences) > 1:
                     for sentence in sentences[:-1]:
-                        wav = await tts._synthesize_safe(sentence)
+                        wav = await tts.synthesize_safe(sentence)
                         if wav:
                             seq += 1
                             yield _sse_audio_event(seq, wav)
@@ -695,7 +695,7 @@ async def voice_interact_stream(
 
             tail = buffer.strip()
             if tail:
-                wav = await tts._synthesize_safe(tail)
+                wav = await tts.synthesize_safe(tail)
                 if wav:
                     seq += 1
                     yield _sse_audio_event(seq, wav)

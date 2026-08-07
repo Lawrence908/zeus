@@ -54,15 +54,31 @@ class VoiceboxTTS:
             self.speed = float(os.getenv("ZEUS_TTS_SPEED", "1.0"))
         except ValueError:
             self.speed = 1.0
+        # float() also accepts nan/inf/0/negative: NaN/Infinity serialize to
+        # invalid JSON many TTS servers reject, and a non-positive speed is
+        # nonsensical. `not (0 < x <= N)` is NaN-safe (all NaN comparisons are False).
+        if not (0 < self.speed <= 4.0):
+            self.speed = 1.0
         # Fail fast: on a contended host a slow synth should surface quickly so
         # the browser can fall back to Web Speech instead of sitting silent.
         try:
             self.timeout = float(os.getenv("ZEUS_TTS_TIMEOUT_SEC", "20"))
         except ValueError:
             self.timeout = 20.0
+        # Same nan/inf/non-positive guard as speed; a bad timeout would error httpx.
+        if not (0 < self.timeout <= 300):
+            self.timeout = 20.0
 
     def _split_sentences(self, text: str) -> list[str]:
         return [s.strip() for s in _SENTENCE_END.split(text) if s.strip()]
+
+    def split_sentences(self, text: str) -> list[str]:
+        """Public sentence splitter for streaming callers (e.g. chat.py)."""
+        return self._split_sentences(text)
+
+    async def synthesize_safe(self, text: str) -> bytes | None:
+        """Public safe-synthesis for streaming callers: returns None on failure."""
+        return await self._synthesize_safe(text)
 
     async def synthesize(self, text: str) -> bytes:
         payload = {

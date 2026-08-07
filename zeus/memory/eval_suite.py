@@ -17,12 +17,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # tests/retrieval_eval_queries/ relative to the repo root (this file lives at
 # <root>/zeus/memory/eval_suite.py, so parents[2] is the root).
@@ -55,6 +58,13 @@ def load_suite(*, include_pending: bool = False, queries_dir: Path | None = None
             if not query or not isinstance(kws, list) or not kws:
                 continue
             layer = str(item.get("expected_layer") or "knowledge").strip().lower()
+            if layer not in VALID_LAYERS:
+                # A YAML typo (e.g. "knowlege") would otherwise silently mis-bucket
+                # this query and skew the per-layer metrics. Skip it loudly instead.
+                logger.warning(
+                    "eval_suite: unknown expected_layer %r in %s; skipping row", layer, path.name
+                )
+                continue
             rows.append(
                 {
                     "query": query,
