@@ -1,0 +1,110 @@
+# .github/workflows/ci.yml — Zeus CI
+#
+# Three independent jobs (no `needs:`, so failures are isolated and run in
+# parallel):
+#   backend  — ruff lint gate + pytest suite (mock-based, no live services) + coverage
+#   frontend — build the React SPA (zeus/frontend) and SvelteKit shell (zeus-os)
+#   docker   — validate the runtime image (zeus/core/Dockerfile) builds
+#
+# The pytest suite is fully mocked (httpx.MockTransport, monkeypatch), so no
+# Qdrant/Ollama/Postgres containers are needed. Coverage is report-only.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # libzim-dev backs the (lazily imported) libzim bindings; installing it
+      # keeps `pip install` from falling back to an sdist build that needs it.
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libzim-dev
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Pytest (with coverage)
+        run: pytest -q
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend build (${{ matrix.app.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - { name: react-spa, dir: zeus/frontend, check: false }
+          - { name: zeus-os, dir: zeus-os, check: true }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.app.dir }}/package-lock.json
+
+      - name: Install
+        working-directory: ${{ matrix.app.dir }}
+        run: npm ci
+
+      - name: Type-check (svelte-check)
+        if: ${{ matrix.app.check }}
+        working-directory: ${{ matrix.app.dir }}
+        run: npm run check
+
+      - name: Build
+        working-directory: ${{ matrix.app.dir }}
+        run: npm run build
+
+  docker:
+    name: Docker build (zeus-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: zeus/core/Dockerfile
+          push: false
+          tags: zeus-core:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

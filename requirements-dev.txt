@@ -1,0 +1,10 @@
+# requirements-dev.txt — tooling for local dev + CI (lint, test, coverage).
+#
+# Installs the full runtime plus the test/lint stack. CI's `backend` job uses
+# this file; the production image (zeus/core/Dockerfile) does NOT, so runtime
+# images stay lean.
+-r requirements.txt
+
+pytest>=8.0.0
+pytest-cov>=5.0.0
+ruff>=0.6.0

@@ -1,0 +1,55 @@
+# pyproject.toml — tooling config only.
+#
+# This file configures ruff (lint) for Zeus. It intentionally does NOT declare
+# a build system or project dependencies: requirements.txt / requirements-dev.txt
+# remain the source of truth for deps. Do not add [build-system] here without a
+# packaging plan.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    ".venv",
+    "zeus/frontend",
+    "zeus-os",
+    "zeus/data",
+    "zeus/core/static",
+    "files.zip",
+]
+
+[tool.ruff.lint]
+# Conservative day-one rule set: pyflakes (F), a subset of pycodestyle (E),
+# import sorting (I), pyupgrade (UP), and flake8-bugbear (B). Check-only — we
+# never auto-reformat the tree. New code must pass; pre-existing violations are
+# quarantined in `ignore` below and should be burned down over time.
+select = ["E", "F", "I", "UP", "B"]
+# Day-one quarantine. Each code below has pre-existing violations across the tree.
+# They are ignored (not auto-reformatted, per the check-only decision) so CI is
+# green immediately, and are TODO: burn down incrementally — remove a code here,
+# fix its hits, commit. Rules NOT listed (e.g. F821 undefined-name, most of F/B)
+# are fully enforced now, so new violations of them fail CI.
+ignore = [
+    "E402",  # module-import-not-at-top-of-file (13) — TODO: burn down
+    "E501",  # line-too-long (long prompts/strings) — TODO: burn down
+    "E731",  # lambda-assignment (6) — TODO: burn down
+    "F401",  # unused-import (24) — TODO: burn down
+    "F541",  # f-string-without-placeholders (2) — TODO: burn down
+    "F841",  # unused-variable (2) — TODO: burn down
+    "I001",  # unsorted-imports (28) — TODO: burn down (enable ruff import sort)
+    "UP012", # unnecessary-encode-utf8 — TODO: burn down
+    "UP015", # redundant-open-modes — TODO: burn down
+    "UP017", # datetime-timezone-utc (67) — TODO: burn down
+    "UP035", # deprecated-import (23) — TODO: burn down
+    "UP037", # quoted-annotation (8) — TODO: burn down
+    "UP041", # timeout-error-alias (17) — TODO: burn down
+    "UP042", # replace-str-enum (5) — TODO: burn down
+    "B007",  # unused-loop-control-variable — TODO: burn down
+    "B008",  # function-call-in-default-argument (7) — TODO: burn down
+    "B904",  # raise-without-from-inside-except (10) — TODO: burn down
+    "B905",  # zip-without-explicit-strict (2) — TODO: burn down
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favor local imports inside test bodies and reuse of fixtures; relax the
+# rules that would otherwise flag intentional test patterns.
+"tests/*" = ["E402", "F811"]

@@ -40,6 +40,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [swarm-orchestration-plan.md](swarm-orchestration-plan.md) | product | Argo swarm-orchestration plan: Metis planner + Argo coordinator dispatching sandboxed Claude Code workers (argonauts) on git worktrees, PR-per-task, under checkpoint approvals. Phased build on AgentRuntime/TaskRunner/bus + OpenShell sandbox. |
 | [claude-code-architecture-notes.md](claude-code-architecture-notes.md) | product | External analysis of Claude Code architecture patterns that informed Zeus's design. |
 | [zeus-mcp-tool-expansion-prompt.md](zeus-mcp-tool-expansion-prompt.md) | bootstrap | Triage prompt for a Claude Code session to review candidate MCP tools, flag safety/deps, and pick which ones become Linear tickets. |
+| [ci.md](ci.md) | ops | CI/CD pipeline: GitHub Actions jobs (backend ruff+pytest, frontend builds, docker build), the mock-based-suite invariant, report-only coverage, and the ruff check-only burn-down list. |
 
 ## zeus/docs/ (product and subsystem design)
 
