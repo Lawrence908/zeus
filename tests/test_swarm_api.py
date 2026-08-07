@@ -104,7 +104,8 @@ def test_plan_scopes_goal_into_run(monkeypatch, tmp_path):
 
 def test_repos_lists_allowlist(monkeypatch, tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
-    a.mkdir(); b.mkdir()
+    a.mkdir()
+    b.mkdir()
     monkeypatch.setenv("ZEUS_SWARM_REPO_ALLOWLIST", f"{a},{b}")
     c = _client()
     data = c.get("/swarm/repos").json()
