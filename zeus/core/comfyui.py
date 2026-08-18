@@ -75,7 +75,16 @@ _FLUX_DTYPE = lambda: os.getenv("ZEUS_COMFYUI_FLUX_DTYPE", "fp8_e4m3fn")
 _HEALTH_TIMEOUT = 3.0
 _SUBMIT_TIMEOUT = 15.0
 _POLL_INTERVAL = 1.0
-_POLL_TIMEOUT = 180.0  # FLUX ~10-30s; lowvram SDXL on the 3080 is much slower
+# Per-request read timeout for a single /history poll. ComfyUI is a single
+# aiohttp worker, so while the GPU is saturated it intermittently stalls a
+# few seconds answering /history. This MUST be generous — reusing the 3.0s
+# health timeout made a slow poll raise ReadTimeout and abort the whole run,
+# which silently kicked FLUX jobs down to the SDXL fallback.
+_POLL_HTTP_TIMEOUT = 30.0
+# Total wall-clock budget for one generation. Measured on Apollo's 5080:
+# FLUX 768x768/20 steps is ~80s cold-ish; larger images and step counts scale
+# up, and lowvram SDXL on the 3080 is slower still. Overridable for big jobs.
+_POLL_TIMEOUT = float(os.getenv("ZEUS_COMFYUI_POLL_TIMEOUT", "300"))
 
 
 @dataclass
@@ -192,7 +201,13 @@ async def _run_on_node(client: httpx.AsyncClient, base: str, graph: dict[str, An
     outputs: dict[str, Any] | None = None
     while time.monotonic() < deadline:
         await asyncio.sleep(_POLL_INTERVAL)
-        h = await client.get(f"{base}/history/{prompt_id}", timeout=_HEALTH_TIMEOUT)
+        try:
+            h = await client.get(f"{base}/history/{prompt_id}", timeout=_POLL_HTTP_TIMEOUT)
+        except httpx.TimeoutException:
+            # ComfyUI stalled answering this poll while the GPU was busy. Not a
+            # failure — the job is still running; keep polling until the total
+            # _POLL_TIMEOUT budget is spent.
+            continue
         if h.status_code != 200:
             continue
         entry = h.json().get(prompt_id)
@@ -270,7 +285,13 @@ async def generate_image(
             # Mid-request failure on the primary: try the fallback once.
             fb = _fallback_url()
             if node == "primary" and fb and await _healthy(client, fb):
-                logger.warning("comfyui: primary failed (%s); retrying on fallback", exc)
+                # str(ReadTimeout) is '', so include the type — otherwise the
+                # log reads "primary failed ()" with no clue what broke.
+                logger.warning(
+                    "comfyui: primary failed (%s: %s); retrying on fallback",
+                    type(exc).__name__,
+                    exc,
+                )
                 node, model = "fallback", _fallback_model()
                 graph = _build_graph(model, prompt, negative_prompt.strip(), width, height, eff_steps, seed)
                 png = await _run_on_node(client, fb, graph)
