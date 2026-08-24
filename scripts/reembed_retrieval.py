@@ -51,6 +51,7 @@ def main() -> int:
     ap.add_argument("--collection", required=True, help="source collection name")
     ap.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
     ap.add_argument("--to-hybrid", action="store_true", help="build a named dense + BM25 copy at <collection>_hybrid")
+    ap.add_argument("--target", help="write to this collection instead of in place (preserves source shape; safe for live cutover)")
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--qdrant-url", default=os.getenv("QDRANT_URL", "http://localhost:6333"))
     args = ap.parse_args()
@@ -63,7 +64,12 @@ def main() -> int:
     src_named = isinstance(vectors_cfg, dict)
     src_sparse = bool(getattr(info.config.params, "sparse_vectors", None))
 
-    target = f"{src}_hybrid" if args.to_hybrid else src
+    if args.target:
+        target = args.target
+    elif args.to_hybrid:
+        target = f"{src}_hybrid"
+    else:
+        target = src
     want_sparse = args.to_hybrid or src_sparse
     want_named = args.to_hybrid or src_named
 
@@ -74,17 +80,26 @@ def main() -> int:
         print("\nDRY RUN. Re-run with --apply to write. Snapshot the collection first.")
         return 0
 
-    if args.to_hybrid:
+    if target != src:
         if target in {c.name for c in client.get_collections().collections}:
             print(f"error: {target} already exists; delete it or pick another name", file=sys.stderr)
             return 2
-        client.create_collection(
+        vectors_config = (
+            {DENSE_VECTOR: qmodels.VectorParams(size=DEFAULT_EMBED_DIMS, distance=qmodels.Distance.COSINE)}
+            if want_named
+            else qmodels.VectorParams(size=DEFAULT_EMBED_DIMS, distance=qmodels.Distance.COSINE)
+        )
+        create_kwargs: dict = dict(
             collection_name=target,
-            vectors_config={DENSE_VECTOR: qmodels.VectorParams(size=DEFAULT_EMBED_DIMS, distance=qmodels.Distance.COSINE)},
-            sparse_vectors_config={SPARSE_VECTOR: qmodels.SparseVectorParams(modifier=qmodels.Modifier.IDF)},
+            vectors_config=vectors_config,
             optimizers_config=qmodels.OptimizersConfigDiff(indexing_threshold=2000),
         )
-        print(f"created hybrid collection {target}")
+        if want_sparse:
+            create_kwargs["sparse_vectors_config"] = {
+                SPARSE_VECTOR: qmodels.SparseVectorParams(modifier=qmodels.Modifier.IDF)
+            }
+        client.create_collection(**create_kwargs)
+        print(f"created collection {target} (named={want_named}, sparse={want_sparse})")
 
     bm25 = _bm25() if want_sparse else None
     offset = None

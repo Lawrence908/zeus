@@ -45,14 +45,26 @@ will disagree and quality will drop. Do not flip the flag without re-embedding.
    python3 scripts/reembed_retrieval.py --collection zeus_knowledge
    python3 scripts/reembed_retrieval.py --collection zeus_memories
    ```
-3. Set `ZEUS_EMBED_PREFIXES=1` in `.env`, then apply (re-embeds in place, same
-   ids and payloads, only vectors change):
+3. Re-embed. For a **small** collection, in place is fine:
    ```bash
-   ZEUS_EMBED_PREFIXES=1 python3 scripts/reembed_retrieval.py --collection zeus_knowledge --apply
    ZEUS_EMBED_PREFIXES=1 python3 scripts/reembed_retrieval.py --collection zeus_memories --apply
    ```
-4. Restart Zeus and re-run the eval. If it regresses, set the flag back to 0 and
-   re-run the re-embed to restore prefix-free vectors, or restore the snapshot.
+   For a **large, live** collection (e.g. `zeus_knowledge` at ~307K points, a
+   multi-hour job), do NOT rewrite it in place: that degrades live retrieval
+   while it runs and breaks it at the end until the flag flips. Instead copy to a
+   new collection with `--target`, leaving the live one serving unprefixed
+   queries until an atomic cutover:
+   ```bash
+   ZEUS_EMBED_PREFIXES=1 python3 scripts/reembed_retrieval.py \
+       --collection zeus_knowledge --target zeus_knowledge_prefixed --apply
+   ```
+4. Cut over: set `ZEUS_EMBED_PREFIXES=1` and point the collection at the rebuilt
+   copy (`ZEUS_KNOWLEDGE_COLLECTION=zeus_knowledge_prefixed`), then **recreate**
+   the container so the new env loads (`docker compose up -d zeus-core`; a plain
+   `restart` does NOT reload `.env`). Re-run the eval. If it regresses, revert the
+   two env values and `up -d` again; the original collection is untouched.
+   New chunks ingested during the copy window are not in the rebuilt copy, so
+   pause ingest during the run or re-ingest the gap after cutover.
 
 Also applies to the news layer (`zeus_news`) and any other nomic collection if
 you want prefixes everywhere; `news.py` still has its own un-prefixed embed path
