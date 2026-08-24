@@ -53,9 +53,14 @@ def _sparse_vectors(model, texts: list[str]) -> list[qmodels.SparseVector]:
     ]
 
 
-def _retry(fn, *, what: str, retries: int = 6):
-    """Run fn(), retrying transient failures with exponential backoff."""
-    delay = 2.0
+def _retry(fn, *, what: str, retries: int = 12):
+    """Run fn(), retrying transient failures with exponential backoff.
+
+    Patient by default: on a shared GPU, Ollama can 500 for a couple of minutes
+    while it swaps the chat model against nomic. 12 attempts with backoff capped
+    at 180s rides out a ~15 min wedge before giving up.
+    """
+    delay = 3.0
     for attempt in range(1, retries + 1):
         try:
             return fn()
@@ -64,7 +69,7 @@ def _retry(fn, *, what: str, retries: int = 6):
                 raise
             print(f"  {what} failed ({attempt}/{retries}): {exc}; retry in {delay:.0f}s", flush=True)
             time.sleep(delay)
-            delay = min(delay * 2, 60.0)
+            delay = min(delay * 2, 180.0)
 
 
 def _embed_dense(texts: list[str], chunk: int = 32) -> list[list[float]]:
