@@ -38,6 +38,22 @@ logger = logging.getLogger("zeus.memory.store")
 DEFAULT_COLLECTION = os.getenv("QDRANT_COLLECTION", "zeus_memories")
 MIN_CONFIDENCE = float(os.getenv("ZEUS_MEMORY_MIN_CONFIDENCE", "0.6"))
 
+# Optional hybrid (dense + BM25) retrieval and cross-encoder rerank for the fact
+# store, mirroring KnowledgeStore. Both default OFF:
+#   ZEUS_MEMORY_RERANK works on the existing collection (it retrieves a deeper
+#   dense pool and reorders it), so it can be enabled without a re-index.
+#   ZEUS_MEMORY_HYBRID adds a BM25 sparse vector, which the current dense-only
+#   collection lacks, so it requires recreating/re-indexing zeus_memories
+#   (facts are short and keyword-heavy, so BM25 helps most here). See the
+#   re-embed migration in docs before turning it on.
+MEMORY_HYBRID = os.getenv("ZEUS_MEMORY_HYBRID", "0").strip().lower() not in ("0", "false", "no", "")
+MEMORY_RERANK = os.getenv("ZEUS_MEMORY_RERANK", "0").strip().lower() not in ("0", "false", "no", "")
+
+# Named-vector keys, used only when MEMORY_HYBRID is on. A hybrid collection
+# stores named vectors; the legacy dense-only collection stores one unnamed vector.
+DENSE_VECTOR = "dense"
+SPARSE_VECTOR = "bm25"
+
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "core" / "prompts" / "memory_extract.md"
 
 
@@ -171,6 +187,7 @@ class MemoryStore:
         self.qdrant_url = qdrant_url or os.getenv("QDRANT_URL", "http://localhost:6333")
         self._client = QdrantClient(url=self.qdrant_url)
         self._ensured = False
+        self._bm25 = None  # lazy fastembed.SparseTextEmbedding (hybrid only)
 
     # -- collection ---------------------------------------------------------
 
@@ -179,15 +196,25 @@ class MemoryStore:
             return
         existing = {c.name for c in self._client.get_collections().collections}
         if self.collection not in existing:
-            logger.info("creating qdrant collection %s", self.collection)
-            self._client.create_collection(
+            logger.info("creating qdrant collection %s (hybrid=%s)", self.collection, MEMORY_HYBRID)
+            create_kwargs: dict[str, Any] = dict(
                 collection_name=self.collection,
-                vectors_config=qmodels.VectorParams(
-                    size=self.vector_size,
-                    distance=qmodels.Distance.COSINE,
-                ),
                 optimizers_config=qmodels.OptimizersConfigDiff(indexing_threshold=2000),
             )
+            if MEMORY_HYBRID:
+                create_kwargs["vectors_config"] = {
+                    DENSE_VECTOR: qmodels.VectorParams(
+                        size=self.vector_size, distance=qmodels.Distance.COSINE
+                    )
+                }
+                create_kwargs["sparse_vectors_config"] = {
+                    SPARSE_VECTOR: qmodels.SparseVectorParams(modifier=qmodels.Modifier.IDF)
+                }
+            else:
+                create_kwargs["vectors_config"] = qmodels.VectorParams(
+                    size=self.vector_size, distance=qmodels.Distance.COSINE
+                )
+            self._client.create_collection(**create_kwargs)
             for name, schema in (
                 ("user_id", qmodels.PayloadSchemaType.KEYWORD),
                 ("source", qmodels.PayloadSchemaType.KEYWORD),
@@ -276,13 +303,105 @@ class MemoryStore:
                 base.setdefault(k, v)
         return base
 
+    # -- hybrid / rerank helpers (mirror KnowledgeStore) --------------------
+
+    def _get_bm25(self):
+        if self._bm25 is None:
+            from fastembed import SparseTextEmbedding
+
+            cache_dir = os.getenv("ZEUS_FASTEMBED_CACHE_DIR", "zeus/data/fastembed_cache")
+            self._bm25 = SparseTextEmbedding("Qdrant/bm25", cache_dir=cache_dir)
+            logger.info("loaded BM25 sparse encoder (Qdrant/bm25), cache_dir=%s", cache_dir)
+        return self._bm25
+
+    def _embed_sparse(self, texts: list[str]) -> list[qmodels.SparseVector]:
+        model = self._get_bm25()
+        out: list[qmodels.SparseVector] = []
+        for emb in model.embed(texts):
+            out.append(
+                qmodels.SparseVector(
+                    indices=emb.indices.tolist(),
+                    values=emb.values.tolist(),
+                )
+            )
+        return out
+
+    def _make_vector(self, dense: list[float], sparse: qmodels.SparseVector | None):
+        """Legacy collections store a single unnamed dense vector; hybrid
+        collections store named dense + sparse vectors."""
+        if not MEMORY_HYBRID:
+            return dense
+        vec: dict[str, Any] = {DENSE_VECTOR: dense}
+        if sparse is not None:
+            vec[SPARSE_VECTOR] = sparse
+        return vec
+
+    def _rerank(self, query: str, hits: list[MemoryHit]) -> list[MemoryHit]:
+        try:
+            from zeus.memory.reranker import get_reranker
+
+            reranker = get_reranker()
+        except Exception as exc:
+            logger.warning("reranker unavailable, skipping: %s", exc)
+            return hits
+        try:
+            scores = reranker.score_pairs([(query, h.text) for h in hits])
+        except Exception as exc:
+            logger.warning("reranker scoring failed, keeping order: %s", exc)
+            return hits
+        order = sorted(zip(hits, scores), key=lambda x: x[1], reverse=True)
+        return [
+            MemoryHit(
+                id=h.id,
+                text=h.text,
+                score=float(s),
+                source=h.source,
+                category=h.category,
+                payload=h.payload,
+            )
+            for h, s in order
+        ]
+
+    def _query_hybrid(self, dense: list[float], query: str, limit: int, qfilter):
+        """Dense + BM25 RRF fusion for a hybrid (named-vector) collection."""
+        try:
+            [sparse] = self._embed_sparse([query])
+        except Exception as exc:
+            logger.warning("bm25 query encode failed, dense-only fallback: %s", exc)
+            resp = self._client.query_points(
+                collection_name=self.collection,
+                query=dense,
+                using=DENSE_VECTOR,
+                limit=limit,
+                query_filter=qfilter,
+                with_payload=True,
+            )
+            return resp.points
+        prefetch_limit = max(limit, 50)
+        resp = self._client.query_points(
+            collection_name=self.collection,
+            prefetch=[
+                qmodels.Prefetch(query=dense, using=DENSE_VECTOR, limit=prefetch_limit, filter=qfilter),
+                qmodels.Prefetch(query=sparse, using=SPARSE_VECTOR, limit=prefetch_limit, filter=qfilter),
+            ],
+            query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
+            limit=limit,
+            with_payload=True,
+        )
+        return resp.points
+
     def _upsert(self, payloads: list[dict[str, Any]]) -> list[str]:
         self.ensure_collection()
         texts = [p["text"] for p in payloads]
-        vectors = embed_texts(texts)
+        dense = embed_texts(texts)  # task="document"
+        sparse = self._embed_sparse(texts) if MEMORY_HYBRID else [None] * len(texts)
         ids: list[str] = [str(uuid.uuid4()) for _ in payloads]
         points = [
-            qmodels.PointStruct(id=ids[i], vector=vectors[i], payload=payloads[i])
+            qmodels.PointStruct(
+                id=ids[i],
+                vector=self._make_vector(dense[i], sparse[i]),
+                payload=payloads[i],
+            )
             for i in range(len(payloads))
         ]
         self._client.upsert(collection_name=self.collection, points=points, wait=False)
@@ -447,7 +566,7 @@ class MemoryStore:
         self.ensure_collection()
         if not query.strip():
             return []
-        [vector] = embed_texts([query])
+        [dense] = embed_texts([query], task="query")
 
         must: list[qmodels.FieldCondition] = [
             qmodels.FieldCondition(
@@ -495,16 +614,31 @@ class MemoryStore:
             must.append(qmodels.Filter(should=should_until))
 
         qfilter = qmodels.Filter(must=must)
-        response = self._client.query_points(
-            collection_name=self.collection,
-            query=vector,
-            limit=top_k,
-            query_filter=qfilter,
-            with_payload=True,
-        )
+
+        # A reranker only reorders what it is given, so pull a deeper pool first.
+        want = top_k
+        cand_k = want
+        if MEMORY_RERANK:
+            try:
+                cand_k = max(want, int(os.getenv("ZEUS_MEMORY_RERANK_CANDIDATES", "40")))
+            except (TypeError, ValueError):
+                cand_k = max(want, 40)
+            cand_k = min(cand_k, 100)
+
+        if MEMORY_HYBRID:
+            points = self._query_hybrid(dense, query, cand_k, qfilter)
+        else:
+            response = self._client.query_points(
+                collection_name=self.collection,
+                query=dense,
+                limit=cand_k,
+                query_filter=qfilter,
+                with_payload=True,
+            )
+            points = response.points
 
         out: list[MemoryHit] = []
-        for h in response.points:
+        for h in points:
             payload = dict(h.payload or {})
             out.append(
                 MemoryHit(
@@ -516,7 +650,11 @@ class MemoryStore:
                     payload=payload,
                 )
             )
-        return out
+
+        if MEMORY_RERANK and out:
+            out = self._rerank(query, out)
+
+        return out[:want]
 
     # -- update / delete ----------------------------------------------------
 
@@ -533,10 +671,17 @@ class MemoryStore:
         payload = dict(existing[0].payload or {})
         payload["text"] = text
         payload["updated_at"] = _now_iso()
-        [vector] = embed_texts([text])
+        [dense] = embed_texts([text])
+        [sparse] = self._embed_sparse([text]) if MEMORY_HYBRID else [None]
         self._client.upsert(
             collection_name=self.collection,
-            points=[qmodels.PointStruct(id=memory_id, vector=vector, payload=payload)],
+            points=[
+                qmodels.PointStruct(
+                    id=memory_id,
+                    vector=self._make_vector(dense, sparse),
+                    payload=payload,
+                )
+            ],
             wait=True,
         )
 

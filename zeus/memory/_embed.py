@@ -12,6 +12,20 @@ DEFAULT_EMBED_DIMS = 768  # nomic-embed-text
 DEFAULT_EMBED_NUM_CTX = 2048
 logger = logging.getLogger(__name__)
 
+# nomic-embed-text is an ASYMMETRIC model trained with task-instruction prefixes.
+# Ollama does not add them, so we do it here. Enabling prefixes changes the
+# vector space, so the corpus must be re-embedded and queries prefixed the same
+# way; with the flag off (default) behaviour is unchanged for existing indexes.
+#   docs embedded with   "search_document: "
+#   queries embedded with "search_query: "
+EMBED_PREFIXES = os.getenv("ZEUS_EMBED_PREFIXES", "0").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "",
+)
+_TASK_PREFIX = {"query": "search_query: ", "document": "search_document: "}
+
 
 def _timeout() -> httpx.Timeout:
     read = float(os.getenv("OLLAMA_EMBED_TIMEOUT_SEC", "120"))
@@ -23,11 +37,20 @@ def embed_texts(
     *,
     ollama_url: str | None = None,
     model: str | None = None,
+    task: str = "document",
 ) -> list[list[float]]:
-    """Embed each text via Ollama's /api/embeddings. Ollama has no batch endpoint."""
+    """Embed each text via Ollama's /api/embeddings. Ollama has no batch endpoint.
+
+    ``task`` selects the nomic-embed-text instruction prefix ("query" or
+    "document") when ``ZEUS_EMBED_PREFIXES`` is enabled. Callers embedding a
+    search query should pass ``task="query"``; document/chunk writes use the
+    default. The flag must match between ingest and search, which is why turning
+    it on requires a full re-embed (see the migration in docs).
+    """
     url = (ollama_url or os.getenv("OLLAMA_URL", "http://localhost:11435")).rstrip("/")
     embed_model = model or os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text:v1.5")
     keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
+    prefix = _TASK_PREFIX.get(task, "") if EMBED_PREFIXES else ""
     raw_num_ctx = os.getenv("ZEUS_EMBED_NUM_CTX")
     num_ctx = DEFAULT_EMBED_NUM_CTX
     if raw_num_ctx is not None:
@@ -52,7 +75,7 @@ def embed_texts(
                 f"{url}/api/embeddings",
                 json={
                     "model": embed_model,
-                    "prompt": text,
+                    "prompt": f"{prefix}{text}" if prefix else text,
                     "keep_alive": keep_alive,
                     "options": {"num_ctx": num_ctx},
                 },

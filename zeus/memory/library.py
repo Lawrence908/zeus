@@ -17,7 +17,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
@@ -153,44 +152,17 @@ class KnowledgeStore:
 
     # -- embeddings ---------------------------------------------------------
 
-    def _embed_dense(self, texts: list[str]) -> list[list[float]]:
-        """Call Ollama /api/embeddings once per text (no batch endpoint)."""
-        keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
-        # nomic-embed-text:v1.5 trains to 2048 tokens; pin num_ctx so Ollama
-        # doesn't allocate an 8192-slot KV cache (especially with NUM_PARALLEL>1).
-        raw_num_ctx = os.getenv("ZEUS_EMBED_NUM_CTX")
-        num_ctx = 2048
-        if raw_num_ctx is not None:
-            try:
-                parsed_num_ctx = int(raw_num_ctx.strip())
-                if parsed_num_ctx <= 0:
-                    raise ValueError("num_ctx must be a positive integer")
-                num_ctx = parsed_num_ctx
-            except ValueError:
-                logger.warning(
-                    "Invalid ZEUS_EMBED_NUM_CTX=%r; falling back to default %d",
-                    raw_num_ctx,
-                    num_ctx,
-                )
-        vectors: list[list[float]] = []
-        with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)) as client:
-            for text in texts:
-                resp = client.post(
-                    f"{self.ollama_url}/api/embeddings",
-                    json={
-                        "model": self.embed_model,
-                        "prompt": text,
-                        "keep_alive": keep_alive,
-                        "options": {"num_ctx": num_ctx},
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                emb = data.get("embedding")
-                if not isinstance(emb, list) or not emb:
-                    raise RuntimeError(f"ollama returned no embedding for chunk ({len(text)} chars)")
-                vectors.append(emb)
-        return vectors
+    def _embed_dense(self, texts: list[str], *, task: str = "document") -> list[list[float]]:
+        """Dense embeddings via the shared Ollama helper (nomic-embed-text).
+
+        ``task`` selects the nomic query/document instruction prefix when
+        ZEUS_EMBED_PREFIXES is enabled; pass ``task="query"`` on the search path.
+        """
+        from zeus.memory._embed import embed_texts
+
+        return embed_texts(
+            texts, ollama_url=self.ollama_url, model=self.embed_model, task=task
+        )
 
     # Back-compat alias.
     _embed = _embed_dense
@@ -327,10 +299,16 @@ class KnowledgeStore:
 
         cand_k = candidate_k or max(top_k * 4, 20)
         cand_k = min(cand_k, 40)
-        # CPU reranker scales linearly with candidates; 20 is enough for the
-        # rerank pass while staying within conversational latency budgets.
+        # A reranker can only reorder what it is handed, so give it a deeper pool.
+        # Tune ZEUS_KNOWLEDGE_RERANK_CANDIDATES (default 40). A CPU reranker gets
+        # slow past ~40 candidates, so only raise this with ZEUS_RERANKER_DEVICE=cuda.
         if RERANK_ENABLED:
-            cand_k = min(cand_k, 20)
+            try:
+                rerank_cands = int(os.getenv("ZEUS_KNOWLEDGE_RERANK_CANDIDATES", "40"))
+            except (TypeError, ValueError):
+                rerank_cands = 40
+            cand_k = max(cand_k, rerank_cands)
+            cand_k = min(cand_k, 100)
 
         qfilter = self._build_filter(user_id=user_id, sources=sources)
 
@@ -357,7 +335,7 @@ class KnowledgeStore:
         return hits[:top_k]
 
     def _query_dense_only(self, query: str, limit: int, qfilter):
-        [vec] = self._embed_dense([query])
+        [vec] = self._embed_dense([query], task="query")
         resp = self._client.query_points(
             collection_name=self.collection,
             query=vec,
@@ -370,7 +348,7 @@ class KnowledgeStore:
 
     def _query_hybrid(self, query: str, limit: int, qfilter):
         """Dense + BM25 RRF fusion in a single Qdrant round-trip."""
-        [dense] = self._embed_dense([query])
+        [dense] = self._embed_dense([query], task="query")
         try:
             [sparse] = self._embed_sparse([query])
         except Exception as exc:
