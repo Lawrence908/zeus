@@ -101,9 +101,13 @@ def layer_results(query: str, *, top_k: int = DEFAULT_TOP_K) -> dict[str, list[d
     """Run every retrieval layer once, returning mem0-shaped dicts per layer."""
     from zeus.memory.search import get_profile_facts, search_knowledge, search_memories
 
-    knowledge = search_knowledge(query=query, user_id="user", top_k=top_k)
-    memory = search_memories(query=query, user_id="user", top_k=top_k)
-    profile = [{"memory": f} for f in get_profile_facts("user", top_k=top_k)]
+    # Test what the live query path uses (zeus/core/query.py reads ZEUS_USER_ID),
+    # not a hardcoded "user" partition, or the eval scores a partition the
+    # assistant never queries.
+    uid = os.getenv("ZEUS_USER_ID", "user")
+    knowledge = search_knowledge(query=query, user_id=uid, top_k=top_k)
+    memory = search_memories(query=query, user_id=uid, top_k=top_k)
+    profile = [{"memory": f} for f in get_profile_facts(uid, top_k=top_k)]
     return {"knowledge": knowledge, "memory": memory, "profile": profile}
 
 
