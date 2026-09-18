@@ -21,7 +21,7 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [`../zeus/memory/CLAUDE.md`](../zeus/memory/CLAUDE.md) | product | MemoryStore, KnowledgeStore, Reference: invariants, flags, what not to do. |
 | [`../zeus/ingest/CLAUDE.md`](../zeus/ingest/CLAUDE.md) | product | Iris pipeline: source/target routing, config.yaml, how to add a source. |
 | [`../zeus/voice/CLAUDE.md`](../zeus/voice/CLAUDE.md) | product | Orpheus host-native loop: wake, STT, TTS, Phaos emitter, VRAM budget. |
-| [`../zeus/orchestration/CLAUDE.md`](../zeus/orchestration/CLAUDE.md) | product | AgentRuntime, bus, hooks, Kairos: FastAPI surface, invariants, allowlists. |
+| [`../zeus/orchestration/CLAUDE.md`](../zeus/orchestration/CLAUDE.md) | product | Argo swarm (the real dispatcher) plus the legacy AgentRuntime, bus, hooks, Kairos: FastAPI surface, invariants, allowlists. |
 | [`../zeus/kronos/CLAUDE.md`](../zeus/kronos/CLAUDE.md) | product | Kronos scheduler: job registry, asyncio loop, built-in/agent dispatch, Aegis-gated execution. |
 
 ## docs/ (repo root)
@@ -38,7 +38,8 @@ Audience tag legend: **ops** (operational runbook), **product** (subsystem desig
 | [kronos-frontend-plan.md](kronos-frontend-plan.md) | product | `/jobs` dashboard plan for the React SPA: jobs table, detail drawer, cron builder, live execution feed. |
 | [kronos-job-catalog.md](kronos-job-catalog.md) | ticket | Brainstorm of useful scheduled jobs grouped by domain, with tools each needs (existing vs to-build) and a recommended build order. Use as the planning surface when picking the next Kronos work item. |
 | [nemoclaw-ops.md](nemoclaw-ops.md) | ops | NemoClaw + OpenShell templated runbook: SSH tunnels, inference routing, policies, backups. Fill in your own host names and paths. |
-| [swarm-orchestration-plan.md](swarm-orchestration-plan.md) | product | Argo swarm-orchestration plan: Metis planner + Argo coordinator dispatching sandboxed Claude Code workers (argonauts) on git worktrees, PR-per-task, under checkpoint approvals. Phased build on AgentRuntime/TaskRunner/bus + OpenShell sandbox. |
+| [swarm-system.md](swarm-system.md) | product | **Argo system brief: start here for the swarm.** What is built vs dark, the execution model, isolation, the acceptance gate (guards vs ratchets, anti-gaming), current measured state, known gaps, and how to enable it. Carry-out doc: enough to reason about the swarm without reading the code. |
+| [swarm-orchestration-plan.md](swarm-orchestration-plan.md) | product | Argo swarm-orchestration plan: Metis planner + Argo coordinator dispatching sandboxed Claude Code workers (argonauts) on git worktrees, PR-per-task, under checkpoint approvals. Phased build on AgentRuntime/TaskRunner/bus + OpenShell sandbox. Design rationale + phase log; current state lives in swarm-system.md. |
 | [claude-code-architecture-notes.md](claude-code-architecture-notes.md) | product | External analysis of Claude Code architecture patterns that informed Zeus's design. |
 | [zeus-mcp-tool-expansion-prompt.md](zeus-mcp-tool-expansion-prompt.md) | bootstrap | Triage prompt for a Claude Code session to review candidate MCP tools, flag safety/deps, and pick which ones become Linear tickets. |
 | [ci.md](ci.md) | ops | CI/CD pipeline: GitHub Actions jobs (backend ruff+pytest, frontend builds, docker build), the mock-based-suite invariant, report-only coverage, and the ruff check-only burn-down list. |

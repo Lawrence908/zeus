@@ -1,6 +1,47 @@
-# zeus/orchestration/ — Agent runtime, bus, hooks, Kairos
+# zeus/orchestration/ (Agent runtime, bus, hooks, Kairos, Argo swarm)
 
-Agent lifecycle, multi-step tasks, bus routing, and the Kairos background daemon. Root brief: [`../../CLAUDE.md`](../../CLAUDE.md). Full spec: [`../docs/agent-runtime-spec.md`](../docs/agent-runtime-spec.md).
+Agent lifecycle, multi-step tasks, bus routing, the Kairos background daemon, and the Argo swarm. Root brief: [`../../CLAUDE.md`](../../CLAUDE.md). Full spec: [`../docs/agent-runtime-spec.md`](../docs/agent-runtime-spec.md).
+
+> **Read this first if you are here about multi-agent coding work.** `swarm/` (Argo)
+> is the real dispatcher: a DAG coordinator with a durable SQLite store, a bounded
+> parallel worker pool, human approval gates, and a `Worker` Protocol whose
+> implementations run `claude -p` on the host or in a locked-down container. It is
+> merged, tested, and currently **dark** (`ZEUS_SWARM_ENABLED` unset;
+> `ZEUS_SWARM_WORKER` defaults to `stub`).
+>
+> `AgentRuntime` / `TaskRunner` / `bus.py`, documented below, are the **pre-Argo
+> layer** and are not used by it. `AgentRuntime.start_agent()` sets a status enum
+> and logs; `bus.py` always posts to `http://localhost:8000`. Ruflo itself is not
+> an installed dependency, `ruflo.yaml` is a YAML dialect parsed by ~90 lines of
+> `runtime.py`, and its `version` field is a display string.
+>
+> System brief: [`../../docs/swarm-system.md`](../../docs/swarm-system.md).
+> Design decisions: [`../../docs/swarm-orchestration-plan.md`](../../docs/swarm-orchestration-plan.md).
+
+## Argo at a glance
+
+| Path | Role |
+|------|------|
+| `swarm/coordinator.py` | state machine: gates, dispatch, verify, Aegis screen, commit, merge, rebase, recover, kill |
+| `swarm/worker.py` | the `Worker` Protocol: the one extension seam |
+| `swarm/claude_worker.py` / `sandbox.py` | host subprocess vs container argonaut |
+| `swarm/worktree.py` | integration branch, per-node worktrees (tracked files only) |
+| `swarm/verifier.py` | node checks in a sandboxed container; `network=` override for the trusted project check |
+| `swarm/config.py` | repo allowlist, diff denylist, ~35 `ZEUS_SWARM_*` knobs |
+| `swarm/store.py` | durable SQLite runs/nodes/approvals/events |
+| `swarm/api.py` | `/swarm/*` HTTP + SSE |
+
+**Argo invariants** (in addition to the bus invariants below):
+
+- **The denylist is enforced on the diff**, not just on tool arguments. It covers
+  `zeus/orchestration/**`, `zeus/safety/policies/**`, and the acceptance harness,
+  query suites and baselines. An agent that can weaken its own policy, or edit the
+  harness that scores it, has neither.
+- **Worktrees carry tracked files only**, so `zeus/data/` never reaches a worker.
+- **The container owns no git**; the host coordinator commits and merges.
+- **Unattended defaults are the hardened ones**: sandbox egress `proxy`, verify
+  host-fallback off. Loosening either needs a safety review note.
+- **The acceptance gate may propose a baseline; a human promotes one.**
 
 Kronos (the cron-driven scheduler) is the deterministic sibling to Kairos; runs as a parallel lifespan task. See [`../kronos/CLAUDE.md`](../kronos/CLAUDE.md).
 
@@ -119,12 +160,12 @@ ZEUS_KAIROS_TOOL_ALLOWLIST=zeus_memory_search,olympian_status_read,olympian_serv
 
 Conditionally safe (one write, low blast radius):
 
-- `olympian_inbox_append` — append a one-line note to `~/.zeus/inbox.md`. Add only when there is a clear "Kairos leaves itself a note" use case, and only with `ZEUS_MCP_ALLOW_WRITE=1`.
+- `olympian_inbox_append`: append a one-line note to `~/.zeus/inbox.md`. Add only when there is a clear "Kairos leaves itself a note" use case, and only with `ZEUS_MCP_ALLOW_WRITE=1`.
 
 Never add to the default allowlist:
 
-- `olympian_action_run` — arbitrary script execution. The risk is unbounded by allowlist alone; gate behind a dedicated `ZEUS_KAIROS_ALLOW_ACTIONS=1` check before adding.
-- `zeus_remember`, `zeus_ingest_trigger` — both write to memory or trigger ingest, which is observable but expensive on misuse.
+- `olympian_action_run`: arbitrary script execution. The risk is unbounded by allowlist alone; gate behind a dedicated `ZEUS_KAIROS_ALLOW_ACTIONS=1` check before adding.
+- `zeus_remember`, `zeus_ingest_trigger`: both write to memory or trigger ingest, which is observable but expensive on misuse.
 
 ## What not to do
 
