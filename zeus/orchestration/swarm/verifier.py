@@ -36,11 +36,15 @@ class VerifyResult(BaseModel):
 
 
 class Verifier(Protocol):
-    async def verify(self, node: TaskNode, workspace: str) -> VerifyResult: ...
+    async def verify(
+        self, node: TaskNode, workspace: str, *, network: str | None = None
+    ) -> VerifyResult: ...
 
 
 class NoopVerifier:
-    async def verify(self, node: TaskNode, workspace: str) -> VerifyResult:
+    async def verify(
+        self, node: TaskNode, workspace: str, *, network: str | None = None
+    ) -> VerifyResult:
         return VerifyResult(passed=True, output="(no check)")
 
 
@@ -48,7 +52,9 @@ class FailClosedVerifier:
     """Fail any node that has a check; used when sandboxing is required but the
     sandbox can't run and host fallback is disabled. A node with no check passes."""
 
-    async def verify(self, node: TaskNode, workspace: str) -> VerifyResult:
+    async def verify(
+        self, node: TaskNode, workspace: str, *, network: str | None = None
+    ) -> VerifyResult:
         if not node.check.strip():
             return VerifyResult(passed=True, output="(no check)")
         return VerifyResult(
@@ -64,7 +70,11 @@ class CommandVerifier:
         self._timeout_s = timeout_s
         self._shell = shell
 
-    async def verify(self, node: TaskNode, workspace: str) -> VerifyResult:
+    async def verify(
+        self, node: TaskNode, workspace: str, *, network: str | None = None
+    ) -> VerifyResult:
+        # Host exec has no network namespace to constrain; `network` is accepted
+        # for protocol parity and deliberately ignored.
         if not node.check.strip():
             return VerifyResult(passed=True, output="(no check)")
         try:
@@ -139,7 +149,9 @@ class SandboxedCommandVerifier:
         self._timeout_s = timeout_s
         self._shell = shell
 
-    async def verify(self, node: TaskNode, workspace: str) -> VerifyResult:
+    async def verify(
+        self, node: TaskNode, workspace: str, *, network: str | None = None
+    ) -> VerifyResult:
         if not node.check.strip():
             return VerifyResult(passed=True, output="(no check)")
         if not docker_available():
@@ -148,7 +160,9 @@ class SandboxedCommandVerifier:
             node.check,
             workspace=workspace,
             image=config.verify_image(),
-            network=config.verify_network(),
+            # `network` is only ever non-None for the trusted project check; node
+            # checks fall through to the locked-down default.
+            network=network or config.verify_network(),
             limits=config.verify_limits(),
             shell=self._shell,
         )

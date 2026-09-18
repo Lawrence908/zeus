@@ -87,7 +87,11 @@ def test_build_docker_command_no_proxy_by_default():
 def test_egress_config_modes(monkeypatch):
     from zeus.orchestration.swarm import config
 
+    # Default is the hardened proxy mode: unrestricted egress must be opted into.
     monkeypatch.delenv("ZEUS_SWARM_SANDBOX_EGRESS", raising=False)
+    assert config.sandbox_egress()["mode"] == "proxy"
+
+    monkeypatch.setenv("ZEUS_SWARM_SANDBOX_EGRESS", "open")
     assert config.sandbox_egress()["mode"] == "open"
 
     monkeypatch.setenv("ZEUS_SWARM_SANDBOX_EGRESS", "none")

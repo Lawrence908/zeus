@@ -21,7 +21,13 @@ import os
 _DEFAULT_REPO_ALLOWLIST = "~/zeus"
 _DEFAULT_PATH_DENYLIST = (
     "zeus/safety/policies/**,zeus/orchestration/**,.git/**,"
-    ".env,.env.*,*/.env,*/.env.*"
+    ".env,.env.*,*/.env,*/.env.*,"
+    # The acceptance instrument and its record. Same argument as the Aegis policy
+    # above, one level up: an agent that can edit the harness scoring it, the query
+    # suite it is scored on, or the baseline it is compared against is not being
+    # measured. It may propose a new baseline; a human promotes one.
+    "scripts/acceptance.py,zeus/memory/eval_suite.py,"
+    "tests/retrieval_eval_queries/**,tests/*baseline*.json,pytest.ini"
 )
 
 
@@ -79,14 +85,20 @@ def sandbox_egress() -> dict[str, str]:
     An LLM-authored worker runs arbitrary code, so on the default bridge network
     it could reach any host. This selects how its network is constrained:
 
-    - ``open`` (default, back-compat): the bridge network, unrestricted egress.
-    - ``proxy``: join an *internal* docker network (no direct route out) and send
-      all traffic through an allowlist HTTP(S) proxy (``ZEUS_SWARM_EGRESS_PROXY``,
-      e.g. the tinyproxy in ``docker/egress-proxy`` that only permits
-      ``*.anthropic.com``). This is the recommended hardened mode.
+    - ``proxy`` (default): join an *internal* docker network (no direct route out)
+      and send all traffic through an allowlist HTTP(S) proxy
+      (``ZEUS_SWARM_EGRESS_PROXY``, e.g. the tinyproxy in ``docker/egress-proxy``
+      that only permits ``*.anthropic.com``). Requires that proxy URL; the worker
+      fails closed without it rather than silently running unrestricted.
+    - ``open``: the bridge network, unrestricted egress. A worker here can reach
+      any host on the LAN, so this is an explicit opt-out, not a default.
     - ``none``: ``--network none``; no egress at all (offline/local workers).
+
+    Default is ``proxy`` because an unattended improvement loop runs many
+    iterations without a human reading each diff; the blast radius of one bad
+    one should not include the rest of the homelab.
     """
-    mode = os.getenv("ZEUS_SWARM_SANDBOX_EGRESS", "open").strip().lower()
+    mode = os.getenv("ZEUS_SWARM_SANDBOX_EGRESS", "proxy").strip().lower()
     if mode == "none":
         return {"mode": "none", "network": "none", "proxy": "", "no_proxy": ""}
     if mode == "proxy":
@@ -201,11 +213,13 @@ def verify_sandbox() -> bool:
 def verify_host_fallback() -> bool:
     """If the verify sandbox can't run (no docker/image), fall back to host exec.
 
-    On by default so dev doesn't hard-break; the coordinator logs a loud WARNING
-    when it happens. Set to 0 to fail closed (a check that can't be sandboxed
-    fails) on hosts where running LLM-authored shell on the host is unacceptable.
+    OFF by default: a check that cannot be sandboxed fails the node. `node.check`
+    is LLM-authored shell, and the acceptance loop is exactly the path where it
+    runs unattended and repeatedly, so a missing image must not quietly degrade
+    into running it on zeus-core's host. Set to 1 for dev ergonomics on a box
+    where that is acceptable; the coordinator logs a loud WARNING when it fires.
     """
-    return os.getenv("ZEUS_SWARM_VERIFY_HOST_FALLBACK", "1").strip().lower() in ("1", "true", "yes", "on")
+    return os.getenv("ZEUS_SWARM_VERIFY_HOST_FALLBACK", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 def verify_image() -> str:
@@ -217,6 +231,25 @@ def verify_network() -> str:
     """Checks should not need egress; default `none`. Widen per-stack if a check
     must fetch (e.g. `pip install`)."""
     return os.getenv("ZEUS_SWARM_VERIFY_NETWORK", "none")
+
+
+def verify_project_network() -> str:
+    """Network for the *trusted* run-level project check only.
+
+    The acceptance gate has to reach Qdrant and Ollama to score the retrieval
+    ratchet, but `verify_network()` is shared with node checks, which are
+    LLM-authored. Widening that one would hand egress to arbitrary generated
+    shell, undoing the sandbox.
+
+    So this is a separate knob, and the coordinator only applies it when the
+    project check came from `project_check_default()` - i.e. the operator set it
+    in the environment. A per-run `project_check` supplied through the API or a
+    planner is untrusted and runs on `verify_network()` like any node check.
+
+    Defaults to `none`; set it to the compose network carrying zeus-qdrant and
+    zeus-ollama (e.g. `zeus_default`) when enabling the acceptance loop.
+    """
+    return os.getenv("ZEUS_SWARM_VERIFY_PROJECT_NETWORK", "none")
 
 
 def verify_limits() -> dict[str, str]:

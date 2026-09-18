@@ -463,13 +463,21 @@ class Coordinator:
         ws = self._workspaces.get(run_id)
 
         # Run-level check on the assembled branch, reusing the (sandboxed) verifier.
-        check_cmd = (view.run.project_check or config.project_check_default()).strip()
+        # Trust boundary: only an operator-set check (env default) may use the
+        # wider project network. A per-run project_check arrives from the API or
+        # the planner, so it is treated like LLM-authored shell and gets the
+        # locked-down node network.
+        run_check = (view.run.project_check or "").strip()
+        check_cmd = run_check or config.project_check_default().strip()
+        check_network = None if run_check else config.verify_project_network()
         passed: bool | None = None
         output: str | None = None
         if check_cmd and ws is not None and ws.integration_path is not None:
             synthetic = TaskNode(run_id=run_id, id="__project__",
                                  title="project check", check=check_cmd)
-            vres = await self._verifier.verify(synthetic, ws.integration_path)
+            vres = await self._verifier.verify(
+                synthetic, ws.integration_path, network=check_network
+            )
             passed, output = vres.passed, vres.output
 
         status = RunStatus.COMPLETED if (all_ok and passed is not False) else RunStatus.COMPLETED_PARTIAL

@@ -1,0 +1,46 @@
+# docker/verify/Dockerfile.zeus - verify image carrying the Zeus runtime env.
+#
+# Build:  docker build -t zeus-swarm-verify:latest -f docker/verify/Dockerfile.zeus .
+#         (build context is the repo root, not docker/verify, so requirements
+#          files are reachable)
+#
+# The sibling `Dockerfile` is deliberately lean (ruff + pytest) and stays the
+# generic reference. This one exists because effectively every check in this repo
+# imports `zeus` - both LLM-authored node checks like `pytest -q tests/test_x.py`
+# and the run-level acceptance gate, which imports zeus.memory.eval_suite to score
+# the retrieval ratchet. A lean image would fail those on ModuleNotFoundError,
+# which reads as "the change broke something" rather than "the image is wrong" -
+# the worst kind of false signal in an acceptance loop.
+#
+# Deps only, no source: the worktree is bind-mounted at /work at runtime, so the
+# code under test is always the agent's, never a stale copy baked into the image.
+
+FROM python:3.11-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git ripgrep ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-dev.txt /tmp/
+# FlagEmbedding is dropped: it pulls torch + the nvidia CUDA stack + triton (~5.3 GB,
+# turning a 5 GB image into 10.7 GB) and nothing imports it any more - the reranker
+# became an httpx client to rerank-gateway. fastembed IS kept; hybrid BM25 needs it,
+# and it rides on onnxruntime rather than torch. If a check ever needs FlagEmbedding
+# again, the honest fix is to put torch back in this image, not to silently skip the
+# check.
+# Both files are filtered: requirements-dev.txt starts with `-r requirements.txt`,
+# so filtering only the base file lets pip re-read the unfiltered one and put
+# FlagEmbedding (and 5.3 GB of CUDA) straight back.
+RUN grep -viE '^FlagEmbedding' /tmp/requirements.txt > /tmp/req-verify.txt \
+    && grep -viE '^-r |^FlagEmbedding' /tmp/requirements-dev.txt > /tmp/req-dev-verify.txt \
+    && pip install --no-cache-dir -r /tmp/req-verify.txt -r /tmp/req-dev-verify.txt \
+    && rm -f /tmp/requirements.txt /tmp/requirements-dev.txt \
+             /tmp/req-verify.txt /tmp/req-dev-verify.txt
+
+# Worktree is bind-mounted here at runtime; HOME is a tmpfs (see the command builder).
+WORKDIR /work
+
+# No entrypoint: `docker run <image> bash -c "<check>"` provides the full argv.
+ENTRYPOINT []
+CMD ["python", "--version"]
