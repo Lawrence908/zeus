@@ -184,6 +184,32 @@ def aegis_policy() -> str:
     return os.getenv("ZEUS_SWARM_AEGIS_POLICY", "swarm").strip() or "swarm"
 
 
+def escalate_consecutive_denials() -> int:
+    """Safety denials in a row before the run stops and asks a human to look.
+
+    Borrowed from Anthropic's auto-mode thresholds (3 consecutive / 20 total),
+    which exist because the opposite design fails measurably: they report users
+    approving 93% of permission prompts by default, so a gate on every action
+    decays into a rubber stamp. The lesson taken here is not "gate more", it is
+    "stay quiet while things are normal, and interrupt hard on a pattern".
+
+    A single denial is ordinary: a worker tried to touch a denied path, got
+    refused, and the node fails open. Three in a row is not ordinary. It usually
+    means the plan itself is pointed at something it may not have, and no amount
+    of retrying will fix that.
+    """
+    return int(os.getenv("ZEUS_SWARM_ESCALATE_CONSECUTIVE_DENIALS", "3"))
+
+
+def escalate_total_denials() -> int:
+    """Total safety denials in one run before escalating, regardless of streak.
+
+    Catches the slow version of the same problem: denials scattered across many
+    nodes, never three in a row, but a run that is clearly fighting the policy.
+    """
+    return int(os.getenv("ZEUS_SWARM_ESCALATE_TOTAL_DENIALS", "20"))
+
+
 def merge_conflict_retries() -> int:
     """Extra worker redos (auto-rebase, P9a) when a node's merge conflicts with
     concurrently-merged work, before the node fails. Separate from verify retries."""

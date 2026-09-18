@@ -21,6 +21,7 @@ class RunStatus(str, Enum):
     FAILED = "failed"  # nothing succeeded
     CANCELLED = "cancelled"
     PAUSED_BUDGET = "paused_budget"
+    PAUSED_ESCALATION = "paused_escalation"  # repeated safety denials; a human must look
 
 
 class NodeStatus(str, Enum):
@@ -40,6 +41,7 @@ class ApprovalKind(str, Enum):
     BUDGET = "budget"  # run exceeded budget_usd; approve to continue
     FINAL = "final"
     QUESTION = "question"  # a node needs human clarification before it can run (P10)
+    ESCALATION = "escalation"  # repeated safety denials tripped the escalation threshold
 
 
 class ApprovalState(str, Enum):

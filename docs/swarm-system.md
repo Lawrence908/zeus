@@ -155,6 +155,32 @@ reasoning):
 - **Noise floor**: deltas under `ZEUS_ACCEPTANCE_TOLERANCE` (default 5pp) are
   neither regression nor improvement. Suite must meet a minimum size.
 
+### Denial escalation (added 2026-09-18)
+
+Borrowed from Anthropic's auto-mode thresholds. The evidence for the shape is
+first-party: they report **users approving 93% of permission prompts by default**,
+so a gate on every action decays into a rubber stamp. The lesson is not "gate
+more", it is "stay quiet while things are normal and interrupt hard on a pattern".
+
+A run pauses at an `ESCALATION` gate (`RunStatus.PAUSED_ESCALATION`) after
+`ZEUS_SWARM_ESCALATE_CONSECUTIVE_DENIALS` (3) safety denials in a row, or
+`ZEUS_SWARM_ESCALATE_TOTAL_DENIALS` (20) in the run.
+
+Counting rules, each deliberate:
+
+- Only **policy refusals** count: an Aegis screen rejection or a denied-path diff.
+  A failing check is not a denial; that is the system working, and the worker gets
+  the output back and retries. Conflating them would escalate on ordinary red
+  tests and train the human to wave escalations through.
+- A node landing cleanly clears the **streak but not the total**, so the slow-burn
+  case (denials scattered across many nodes, never three in a row) still trips.
+- Approving an escalation clears **both** counters. Leaving the total would
+  re-trip on the next single denial and turn the escalation back into the
+  per-action prompt it replaces.
+- Counters are in-memory beside `_workspaces`, so a restart forgives the streak.
+  That is the right failure direction: the alternative is a run that resumes
+  already-escalated with no visible reason.
+
 ## 7. Current state
 
 **Built, merged, tested.** PR #44 merged 2026-07-25. P0–P11 plus hardening. 143
@@ -190,6 +216,34 @@ Measured 2026-09-18 under the deployed config:
 
 **No baseline has been promoted.** Promoting a saturated suite would lock in a
 loop that can never accept anything while looking correctly configured.
+
+### BLOCKER: reranking is silently not happening (found 2026-09-18)
+
+Every retrieval number in this doc was measured with **the reranker failing open**,
+despite the config recording `ZEUS_KNOWLEDGE_RERANK=1`.
+
+- Apollo's GPU reranker (Infinity on `:8194`) is unreachable. The machine is off.
+- The CPU fallback is functionally dead: a **2-text rerank took 24.4 seconds**
+  direct to TEI, against a 5s queue timeout and a 15s request timeout, so every
+  request 503s. Its log shows a 9-minute warm-up and
+  `Intel MKL WARNING: AVX ... deprecated ... will use SSE4.2`. A 568M-param
+  cross-encoder on SSE4.2 is not a fallback.
+- `zeus/memory/reranker.py` fails open by design, so retrieval silently returns
+  unranked order and the caller cannot tell.
+- `rerank-gateway` reports `"status": "ok"` because its probe is `GET /info`,
+  which succeeds. It never measures latency.
+
+**This is a third class of false signal, and the worst one.** The other two are
+visible once you look. This is invisible: the config block records rerank as
+*intent*, not as *applied*, so `_assert_config_match` would compare a genuinely
+reranked baseline against a silently unreranked run and report the gap as a code
+regression. Before the loop runs unattended, the gate must verify the reranker
+actually applied, or refuse to score.
+
+Consequence for the numbers above: the saturation at `hit@1 1.0` is **not**
+attributable to reranking. The gain over the `0.5667` candidate baseline most
+likely comes from the uncommitted nomic-prefix and hybrid work in `_embed.py` and
+`library.py`.
 
 ### Known gaps
 
@@ -238,12 +292,20 @@ review actually happens.
 
 ## 9. What unblocks the project
 
-Suite work, not harness work.
+Infrastructure first, then suite work. Harness work is done.
 
-1. Grow the knowledge suite until it has headroom, harder queries, ideally minted
-   from real query-log usage (highest signal per Themis; blocked on a persisted
-   query log).
+0. **Fix reranking.** Everything below is measured through it and it is not
+   running. Apollo is off; the CPU node cannot stand in. Blocked on hardware.
+1. Grow the knowledge suite until it has headroom. **In progress**: 36 candidates
+   sit unreviewed in `tests/retrieval_eval_queries/pending/`, measuring
+   `hit@1 0.694 / hit@5 0.722` where the active suite is a saturated 1.0. Built on
+   two rules: a query must not contain its own expected keywords, and it should
+   target a crowded document family so the retriever has to discriminate. Needs
+   re-measuring once reranking works, and a human pass before promotion. Longer
+   term the highest-signal source is real query-log usage, blocked on a persisted
+   query log.
 2. Verify and grow the 3 profile queries past the noise floor.
-3. Widen `eval_suite`'s config block so the guard can see the memory layer.
+3. Widen `eval_suite`'s config block so the guard can see the memory layer, and
+   make it record whether rerank *applied*, not just whether it was requested.
 4. Pin the verify image's deps to deployed versions.
 5. **Then** baseline, under a committed tree.

@@ -1,0 +1,84 @@
+# tests/retrieval_eval_queries/pending/knowledge_hard_batch2.yaml
+#
+# UNREVIEWED CANDIDATES. Second batch, written after measuring the first.
+#
+# Batch 1 came back hit@1 0.81 (17 of 21 at rank 1). Inspecting the four that
+# were not at rank 1 showed hardness needs TWO things, and only one of them is
+# about phrasing:
+#
+#   1. full paraphrase, so no rare term from the query survives into BM25; and
+#   2. a document family with many near-identical members, so the reranker has
+#      to actually discriminate.
+#
+# Batch 1's easy queries were easy because their target document was UNIQUE in
+# the corpus (one doc on the traits of moral principles, one Zopf recipe). A
+# paraphrase still lands those because nothing competes. That is corpus
+# sparsity, not retrieval difficulty, and it cannot be fixed by rewording.
+#
+# So every query here targets a crowded family: the Patchrick homelab ops series
+# (2.0/2.1/3.0/3.1/3.2, all about the same stack), the dated ethics notes, the
+# dated compiler notes, and the graph-theory Definitions.
+#
+# Second subtlety this exploits: score_suite checks keywords against retrieved
+# TEXT, not document identity. Competition therefore only bites when the keyword
+# is unique to ONE member of the family. Keywords below are chosen for that:
+# a tunnel UUID, a specific script invocation, a specific token name.
+#
+# Grounded in chunks sampled from live zeus_knowledge on 2026-09-18.
+
+# -- Patchrick homelab ops series: five near-identical docs, one right answer --
+- query: "Which identifier does traffic pass through between the CDN edge and my reverse proxy?"
+  expected_keywords: [3a9f1023, tunnel, caddy]
+  expected_layer: knowledge
+- query: "How do I bring up only one class of my self-hosted services rather than all of them?"
+  expected_keywords: ["start-homelab.sh", "--category"]
+  expected_layer: knowledge
+- query: "Checking a site responds locally while pretending to be the public hostname"
+  expected_keywords: [dev.chrislawrence.ca, curl, http_code]
+  expected_layer: knowledge
+- query: "Which internal address does the proxy listen on before requests reach the apps?"
+  expected_keywords: ["192.168.50.70", caddy]
+  expected_layer: knowledge
+
+# -- dated compiler notes: two adjacent lectures on the same subject --
+- query: "The stream of typed symbols produced from a tiny C function with one assignment"
+  expected_keywords: [INTKEYWD, ASSIGNOP, INTLITERAL]
+  expected_layer: knowledge
+- query: "A rule saying one construct is built from three parts in a fixed order"
+  expected_keywords: [featureX, grammar]
+  expected_layer: knowledge
+
+# -- dated ethics notes: four notes, overlapping vocabulary, distinct content --
+- query: "The objection that a purely self-regarding theory leaves clashes unresolvable"
+  expected_keywords: [egoism, conflicts of interests]
+  expected_layer: knowledge
+- query: "Whose perspectives does the note say were left out of the Western canon?"
+  expected_keywords: [women, excluded, intellectual tradition]
+  expected_layer: knowledge
+- query: "The property that a moral rule should be able to guide and evaluate conduct"
+  expected_keywords: [prescriptivity, action-guiding]
+  expected_layer: knowledge
+- query: "The property that a moral rule must outrank competing considerations"
+  expected_keywords: [overridingness]
+  expected_layer: knowledge
+
+# -- graph theory Definitions: one doc, many numbered definitions --
+- query: "The subgraph you get from one class of the connected-to relation"
+  expected_keywords: [component, equivalence class, induced]
+  expected_layer: knowledge
+
+# -- Factbook: ~250 structurally identical country pages --
+- query: "A country reporting over 29 million fixed telephone subscriptions"
+  expected_keywords: ["29,330,454", fixed lines]
+  expected_layer: knowledge
+- query: "Which country ranks tenth for carbon dioxide released by burning energy?"
+  expected_keywords: ["638.3", carbon dioxide]
+  expected_layer: knowledge
+- query: "A state that imports no crude at all while holding the world's second largest reserves"
+  expected_keywords: ["266.2", proved reserves]
+  expected_layer: knowledge
+
+# -- astronomy: the batch-1 miss, reworded to keep one anchor term --
+- query: "Two stars orbiting a shared centre of mass after forming together"
+  expected_keywords: [binary, common center of mass]
+  expected_layer: knowledge

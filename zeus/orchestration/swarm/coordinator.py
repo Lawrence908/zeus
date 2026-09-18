@@ -72,6 +72,11 @@ class Coordinator:
         self._pr_opener = pr_opener or PullRequestOpener()
         self._bus = event_bus
         self._workspaces: dict[str, CodeWorkspace] = {}
+        # Safety-denial counters per run: {run_id: [consecutive, total]}. In-memory
+        # like _workspaces, and reset by recover() along with them. A restart
+        # forgiving the streak is the right failure direction: the alternative is a
+        # run that resumes already-escalated with no way to see why.
+        self._denials: dict[str, list[int]] = {}
 
     async def _publish(self, run_id: str) -> None:
         if self._bus is not None:
@@ -197,6 +202,19 @@ class Coordinator:
                     await self._store.set_run_status(run_id, RunStatus.CANCELLED)
                     await self._teardown_workspace(run_id)
                 break
+            escalation = self._should_escalate(run_id)
+            if escalation is not None:
+                # Stop and make a human look. Deliberately NOT a per-action prompt:
+                # the run is silent while denials are isolated and interrupts once a
+                # pattern emerges, so the interruption still carries information.
+                if view.pending_approval(ApprovalKind.ESCALATION) is None:
+                    ap = await self._store.create_approval(
+                        run_id, ApprovalKind.ESCALATION, detail=escalation)
+                    await self._store.append_event(run_id, "escalation", escalation)
+                    await self._notify(view.run, ap)
+                await self._store.set_run_status(run_id, RunStatus.PAUSED_ESCALATION)
+                logger.warning("swarm run %s paused: %s", run_id, escalation)
+                break
             if self._over_budget(view.run, view.nodes):
                 # Kill-switch: hold the run until the budget overrun is approved.
                 if view.pending_approval(ApprovalKind.BUDGET) is None:
@@ -313,6 +331,7 @@ class Coordinator:
                 # before it lands, so unsafe output never reaches the branch.
                 aegis_reason = self._aegis_screen(result.output, vres.output if vres else "")
                 if aegis_reason is not None:
+                    self._record_denial(run.id)
                     await self._fail(n, nodes, aegis_reason)
                     return
 
@@ -324,6 +343,7 @@ class Coordinator:
                         await self._fail(n, nodes, f"commit failed: {exc}")
                         return
                     if commit.denied:
+                        self._record_denial(run.id)
                         await self._fail(n, nodes, f"policy violation: denied paths {commit.denied}")
                         return
                     if commit.committed:
@@ -351,6 +371,7 @@ class Coordinator:
                             return
                 n.status = NodeStatus.SUCCEEDED
                 n.output = result.output
+                self._clear_denial_streak(run.id)
                 await self._store.update_node(n)
                 await self._store.append_event(
                     n.run_id, "node_status",
@@ -373,6 +394,36 @@ class Coordinator:
         outcome = evaluate_text(combined, config.aegis_policy())
         if outcome.status == "rejected":
             return f"Aegis ({config.aegis_policy()} policy) blocked worker output: {outcome.message}"
+        return None
+
+    def _record_denial(self, run_id: str) -> None:
+        """Count a safety denial (Aegis screen or denied-path diff) against the run.
+
+        Only policy refusals land here. A failing check is not a denial: that is the
+        system working, and the worker gets the output back and retries. Conflating
+        the two would escalate on ordinary red tests and train the human to wave
+        escalations through, which is the exact failure this is meant to avoid.
+        """
+        c = self._denials.setdefault(run_id, [0, 0])
+        c[0] += 1
+        c[1] += 1
+
+    def _clear_denial_streak(self, run_id: str) -> None:
+        """A node landed cleanly, so the run is not fighting the policy. Streak only:
+        the total stands, because the slow-burn case is what the total is for."""
+        c = self._denials.get(run_id)
+        if c is not None:
+            c[0] = 0
+
+    def _should_escalate(self, run_id: str) -> str | None:
+        c = self._denials.get(run_id)
+        if c is None:
+            return None
+        consecutive, total = c
+        if consecutive >= config.escalate_consecutive_denials():
+            return f"{consecutive} safety denials in a row"
+        if total >= config.escalate_total_denials():
+            return f"{total} safety denials in this run"
         return None
 
     async def _fail(self, node: TaskNode, nodes: list[TaskNode], error: str) -> None:
@@ -422,6 +473,17 @@ class Coordinator:
                 if view is not None:
                     spent = sum(n.cost_usd for n in view.nodes)
                     await self._store.set_run_budget(run_id, spent + view.run.budget_usd)
+                await self._store.set_run_status(run_id, RunStatus.RUNNING)
+                return await self.advance(run_id)
+            await self._store.set_run_status(run_id, RunStatus.CANCELLED)
+            await self._teardown_workspace(run_id)
+
+        elif ap.kind == ApprovalKind.ESCALATION:
+            if approve:
+                # The human looked and says carry on, so clear the counters outright.
+                # Leaving the total in place would re-trip on the next single denial
+                # and turn the escalation into the per-action prompt it replaced.
+                self._denials[run_id] = [0, 0]
                 await self._store.set_run_status(run_id, RunStatus.RUNNING)
                 return await self.advance(run_id)
             await self._store.set_run_status(run_id, RunStatus.CANCELLED)
