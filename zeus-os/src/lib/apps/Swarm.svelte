@@ -92,10 +92,48 @@
   const GATE_LABEL: Record<ApprovalKind, string> = {
     plan: 'Approve plan',
     node_write: 'Approve write',
-    budget: 'Over budget — continue',
+    budget: 'Over budget, continue?',
     final: 'Approve merge (final)',
-    question: 'Clarification needed'
+    question: 'Clarification needed',
+    escalation: 'Repeated denials, review'
   };
+
+  // Triage buckets for the run list. The list is the surface that has to answer
+  // "which of these is waiting on me" without opening each run, so runs are
+  // grouped by what they need from a human rather than listed chronologically.
+  // Question gates are the reason this exists: they leave the run RUNNING, so a
+  // status-only list shows a blocked run as busy while a node sits idle.
+  type Bucket = 'input' | 'review' | 'working' | 'done';
+  const BUCKET_LABEL: Record<Bucket, string> = {
+    input: 'Needs input',
+    review: 'Ready for review',
+    working: 'Working',
+    done: 'Done'
+  };
+  const BUCKET_ORDER: Bucket[] = ['input', 'review', 'working', 'done'];
+
+  // Ordered most- to least-urgent: a run blocked mid-flight is stalled work,
+  // whereas one at the final gate has already done everything it can.
+  function bucketOf(r: Run): Bucket {
+    const pk = r.pending_kinds ?? [];
+    if (pk.includes('question') || pk.includes('escalation') || pk.includes('budget')) return 'input';
+    if (r.status === 'paused_escalation' || r.status === 'paused_budget') return 'input';
+    if (pk.includes('plan') || pk.includes('final') || pk.includes('node_write')) return 'review';
+    if (r.status === 'pending_plan_approval' || r.status === 'pending_final_approval') return 'review';
+    if (r.status === 'running') return 'working';
+    return 'done';
+  }
+
+  $: grouped = BUCKET_ORDER.map((b) => ({
+    bucket: b,
+    runs: runs.filter((r) => bucketOf(r) === b)
+  })).filter((g) => g.runs.length > 0);
+
+  // Count only what a human must act on, for the header badge.
+  $: waitingCount = runs.filter((r) => {
+    const b = bucketOf(r);
+    return b === 'input' || b === 'review';
+  }).length;
 
   let answers: Record<string, string> = {}; // approval_id -> draft answer
 
@@ -268,6 +306,12 @@
       disabled={busy || !goal.trim()}
       on:click={submitPlan}
     >{busy ? '…' : 'plan'}</button>
+    {#if waitingCount}
+      <span
+        class="ml-auto px-2 py-0.5 rounded border border-err/60 text-err text-[10px] shrink-0"
+        title="Runs waiting on a human decision"
+      >{waitingCount} waiting</span>
+    {/if}
   </header>
 
   {#if metrics && metrics.runs_total > 0}
@@ -285,12 +329,42 @@
   <div class="flex-1 flex min-h-0">
     <!-- runs -->
     <ul class="w-1/3 overflow-y-auto border-r border-border/40">
-      {#each runs as r (r.id)}
-        <li class="border-b border-border/20" class:bg-surface2={r.id === selectedId}>
-          <button class="w-full text-left px-3 py-2 hover:bg-surface2/60" on:click={() => pick(r.id)}>
-            <div class="text-fg truncate">{r.goal}</div>
-            <div class="text-[10px] text-muted mt-0.5">{r.status} · {r.id.slice(0, 8)}</div>
-          </button>
+      {#each grouped as g (g.bucket)}
+        <li>
+          <h2
+            class="sticky top-0 z-10 px-3 py-1 text-[10px] uppercase tracking-wider bg-bg border-b border-border/30"
+            class:text-err={g.bucket === 'input'}
+            class:text-accent2={g.bucket === 'review'}
+            class:text-warn={g.bucket === 'working'}
+            class:text-muted={g.bucket === 'done'}
+          >
+            {BUCKET_LABEL[g.bucket]} <span class="opacity-60">({g.runs.length})</span>
+          </h2>
+          <ul>
+            {#each g.runs as r (r.id)}
+              <li class="border-b border-border/20" class:bg-surface2={r.id === selectedId}>
+                <button
+                  class="w-full text-left px-3 py-2 hover:bg-surface2/60"
+                  on:click={() => pick(r.id)}
+                >
+                  <div class="text-fg truncate">{r.goal}</div>
+                  <div class="text-[10px] text-muted mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    <span>{r.status} · {r.id.slice(0, 8)}</span>
+                    {#each r.pending_kinds ?? [] as k}
+                      <span
+                        class="px-1 rounded border text-[9px]"
+                        class:border-err={k === 'question' || k === 'escalation' || k === 'budget'}
+                        class:text-err={k === 'question' || k === 'escalation' || k === 'budget'}
+                        class:border-accent2={!['question', 'escalation', 'budget'].includes(k)}
+                        class:text-accent2={!['question', 'escalation', 'budget'].includes(k)}
+                        title={GATE_LABEL[k]}
+                      >{k}</span>
+                    {/each}
+                  </div>
+                </button>
+              </li>
+            {/each}
+          </ul>
         </li>
       {:else}
         <li class="px-3 py-6 text-muted text-center">No runs. Scope a goal above.</li>

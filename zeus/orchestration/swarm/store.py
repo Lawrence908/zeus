@@ -280,7 +280,24 @@ class SwarmStore:
             rows = conn.execute(
                 "SELECT * FROM swarm_runs ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
-        return [self._run_from_row(r) for r in rows]
+            runs = [self._run_from_row(r) for r in rows]
+            if not runs:
+                return runs
+            # One extra query for the whole page, not one per run: the list is the
+            # triage surface, so it has to answer "which of these is waiting on
+            # me" without the caller opening each run in turn.
+            marks = ",".join("?" for _ in runs)
+            pending = conn.execute(
+                f"SELECT run_id, kind FROM swarm_approvals "
+                f"WHERE state = 'pending' AND run_id IN ({marks})",
+                [r.id for r in runs],
+            ).fetchall()
+        by_run: dict[str, list[str]] = {}
+        for row in pending:
+            by_run.setdefault(row["run_id"], []).append(row["kind"])
+        for r in runs:
+            r.pending_kinds = sorted(set(by_run.get(r.id, [])))
+        return runs
 
     # ---- mutate ----------------------------------------------------------
 

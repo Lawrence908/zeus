@@ -9,7 +9,8 @@ export type RunStatus =
   | 'completed_partial'
   | 'failed'
   | 'cancelled'
-  | 'paused_budget';
+  | 'paused_budget'
+  | 'paused_escalation';
 
 export type NodeStatus =
   | 'blocked'
@@ -21,7 +22,7 @@ export type NodeStatus =
   | 'skipped'
   | 'unreachable';
 
-export type ApprovalKind = 'plan' | 'node_write' | 'budget' | 'final' | 'question';
+export type ApprovalKind = 'plan' | 'node_write' | 'budget' | 'final' | 'question' | 'escalation';
 export type ApprovalState = 'pending' | 'approved' | 'rejected';
 
 export interface Run {
@@ -37,6 +38,9 @@ export interface Run {
   project_check_passed: boolean | null;
   project_check_output: string | null;
   pr_url: string | null;
+  // Derived server-side at list time: which gates are pending. `status` alone
+  // cannot say "waiting on me", because a question gate leaves the run RUNNING.
+  pending_kinds?: ApprovalKind[];
   created_at: string;
   updated_at: string;
 }

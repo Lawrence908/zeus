@@ -158,6 +158,12 @@ class Run(BaseModel):
     pr_url: str | None = None  # PR opened at the final gate (P7), if auto-PR is on
     created_at: str = ""
     updated_at: str = ""
+    # Derived at list time, never stored: which gates are pending on this run.
+    # `status` alone cannot answer "is this waiting on me" because a QUESTION
+    # gate leaves the run RUNNING, so a list keyed on status shows a blocked run
+    # as busy. That is the one case a supervisor most needs to see, since a node
+    # sits idle until it is answered.
+    pending_kinds: list[str] = []
 
 
 class RunEstimate(BaseModel):
