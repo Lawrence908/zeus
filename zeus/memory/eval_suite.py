@@ -147,6 +147,53 @@ def _finalize(m: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_config() -> dict[str, Any]:
+    """Everything that could explain the number, so a comparison can refuse.
+
+    A metric is only comparable to a baseline captured the same way, so anything
+    that changes what is being measured belongs here. Two lessons are baked in,
+    both learned the hard way on 2026-09-18:
+
+    - The memory-layer flags and collection names were missing, so a run whose
+      profile searches were 400-ing (hybrid collection queried without
+      ZEUS_MEMORY_HYBRID) still looked config-identical to a healthy baseline.
+    - `rerank_applied` records EFFECT, not intent. ZEUS_KNOWLEDGE_RERANK=1 only
+      says reranking was asked for; the client fails open, so an entire run can
+      score unreranked while reporting rerank=1. That difference is large enough
+      to read as a catastrophic code regression.
+    """
+    cfg: dict[str, Any] = {
+        "ZEUS_KNOWLEDGE_HYBRID": os.getenv("ZEUS_KNOWLEDGE_HYBRID", "1"),
+        "ZEUS_KNOWLEDGE_RERANK": os.getenv("ZEUS_KNOWLEDGE_RERANK", "0"),
+        "ZEUS_MEMORY_HYBRID": os.getenv("ZEUS_MEMORY_HYBRID", "0"),
+        "ZEUS_MEMORY_RERANK": os.getenv("ZEUS_MEMORY_RERANK", "0"),
+        "ZEUS_EMBED_MODEL": os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text"),
+        "QDRANT_COLLECTION": os.getenv("QDRANT_COLLECTION", "zeus_memories"),
+        "ZEUS_KNOWLEDGE_COLLECTION": os.getenv("ZEUS_KNOWLEDGE_COLLECTION", "zeus_knowledge"),
+    }
+    try:
+        from zeus.memory.reranker import rerank_applied, rerank_stats
+
+        applied = rerank_applied()
+        # Only the verdict goes in `config`, never the raw counts: config is
+        # compared key-by-key against a baseline, and attempt counts differ on
+        # every run, so including them would make every comparison refuse.
+        cfg["rerank_applied"] = "unused" if applied is None else str(applied).lower()
+    except Exception:  # noqa: BLE001 - never let instrumentation break scoring
+        cfg["rerank_applied"] = "unknown"
+    return cfg
+
+
+def _rerank_diagnostics() -> dict[str, Any]:
+    """Raw counters, reported beside `config` rather than inside it."""
+    try:
+        from zeus.memory.reranker import rerank_stats
+
+        return rerank_stats()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def score_suite(
     suite: list[dict[str, Any]] | None = None, *, top_k: int = DEFAULT_TOP_K
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -224,10 +271,7 @@ def score_suite(
     summary = {
         "overall": _finalize(overall),
         "per_layer": {layer: _finalize(mm) for layer, mm in sorted(by_layer.items())},
-        "config": {
-            "ZEUS_KNOWLEDGE_HYBRID": os.getenv("ZEUS_KNOWLEDGE_HYBRID", "1"),
-            "ZEUS_KNOWLEDGE_RERANK": os.getenv("ZEUS_KNOWLEDGE_RERANK", "0"),
-            "ZEUS_EMBED_MODEL": os.getenv("ZEUS_EMBED_MODEL", "nomic-embed-text"),
-        },
+        "config": _run_config(),
+        "rerank": _rerank_diagnostics(),
     }
     return summary, per_query
