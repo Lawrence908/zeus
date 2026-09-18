@@ -52,8 +52,20 @@ if str(REPO) not in sys.path:
 # ratchet re-opens the neutral-churn hole.
 RATCHET_PATHS = {
     "retrieval": ("zeus/memory/", "zeus/core/query.py"),
+}
+
+# Measurable, but saturated: the committed tool-use baseline is selection_accuracy
+# 1.0 / false_positive_rate 0.0 / answer_hit_rate 1.0 on 17 cases. Nothing can
+# improve on a perfect score, so as a ratchet it would reject every tools change
+# forever. It earns its keep as a non-regression guard instead. Promote it to
+# RATCHET_PATHS only after the suite grows enough to have headroom AND a noise
+# floor below the tolerance (17 cases puts one case at 5.9pp, already above it).
+GUARD_PATHS = {
     "tool_use": ("zeus/core/tools/",),
 }
+
+# Metrics where down is better; compared with the sign flipped.
+LOWER_IS_BETTER = frozenset({"false_positive_rate", "layer_miss"})
 
 # Rates below this delta are noise, not signal. Themis learned the hard way that
 # 5pp on a 30-query suite is ~1.5 queries, under run-to-run variance.
@@ -94,11 +106,11 @@ def changed_paths(repo: Path, ref: str) -> list[str]:
     return [p for p in out.splitlines() if p.strip()]
 
 
-def in_scope(paths: list[str]) -> dict[str, bool]:
-    """Which ratchets this diff is required to satisfy."""
+def in_scope(paths: list[str], table: dict[str, tuple[str, ...]] | None = None) -> dict[str, bool]:
+    """Which ratchets (or guards, with `table`) this diff is required to satisfy."""
     return {
         name: any(p.startswith(prefixes) for p in paths)
-        for name, prefixes in RATCHET_PATHS.items()
+        for name, prefixes in (table or RATCHET_PATHS).items()
     }
 
 
@@ -209,6 +221,26 @@ def _load_baseline(path: Path, *, kind: str) -> dict[str, Any]:
     return summary
 
 
+def _assert_config_match(current: dict[str, Any], base: dict[str, Any], *, label: str) -> None:
+    """Refuse to compare two runs measured under different retrieval/LLM config.
+
+    A metric is only comparable to a baseline captured the same way. Scoring with
+    a different embed model, collection, rerank setting or provider measures a
+    different system, and the diff then reports a huge regression that has nothing
+    to do with the change - the single most misleading output this gate can
+    produce. Observed for real: running without the deployed env scored hit@5 0.03
+    against a 0.61 baseline on a no-op comment.
+    """
+    for key in sorted(set(current) | set(base)):
+        cur, old = current.get(key), base.get(key)
+        if cur and old and str(cur) != str(old):
+            raise Reject(
+                f"{label} baseline was measured with {key}={old!r} but this run used "
+                f"{key}={cur!r}; the numbers are not comparable. Run the gate with the "
+                "deployed config, or rebaseline for this one."
+            )
+
+
 def _compare(
     current: dict[str, Any], base: dict[str, Any], metrics: list[str], *, label: str
 ) -> tuple[list[str], list[str]]:
@@ -219,12 +251,32 @@ def _compare(
     for m in metrics:
         if m not in current or m not in base:
             continue
-        delta = float(current[m]) - float(base[m])
+        raw = float(current[m]) - float(base[m])
+        # false_positive_rate going up is a regression, not an improvement.
+        delta = -raw if m in LOWER_IS_BETTER else raw
         if delta < -tol:
-            regressions.append(f"{label}.{m} {base[m]:.4f} -> {current[m]:.4f} ({delta:+.4f})")
+            regressions.append(f"{label}.{m} {base[m]:.4f} -> {current[m]:.4f} ({raw:+.4f})")
         elif delta > tol:
-            improvements.append(f"{label}.{m} {base[m]:.4f} -> {current[m]:.4f} ({delta:+.4f})")
+            improvements.append(f"{label}.{m} {base[m]:.4f} -> {current[m]:.4f} ({raw:+.4f})")
     return regressions, improvements
+
+
+def _load_suite_and_score() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Seam for tests: live scoring is the one part that needs Qdrant + Ollama.
+
+    `score_suite` returns a (summary, per_query) tuple - not a dict - and is
+    fail-open per query, so a connectivity outage arrives as N errored rows rather
+    than an exception. Both shapes were guessed wrong once and only surfaced
+    against live services, hence the seam.
+    """
+    from zeus.memory.eval_suite import load_suite, score_suite
+
+    suite = load_suite()
+    try:
+        summary, _per_query = score_suite(suite)
+    except Exception as exc:  # noqa: BLE001 - surfaced as a reject, not swallowed
+        raise Reject(f"retrieval eval could not run (Qdrant/Ollama reachable?): {exc}") from exc
+    return suite, summary
 
 
 def ratchet_retrieval(repo: Path) -> tuple[list[str], list[str], str]:
@@ -233,9 +285,7 @@ def ratchet_retrieval(repo: Path) -> tuple[list[str], list[str], str]:
     Needs Qdrant + Ollama. Unreachable services are a hard failure, never a skip:
     a skipped ratchet silently degrades the loop back to guards-only.
     """
-    from zeus.memory.eval_suite import load_suite, score_suite
-
-    suite = load_suite()
+    suite, summary = _load_suite_and_score()
     min_n = int(_env("ZEUS_ACCEPTANCE_MIN_SUITE", str(DEFAULT_MIN_SUITE)))
     if len(suite) < min_n:
         raise Reject(
@@ -243,23 +293,22 @@ def ratchet_retrieval(repo: Path) -> tuple[list[str], list[str], str]:
             "the noise floor would swamp the signal"
         )
 
-    try:
-        report = score_suite(suite)
-    except Exception as exc:  # noqa: BLE001 - surfaced as a reject, not swallowed
-        raise Reject(f"retrieval eval could not run (Qdrant/Ollama reachable?): {exc}") from exc
-
-    summary = report["summary"]
     overall = summary["overall"]
     if overall.get("n_error", 0) > 0:
+        # score_suite is fail-open per query: unreachable Qdrant/Ollama comes back
+        # as N errored queries, not an exception. Without this check the loop would
+        # read a total connectivity outage as a scoring result.
         raise Reject(
-            f"retrieval eval had {overall['n_error']} errored queries; "
-            "a scoring bug must not be read as a quality change"
+            f"retrieval eval had {overall['n_error']}/{overall['n_queries']} errored "
+            "queries (Qdrant/Ollama reachable? QDRANT_URL / OLLAMA_URL set?); "
+            "a scoring failure must not be read as a quality change"
         )
 
     base = _load_baseline(
         Path(_env("ZEUS_ACCEPTANCE_RETRIEVAL_BASELINE", "tests/retrieval_eval_baseline.json")),
         kind="retrieval",
     )
+    _assert_config_match(summary.get("config", {}), base.get("config", {}), label="retrieval")
     regs, imps = _compare(
         overall, base["overall"], ["hit@1", "hit@5", "hit@10", "mrr@10"], label="retrieval"
     )
@@ -267,16 +316,59 @@ def ratchet_retrieval(repo: Path) -> tuple[list[str], list[str], str]:
     return regs, imps, note
 
 
-def ratchet_tool_use(repo: Path) -> tuple[list[str], list[str], str]:
-    """Tool-use eval is gated behind its own env flag and needs a live LLM path."""
-    raise Reject(
-        "tool_use ratchet not yet wired: tests/tool_use_eval.py needs a live provider "
-        "and has no promoted baseline in this shape. Either wire it or remove "
-        "zeus/core/tools/ from RATCHET_PATHS - do not leave it silently skipped."
+def _run_tool_eval() -> dict[str, Any]:
+    """Seam for tests. Needs a live LLM provider (Ollama in prod, Claude in dev)."""
+    import asyncio
+
+    sys.path.insert(0, str(REPO / "tests"))
+    from tool_use_eval import run_eval
+
+    try:
+        return asyncio.run(run_eval())["summary"]
+    except Exception as exc:  # noqa: BLE001 - surfaced as a reject, not swallowed
+        raise Reject(f"tool-use eval could not run (LLM provider reachable?): {exc}") from exc
+
+
+def guard_tool_use(repo: Path) -> str:
+    """Non-regression check on tool selection. Not a ratchet - see GUARD_PATHS.
+
+    Also refuses to compare across providers: the baseline records the provider and
+    model it was measured on, and selection accuracy is a property of the model at
+    least as much as of the code. A qwen2.5:7b number and a Claude number are not
+    the same measurement, and quietly diffing them would manufacture both
+    regressions and improvements out of nothing.
+    """
+    summary = _run_tool_eval()
+    if summary.get("n_errors", 0) > 0:
+        raise Reject(f"tool-use eval had {summary['n_errors']} errored cases")
+
+    base = _load_baseline(
+        Path(_env("ZEUS_ACCEPTANCE_TOOL_USE_BASELINE", "tests/tool_use_eval_baseline.json")),
+        kind="tool_use",
+    )
+    cur_cfg = summary.get("config", {})
+    base_cfg = base.get("config", {})
+    _assert_config_match(
+        {k: cur_cfg.get(k) for k in ("provider", "model")},
+        {k: base_cfg.get(k) for k in ("provider", "model")},
+        label="tool-use",
+    )
+
+    regs, _imps = _compare(
+        summary, base,
+        ["selection_accuracy", "false_positive_rate", "answer_hit_rate"],
+        label="tool_use",
+    )
+    if regs:
+        raise Reject("tool-use regression:\n  " + "\n  ".join(regs))
+    return (
+        f"no regression (selection={summary['selection_accuracy']:.3f}, "
+        f"fp={summary['false_positive_rate']:.3f}, n={summary['n_cases']})"
     )
 
 
-RATCHETS = {"retrieval": ratchet_retrieval, "tool_use": ratchet_tool_use}
+RATCHETS = {"retrieval": ratchet_retrieval}
+GUARDS_BY_PATH = {"tool_use": guard_tool_use}
 
 
 # --------------------------------------------------------------------------
@@ -290,8 +382,10 @@ def main() -> int:
     try:
         paths = changed_paths(repo, ref)
         scope = in_scope(paths)
+        guard_scope = in_scope(paths, GUARD_PATHS)
         report["changed_files"] = len(paths)
         report["scope"] = scope
+        report["guard_scope"] = guard_scope
 
         if not any(scope.values()):
             raise Reject(
@@ -307,6 +401,10 @@ def main() -> int:
             ("frozen_suite", lambda: guard_frozen_suite(repo, ref)),
         ):
             report["guards"][name] = gate()
+
+        for name, required in guard_scope.items():
+            if required:
+                report["guards"][name] = GUARDS_BY_PATH[name](repo)
 
         all_regs: list[str] = []
         all_imps: list[str] = []
