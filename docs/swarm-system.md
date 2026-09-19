@@ -202,10 +202,13 @@ regression detection fires, config guard refuses an incomparable baseline.
 
 Measured 2026-09-18 under the deployed config:
 
-| Layer | n | hit@1 | hit@5 | hit@10 |
-|---|---|---|---|---|
-| knowledge | 30 | **1.00** | 1.00 | 1.00 |
-| profile | 3 | 0.00 | 0.00 | 0.33 |
+Re-measured 2026-09-18 with `rerank_applied: true` (132/132 calls succeeded):
+
+| Suite | layer | n | hit@1 | hit@5 | hit@10 | MRR |
+|---|---|---|---|---|---|---|
+| active | knowledge | 30 | **1.00** | 1.00 | 1.00 | 1.00 |
+| active | profile | 3 | 0.00 | 0.00 | 0.33 | 0.06 |
+| candidates (pending) | knowledge | 36 | 0.694 | 0.722 | 0.806 | 0.713 |
 
 - **Knowledge is saturated**, 30/30 at rank 1. No headroom; a ratchet rejects
   everything forever. The rerank work moved it from `hit@1 0.5667`.
@@ -217,33 +220,38 @@ Measured 2026-09-18 under the deployed config:
 **No baseline has been promoted.** Promoting a saturated suite would lock in a
 loop that can never accept anything while looking correctly configured.
 
-### BLOCKER: reranking is silently not happening (found 2026-09-18)
+### Reranking: was silently off, now verified applied (2026-09-18)
 
-Every retrieval number in this doc was measured with **the reranker failing open**,
-despite the config recording `ZEUS_KNOWLEDGE_RERANK=1`.
+Apollo was powered off, so the GPU reranker was unreachable and the CPU fallback
+answered a two-text rerank in **24.4 seconds** against a 5s queue timeout. Every
+request 503'd, `reranker.py` failed open, and retrieval silently returned
+unranked order while the config reported `ZEUS_KNOWLEDGE_RERANK=1`.
 
-- Apollo's GPU reranker (Infinity on `:8194`) is unreachable. The machine is off.
-- The CPU fallback is functionally dead: a **2-text rerank took 24.4 seconds**
-  direct to TEI, against a 5s queue timeout and a 15s request timeout, so every
-  request 503s. Its log shows a 9-minute warm-up and
-  `Intel MKL WARNING: AVX ... deprecated ... will use SSE4.2`. A 568M-param
-  cross-encoder on SSE4.2 is not a fallback.
-- `zeus/memory/reranker.py` fails open by design, so retrieval silently returns
-  unranked order and the caller cannot tell.
-- `rerank-gateway` reports `"status": "ok"` because its probe is `GET /info`,
-  which succeeds. It never measures latency.
+**Apollo is back and reranking is confirmed working**: `x-rerank-node: apollo`,
+flavour `infinity`, ~2.3s per call, and the re-measurement below logged
+132/132 and 276/276 successful rerank calls with `rerank_applied: true`.
 
-**This is a third class of false signal, and the worst one.** The other two are
-visible once you look. This is invisible: the config block records rerank as
-*intent*, not as *applied*, so `_assert_config_match` would compare a genuinely
-reranked baseline against a silently unreranked run and report the gap as a code
-regression. Before the loop runs unattended, the gate must verify the reranker
-actually applied, or refuse to score.
+Two durable lessons, both now enforced in code:
 
-Consequence for the numbers above: the saturation at `hit@1 1.0` is **not**
-attributable to reranking. The gain over the `0.5667` candidate baseline most
-likely comes from the uncommitted nomic-prefix and hybrid work in `_embed.py` and
-`library.py`.
+- **A flag records intent, not effect.** `eval_suite` now reports
+  `rerank_applied` as a verdict, derived from attempt-vs-success counters in
+  `reranker.py`. Raw counts sit beside `config`, never inside it, because they
+  differ per run and would make every comparison refuse.
+- **The CPU node is a placeholder, not a fallback.** It reports healthy because
+  the gateway probes `GET /info` and never measures latency. Treat "Apollo off"
+  as "reranking off", whatever the env says.
+
+**Reranking measurably changes ranks but did not change the aggregates.** A/B on
+four candidate queries: 7 to 8, 9 to 6, 8 to 9, and 1 to 1. Every move stayed
+outside the top 5, so hit@1 and hit@5 were identical with and without it. Two got
+worse and one better, which is n=4 and proves nothing, but "is the reranker
+earning its place on hard queries" is now a real open question rather than an
+assumption.
+
+Consequence: the saturation at `hit@1 1.0` is confirmed **not** attributable to
+reranking, since it holds with reranking verified on. The gain over the old
+`0.5667` figure most likely comes from the uncommitted nomic-prefix and hybrid
+work in `_embed.py` and `library.py`.
 
 ### Known gaps
 
@@ -294,16 +302,14 @@ review actually happens.
 
 Infrastructure first, then suite work. Harness work is done.
 
-0. **Fix reranking.** Everything below is measured through it and it is not
-   running. Apollo is off; the CPU node cannot stand in. Blocked on hardware.
-1. Grow the knowledge suite until it has headroom. **In progress**: 36 candidates
-   sit unreviewed in `tests/retrieval_eval_queries/pending/`, measuring
-   `hit@1 0.694 / hit@5 0.722` where the active suite is a saturated 1.0. Built on
-   two rules: a query must not contain its own expected keywords, and it should
-   target a crowded document family so the retriever has to discriminate. Needs
-   re-measuring once reranking works, and a human pass before promotion. Longer
-   term the highest-signal source is real query-log usage, blocked on a persisted
-   query log.
+0. ~~Fix reranking.~~ **Done**: Apollo is back, reranking verified applied.
+1. Grow the knowledge suite until it has headroom. **Measured**: 36 candidates in
+   `tests/retrieval_eval_queries/pending/` score `hit@1 0.694 / hit@5 0.722` with
+   reranking on, where the active suite is a saturated 1.0. Built on two rules: a
+   query must not contain its own expected keywords, and it should target a
+   crowded document family so the retriever has to discriminate. **Awaiting a
+   human pass before promotion.** Longer term the highest-signal source is real
+   query-log usage, blocked on a persisted query log.
 2. Verify and grow the 3 profile queries past the noise floor.
 3. Widen `eval_suite`'s config block so the guard can see the memory layer, and
    make it record whether rerank *applied*, not just whether it was requested.

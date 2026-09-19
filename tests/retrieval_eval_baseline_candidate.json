@@ -1,340 +1,364 @@
 {
-  "summary": {
-    "overall": {
-      "n_queries": 33,
-      "n_scored": 33,
-      "n_error": 0,
-      "hit@1": 0.5152,
-      "hit@5": 0.6061,
-      "hit@10": 0.7273,
-      "mrr@10": 0.5552,
-      "layer_miss": 0.0606
-    },
-    "per_layer": {
-      "knowledge": {
-        "n_queries": 30,
-        "n_scored": 30,
-        "n_error": 0,
-        "hit@1": 0.5667,
-        "hit@5": 0.6667,
-        "hit@10": 0.8,
-        "mrr@10": 0.6107,
-        "layer_miss": 0.0
-      },
-      "profile": {
-        "n_queries": 3,
-        "n_scored": 3,
-        "n_error": 0,
-        "hit@1": 0.0,
-        "hit@5": 0.0,
-        "hit@10": 0.0,
-        "mrr@10": 0.0,
-        "layer_miss": 0.6667
-      }
-    },
-    "config": {
-      "ZEUS_KNOWLEDGE_HYBRID": "1",
-      "ZEUS_KNOWLEDGE_RERANK": "0",
-      "ZEUS_EMBED_MODEL": "nomic-embed-text:v1.5"
-    }
+ "_note": "PROPOSED, NOT PROMOTED. Themis rule: the process that produces the number must not write the number it is compared against. A human promotes this to retrieval_eval_baseline.json in a separate, reviewable commit.",
+ "_provenance": {
+  "scored_at": "2026-09-18T22:37:23",
+  "git_head": "9362c3a",
+  "working_tree_dirty_on_retrieval_paths": true,
+  "dirty_files": [
+   "zeus/memory/CLAUDE.md",
+   "zeus/memory/_embed.py",
+   "zeus/memory/library.py",
+   "zeus/memory/news.py",
+   "zeus/memory/reranker.py"
+  ],
+  "caveat": "Measured against a dirty tree: the retrieval-path files below are uncommitted, so no commit reproduces this number. Re-measure on a clean tree before promoting.",
+  "rerank_verified": "true"
+ },
+ "summary": {
+  "overall": {
+   "n_queries": 33,
+   "n_scored": 33,
+   "n_error": 0,
+   "hit@1": 0.9091,
+   "hit@5": 0.9091,
+   "hit@10": 0.9394,
+   "mrr@10": 0.9149,
+   "layer_miss": 0.0303
   },
-  "per_query": [
-    {
-      "query": "What is the Zeus project?",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 0,
-      "rr": 0.0
-    },
-    {
-      "query": "How does Zeus handle voice input and output?",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Aegis safety policies and guardrails",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "What embedding model does Zeus use?",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 0,
-      "rr": 0.0
-    },
-    {
-      "query": "Ruflo agent orchestration",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "How do stars form from a solar nebula?",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Early galaxies and collisional events",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 4,
-      "wrong_layer_rank": 0,
-      "rr": 0.25
-    },
-    {
-      "query": "Copernicus Brahe Kepler heliocentric model",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Binary stars and stellar groupings",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Steps to solve a definite integral",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Proof step summaries for lemmas and theorems",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Atlas physical network interfaces",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Hephaestus fresh server directory structure",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Caddy proxy diagnostics troubleshooting",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "ZFS pool RAIDZ2 mount setup",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "SSH fail2ban hardening",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Gmail OAuth trigger for rent receipts",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 4,
-      "wrong_layer_rank": 0,
-      "rr": 0.25
-    },
-    {
-      "query": "InboxCast personalized inbox summary",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 1,
-      "rr": 1.0
-    },
-    {
-      "query": "Azure VM xfce4 session setup",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 7,
-      "wrong_layer_rank": 0,
-      "rr": 0.1429
-    },
-    {
-      "query": "WSL update in PowerShell",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 0,
-      "rr": 0.0
-    },
-    {
-      "query": "Portfolio of tools I have built",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 4,
-      "wrong_layer_rank": 0,
-      "rr": 0.25
-    },
-    {
-      "query": "Resume for software developer data scientist student",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "C floating point addition function",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Team Arena PlayerNFT Linear checklist",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 7,
-      "wrong_layer_rank": 0,
-      "rr": 0.1429
-    },
-    {
-      "query": "Lulu webhook email order integration",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 1,
-      "wrong_layer_rank": 0,
-      "rr": 1.0
-    },
-    {
-      "query": "Plato Republic summary life lessons",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 0,
-      "rr": 0.0
-    },
-    {
-      "query": "AI deception risks ethical dilemma",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 7,
-      "wrong_layer_rank": 0,
-      "rr": 0.1429
-    },
-    {
-      "query": "Physical Intelligence robotics research",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 0,
-      "rr": 0.0
-    },
-    {
-      "query": "Amazon Leo in-flight antenna vs Starlink",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 0,
-      "rr": 0.0
-    },
-    {
-      "query": "Add Telegram integration feature",
-      "suite": "knowledge_questions",
-      "expected_layer": "knowledge",
-      "outcome": "hit",
-      "first_rank": 7,
-      "wrong_layer_rank": 0,
-      "rr": 0.1429
-    },
-    {
-      "query": "What are the user's plain-text and formatting preferences?",
-      "suite": "profile_questions",
-      "expected_layer": "profile",
-      "outcome": "layer_miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 4,
-      "rr": 0.0
-    },
-    {
-      "query": "What is the user currently working on?",
-      "suite": "profile_questions",
-      "expected_layer": "profile",
-      "outcome": "miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 0,
-      "rr": 0.0
-    },
-    {
-      "query": "What hardware does the user run their homelab on?",
-      "suite": "profile_questions",
-      "expected_layer": "profile",
-      "outcome": "layer_miss",
-      "first_rank": 0,
-      "wrong_layer_rank": 4,
-      "rr": 0.0
-    }
-  ]
+  "per_layer": {
+   "knowledge": {
+    "n_queries": 30,
+    "n_scored": 30,
+    "n_error": 0,
+    "hit@1": 1.0,
+    "hit@5": 1.0,
+    "hit@10": 1.0,
+    "mrr@10": 1.0,
+    "layer_miss": 0.0
+   },
+   "profile": {
+    "n_queries": 3,
+    "n_scored": 3,
+    "n_error": 0,
+    "hit@1": 0.0,
+    "hit@5": 0.0,
+    "hit@10": 0.3333,
+    "mrr@10": 0.0636,
+    "layer_miss": 0.3333
+   }
+  },
+  "config": {
+   "ZEUS_KNOWLEDGE_HYBRID": "1",
+   "ZEUS_KNOWLEDGE_RERANK": "1",
+   "ZEUS_MEMORY_HYBRID": "1",
+   "ZEUS_MEMORY_RERANK": "1",
+   "ZEUS_EMBED_MODEL": "nomic-embed-text:v1.5",
+   "QDRANT_COLLECTION": "zeus_memories_hybrid",
+   "ZEUS_KNOWLEDGE_COLLECTION": "zeus_knowledge",
+   "rerank_applied": "true"
+  },
+  "rerank": {
+   "attempts": 132,
+   "ok": 132
+  }
+ },
+ "per_query": [
+  {
+   "query": "What is the Zeus project?",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 1,
+   "rr": 1.0
+  },
+  {
+   "query": "How does Zeus handle voice input and output?",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 2,
+   "rr": 1.0
+  },
+  {
+   "query": "Aegis safety policies and guardrails",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "What embedding model does Zeus use?",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Ruflo agent orchestration",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 4,
+   "rr": 1.0
+  },
+  {
+   "query": "How do stars form from a solar nebula?",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Early galaxies and collisional events",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Copernicus Brahe Kepler heliocentric model",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Binary stars and stellar groupings",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Steps to solve a definite integral",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Proof step summaries for lemmas and theorems",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Atlas physical network interfaces",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 1,
+   "rr": 1.0
+  },
+  {
+   "query": "Hephaestus fresh server directory structure",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Caddy proxy diagnostics troubleshooting",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 1,
+   "rr": 1.0
+  },
+  {
+   "query": "ZFS pool RAIDZ2 mount setup",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "SSH fail2ban hardening",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Gmail OAuth trigger for rent receipts",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "InboxCast personalized inbox summary",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 3,
+   "rr": 1.0
+  },
+  {
+   "query": "Azure VM xfce4 session setup",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "WSL update in PowerShell",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Portfolio of tools I have built",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Resume for software developer data scientist student",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 2,
+   "rr": 1.0
+  },
+  {
+   "query": "C floating point addition function",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Team Arena PlayerNFT Linear checklist",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Lulu webhook email order integration",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Plato Republic summary life lessons",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "AI deception risks ethical dilemma",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Physical Intelligence robotics research",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Amazon Leo in-flight antenna vs Starlink",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 0,
+   "rr": 1.0
+  },
+  {
+   "query": "Add Telegram integration feature",
+   "suite": "knowledge_questions",
+   "expected_layer": "knowledge",
+   "outcome": "hit",
+   "first_rank": 1,
+   "wrong_layer_rank": 1,
+   "rr": 1.0
+  },
+  {
+   "query": "What are the user's plain-text and formatting preferences?",
+   "suite": "profile_questions",
+   "expected_layer": "profile",
+   "outcome": "layer_miss",
+   "first_rank": 0,
+   "wrong_layer_rank": 1,
+   "rr": 0.0
+  },
+  {
+   "query": "What is the user currently working on?",
+   "suite": "profile_questions",
+   "expected_layer": "profile",
+   "outcome": "hit",
+   "first_rank": 11,
+   "wrong_layer_rank": 3,
+   "rr": 0.0909
+  },
+  {
+   "query": "What hardware does the user run their homelab on?",
+   "suite": "profile_questions",
+   "expected_layer": "profile",
+   "outcome": "hit",
+   "first_rank": 10,
+   "wrong_layer_rank": 1,
+   "rr": 0.1
+  }
+ ]
 }
