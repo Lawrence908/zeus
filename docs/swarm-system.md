@@ -208,7 +208,7 @@ Re-measured 2026-09-18 with `rerank_applied: true` (132/132 calls succeeded):
 |---|---|---|---|---|---|---|
 | active | knowledge | 30 | **1.00** | 1.00 | 1.00 | 1.00 |
 | active | profile | 3 | 0.00 | 0.00 | 0.33 | 0.06 |
-| candidates, own material (pending) | knowledge | 20 | 0.650 | 0.650 | 0.700 | 0.656 |
+| candidates, own material (pending) | knowledge | 32 | 0.563 | 0.563 | 0.594 | 0.566 |
 | candidates, kiwix (parked) | knowledge | 13 | not scored | | | |
 
 - **Knowledge is saturated**, 30/30 at rank 1. No headroom; a ratchet rejects
@@ -311,9 +311,21 @@ Infrastructure first, then suite work. Harness work is done.
    keywords, and it should target a crowded document family so the retriever has
    to discriminate.
 
-   **Still ~10 short of promotable.** `ZEUS_ACCEPTANCE_MIN_SUITE` is 30, and at
-   n=20 one query is 5.0pp, exactly the tolerance. Thirteen queries grounded in
-   the kiwix reference corpus were **parked**, not dropped
+   **Second pass took it to n=32**, clearing the 30-query floor, at
+   `hit@1 0.563 / hit@5 0.563 / hit@10 0.594`. One query is now 3.1pp, under the
+   5pp tolerance. Mined from the families the first round missed: `Definitions`
+   (246 chunks), `Outline`, `specs`, `Cursor Integration`, `SSH`, and the
+   `Integration Steps` pair, where the same title exists twice with near-identical
+   content and only a retriever that tells them apart gets both.
+
+   **Every miss was validated**, not assumed: probing each missed target with a
+   near-literal query put all of them at rank 1, so the ground truth is correct
+   and the queries fail only on paraphrase. Re-run that check whenever a query
+   misses, because broken ground truth depresses the metric permanently and
+   invents headroom that is not there.
+
+   Thirteen queries grounded in
+the kiwix reference corpus were **parked**, not dropped
    (`pending/knowledge_kiwix_parked.yaml`): `CLAUDE.md` says reference content is
    live-proxied and never ingested, yet kiwix chunks sit in `zeus_knowledge`. A
    suite resting on them would collapse the day that discrepancy is fixed. Unmined

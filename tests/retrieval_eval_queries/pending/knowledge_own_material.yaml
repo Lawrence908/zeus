@@ -92,3 +92,63 @@
 - query: "Which vault template drops a header graphic at the top of a note?"
   expected_keywords: [banner, cornell, tfthacker]
   expected_layer: knowledge
+
+# ---------------------------------------------------------------------------
+# Second pass, 2026-09-18: mined from the crowded families left untouched by the
+# first round. Same two rules. n was 20, below the harness's own 30-query floor,
+# and at n=20 one query is 5.0pp, exactly the tolerance.
+# ---------------------------------------------------------------------------
+
+# -- Definitions.md: many numbered definitions in one doc, 246 chunks --
+- query: "If there are more items than containers, what must hold for at least one container?"
+  expected_keywords: [pigeonhole, pigeons, holes]
+  expected_layer: knowledge
+
+# -- Integration Steps: the SAME title exists twice with near-identical content
+#    (Archive/MATH 122/ and root), one on definite bounds and one on
+#    substitution. A retriever that cannot tell them apart fails one of these. --
+- query: "Steps for working out an integral between two limits"
+  expected_keywords: [antiderivative, upper bound]
+  expected_layer: knowledge
+- query: "Steps when you swap part of the integrand for a new variable"
+  expected_keywords: [substitution, differentiate, du]
+  expected_layer: knowledge
+
+# -- Outline.md: course notes on MongoDB --
+- query: "What is the twelve-byte unique key assigned by default?"
+  expected_keywords: [ObjectId, 12-byte]
+  expected_layer: knowledge
+- query: "Which two collections hold large binary uploads split into pieces?"
+  expected_keywords: ["fs.files", "fs.chunks"]
+  expected_layer: knowledge
+
+# -- specs.md: the Supermicro build notes --
+- query: "Which mainstream vendor's pedestal server is the closest match to my eight-bay tower?"
+  expected_keywords: [PowerEdge, T420]
+  expected_layer: knowledge
+- query: "Which three component versions should I verify before trusting the array?"
+  expected_keywords: [Areca, firmware, NIC]
+  expected_layer: knowledge
+
+# -- Cursor Integration.md --
+- query: "How do I register the container tooling gateway with my editor?"
+  expected_keywords: [mcpServers, docker-mcp, autoStart]
+  expected_layer: knowledge
+- query: "Which payment provider did I tell the assistant to remember for Magic Pages?"
+  expected_keywords: [Stripe, memory server]
+  expected_layer: knowledge
+
+# -- SSH.md --
+- query: "Which port did I confirm my remote shell listens on?"
+  expected_keywords: ["port 22"]
+  expected_layer: knowledge
+
+# -- 2.0 System Message.md: same Patchrick family, a different fact --
+- query: "Which container serves my personal site, and on which direct port?"
+  expected_keywords: [chrislawrence-portfolio-portfolio, "8110"]
+  expected_layer: knowledge
+
+# -- Tickets.md --
+- query: "Which work item covers a discussion thread scoped to a single event?"
+  expected_keywords: ["Event chat", frontend]
+  expected_layer: knowledge
