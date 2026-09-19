@@ -1,0 +1,94 @@
+# tests/retrieval_eval_queries/pending/knowledge_own_material.yaml
+#
+# UNREVIEWED CANDIDATES, curated 2026-09-18. Still pending: `load_suite()`
+# excludes pending/ unless include_pending=True, so nothing here is scored until
+# a human promotes it.
+#
+# Every query here is grounded in CHRIS'S OWN material: course notes, project
+# docs, the homelab ops series. Queries grounded in the kiwix reference corpus
+# were moved to knowledge_kiwix_parked.yaml, because `CLAUDE.md` says reference
+# content is live-proxied and never ingested. Those chunks are in zeus_knowledge
+# anyway, so a suite resting on them would collapse the day that discrepancy is
+# fixed, for reasons unrelated to retrieval quality.
+#
+# Construction rules (the second is the non-obvious one):
+#   1. A query must not contain its own expected keywords. The active 30 fail
+#      this, which is why they saturate: "What is the Zeus project?" with
+#      keywords [zeus, assistant, homelab] is a BM25 lookup, not a retrieval
+#      test.
+#   2. It should target a CROWDED document family. A query whose target document
+#      is unique in the corpus stays easy however it is worded; that is corpus
+#      sparsity, not retrieval difficulty, and rewording cannot fix it.
+#
+# `keywords_hit` is ANY-match, and uses \b word boundaries for single tokens, so
+# a keyword may not begin with punctuation (`--category` can never match).
+#
+# Dropped during review: one query whose target is unretrievable even under a
+# literal probe (it would sit at zero forever and manufacture fake headroom), and
+# two duplicates that asked an existing question a second way.
+
+# -- course notes: philosophy / ethics (crowded: several dated notes overlap) --
+- query: "What are the five characteristics a moral rule has to have?"
+  expected_keywords: [prescriptivity, universalizability, overridingness]
+  expected_layer: knowledge
+- query: "The property that a moral rule should be able to guide and evaluate conduct"
+  expected_keywords: [prescriptivity, action-guiding]
+  expected_layer: knowledge
+- query: "The property that a moral rule must outrank competing considerations"
+  expected_keywords: [overridingness]
+  expected_layer: knowledge
+- query: "The view that right and wrong come down to how one person feels about it"
+  expected_keywords: [subjectivism, relativism, feelings]
+  expected_layer: knowledge
+- query: "Why do critics say a self-interest-only theory cannot settle disputes between people?"
+  expected_keywords: [egoism, conflicts of interests, moral theory]
+  expected_layer: knowledge
+- query: "When did the movement for women's emancipation give rise to the term we use for it now?"
+  expected_keywords: [feminism, emancipation, 19th century]
+  expected_layer: knowledge
+- query: "Whose perspectives does the note say were left out of the Western canon?"
+  expected_keywords: [women, excluded, intellectual tradition]
+  expected_layer: knowledge
+
+# -- course notes: systems, compilers, astronomy, graph theory --
+- query: "Compare the two ways an operating system keeps track of which disk blocks belong to a file"
+  expected_keywords: [FAT, i-node, blocks]
+  expected_layer: knowledge
+- query: "What does the scanner hand over before syntax analysis begins?"
+  expected_keywords: [tokens, identifier, parser]
+  expected_layer: knowledge
+- query: "The stream of typed symbols produced from a tiny C function with one assignment"
+  expected_keywords: [INTKEYWD, ASSIGNOP, INTLITERAL]
+  expected_layer: knowledge
+- query: "Why can grammar rules alone not confirm a variable was declared before use?"
+  expected_keywords: [grammar, scopes, types]
+  expected_layer: knowledge
+- query: "A rule saying one construct is built from three parts in a fixed order"
+  expected_keywords: [featureX, grammar]
+  expected_layer: knowledge
+- query: "What forms when two suns condense from the same cloud and circle a shared point?"
+  expected_keywords: [binary, center of mass, solar nebula]
+  expected_layer: knowledge
+- query: "The subgraph you get from one class of the connected-to relation"
+  expected_keywords: [component, equivalence class, induced]
+  expected_layer: knowledge
+
+# -- own project and homelab docs (Patchrick series: five near-identical docs) --
+- query: "What should the on-call agent do when my personal site stops responding?"
+  expected_keywords: [docker, caddy, restart]
+  expected_layer: knowledge
+- query: "Which identifier does traffic pass through between the CDN edge and my reverse proxy?"
+  expected_keywords: [3a9f1023, tunnel, caddy]
+  expected_layer: knowledge
+- query: "Which internal address does the proxy listen on before requests reach the apps?"
+  expected_keywords: ["192.168.50.70", caddy]
+  expected_layer: knowledge
+- query: "How do I bring up only one class of my self-hosted services rather than all of them?"
+  expected_keywords: ["start-homelab.sh"]
+  expected_layer: knowledge
+- query: "Which free market-data providers were picked for the share-price pipeline?"
+  expected_keywords: [AlphaVantage, yFinance, congress]
+  expected_layer: knowledge
+- query: "Which vault template drops a header graphic at the top of a note?"
+  expected_keywords: [banner, cornell, tfthacker]
+  expected_layer: knowledge

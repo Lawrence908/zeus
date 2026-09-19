@@ -208,7 +208,8 @@ Re-measured 2026-09-18 with `rerank_applied: true` (132/132 calls succeeded):
 |---|---|---|---|---|---|---|
 | active | knowledge | 30 | **1.00** | 1.00 | 1.00 | 1.00 |
 | active | profile | 3 | 0.00 | 0.00 | 0.33 | 0.06 |
-| candidates (pending) | knowledge | 36 | 0.694 | 0.722 | 0.806 | 0.713 |
+| candidates, own material (pending) | knowledge | 20 | 0.650 | 0.650 | 0.700 | 0.656 |
+| candidates, kiwix (parked) | knowledge | 13 | not scored | | | |
 
 - **Knowledge is saturated**, 30/30 at rank 1. No headroom; a ratchet rejects
   everything forever. The rerank work moved it from `hit@1 0.5667`.
@@ -303,12 +304,21 @@ review actually happens.
 Infrastructure first, then suite work. Harness work is done.
 
 0. ~~Fix reranking.~~ **Done**: Apollo is back, reranking verified applied.
-1. Grow the knowledge suite until it has headroom. **Measured**: 36 candidates in
-   `tests/retrieval_eval_queries/pending/` score `hit@1 0.694 / hit@5 0.722` with
-   reranking on, where the active suite is a saturated 1.0. Built on two rules: a
-   query must not contain its own expected keywords, and it should target a
-   crowded document family so the retriever has to discriminate. **Awaiting a
-   human pass before promotion.** Longer term the highest-signal source is real
+1. Grow the knowledge suite until it has headroom. **Reviewed 2026-09-18**: 20
+   curated candidates in `pending/knowledge_own_material.yaml` score
+   `hit@1 0.650 / hit@5 0.650` with reranking on, against the active suite's
+   saturated 1.0. Built on two rules: a query must not contain its own expected
+   keywords, and it should target a crowded document family so the retriever has
+   to discriminate.
+
+   **Still ~10 short of promotable.** `ZEUS_ACCEPTANCE_MIN_SUITE` is 30, and at
+   n=20 one query is 5.0pp, exactly the tolerance. Thirteen queries grounded in
+   the kiwix reference corpus were **parked**, not dropped
+   (`pending/knowledge_kiwix_parked.yaml`): `CLAUDE.md` says reference content is
+   live-proxied and never ingested, yet kiwix chunks sit in `zeus_knowledge`. A
+   suite resting on them would collapse the day that discrepancy is fixed. Unmined
+   crowded families remain: `README`/`readme` (177 and 137 docs), `Definitions`
+   (246 chunks), `Tickets`, `specs`. Longer term the highest-signal source is real
    query-log usage, blocked on a persisted query log.
 2. Verify and grow the 3 profile queries past the noise floor.
 3. Widen `eval_suite`'s config block so the guard can see the memory layer, and

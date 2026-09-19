@@ -1,0 +1,65 @@
+# tests/retrieval_eval_queries/pending/knowledge_kiwix_parked.yaml
+#
+# PARKED, not dropped. These are valid queries against real corpus content, but
+# they are grounded in the **kiwix reference corpus** (World Factbook country
+# pages, sustainability / community StackExchange, foss.cooking recipes) rather
+# than in Chris's own material.
+#
+# Why parked: `CLAUDE.md` states that reference sources are live-proxied at query
+# time and nothing is ingested. In practice kiwix chunks ARE sitting in
+# `zeus_knowledge` (roughly 575 of a 6,000-point sample on 2026-09-18). Either
+# the doc is stale or an ingest run did something unintended, and that is an open
+# question rather than a settled design.
+#
+# A suite resting on them would therefore be resting on content that may be
+# deleted to match the documented design. If that happened, a third of the suite
+# would fail at once and the metric would collapse for reasons having nothing to
+# do with retrieval quality. That is the same false-signal class the acceptance
+# gate exists to refuse, so these stay out until the discrepancy is resolved.
+#
+# They are kept rather than deleted because the Factbook pages are genuinely
+# useful for testing disambiguation: ~250 structurally identical country pages
+# are the most crowded document family in the whole corpus.
+
+# -- World Factbook: near-identical country pages, good disambiguation tests --
+- query: "Which nation sits on roughly 266 billion barrels of proven petroleum?"
+  expected_keywords: [Saudi Arabia, crude oil, proved reserves]
+  expected_layer: knowledge
+- query: "A state that imports no crude at all while holding the world's second largest reserves"
+  expected_keywords: ["266.2", proved reserves]
+  expected_layer: knowledge
+- query: "How many landline subscriptions does Iran report?"
+  expected_keywords: [fixed lines, subscriptions, Iran]
+  expected_layer: knowledge
+- query: "A country reporting over 29 million fixed telephone subscriptions"
+  expected_keywords: ["29,330,454", fixed lines]
+  expected_layer: knowledge
+- query: "Which country ranks tenth for carbon dioxide released by burning energy?"
+  expected_keywords: ["638.3", carbon dioxide]
+  expected_layer: knowledge
+- query: "Which two labour federations combined into a single global union body in 2006?"
+  expected_keywords: [ICFTU, WCL, trade union]
+  expected_layer: knowledge
+- query: "Where would I look up outbound trade figures for every country at once?"
+  expected_keywords: [exports, field listing]
+  expected_layer: knowledge
+
+# -- StackExchange and recipes: paraphrase-heavy, many competing answers --
+- query: "Can a house that recycles its own wash water still be pleasant to live in?"
+  expected_keywords: [greywater, comfortable]
+  expected_layer: knowledge
+- query: "Is it greener to run a machine or use throwaways for washing up?"
+  expected_keywords: [dishwasher, paper plates, pulp]
+  expected_layer: knowledge
+- query: "Someone's combined fish-and-plant tank has stopped working properly"
+  expected_keywords: [aquaponics, koi, fish]
+  expected_layer: knowledge
+- query: "Braided loaf made with a litre of milk and dry yeast"
+  expected_keywords: [zopf, flour, butter]
+  expected_layer: knowledge
+- query: "By how much must emissions drop before 2030 according to the widely reported warning?"
+  expected_keywords: [emissions, "45%", 2030]
+  expected_layer: knowledge
+- query: "Should the person running a community also be the one advertising it?"
+  expected_keywords: [moderator, promote, community]
+  expected_layer: knowledge
