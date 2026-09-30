@@ -118,6 +118,13 @@ class TelegramBot:
         return app is not None and bool(getattr(app, "running", False))
 
     async def start(self) -> None:
+        # A second Application would open its own getUpdates loop, and the
+        # assignment below would orphan the first one past the reach of stop(),
+        # leaving two pollers fighting over the same token indefinitely.
+        if self._application is not None:
+            logger.warning("telegram bot already running; ignoring duplicate start")
+            return
+
         application = ApplicationBuilder().token(self._token).build()
         if self._swarm_answer is not None:
             application.add_handler(CommandHandler("answer", self._on_answer))
@@ -132,9 +139,18 @@ class TelegramBot:
         if application.updater is None:
             raise RuntimeError("telegram Application has no Updater")
         await application.updater.start_polling(drop_pending_updates=True)
-        me = await application.bot.get_me()
-        self._bot_username = me.username
+
+        # Claim the reference the moment polling is live. get_me() is a network
+        # call, and a caller that swallows its exception (see
+        # _restart_telegram_bot) would otherwise leave a polling Application
+        # that nothing holds a reference to and stop() can never reach.
         self._application = application
+        try:
+            me = await application.bot.get_me()
+        except Exception:
+            await self.stop()
+            raise
+        self._bot_username = me.username
         logger.info(
             "telegram bot started as @%s (%d allowed chats)",
             me.username,
