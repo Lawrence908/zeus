@@ -93,7 +93,12 @@ class SQLiteJobStorage:
             conn.commit()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._db_path, isolation_level=None)
+        conn = sqlite3.connect(self._db_path, isolation_level=None)
+        # Per-connection and OFF by default, unlike journal_mode which persists
+        # in the file. Without it here, job_runs' ON DELETE CASCADE never fires
+        # and deleting a job silently orphans its whole run history.
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
 
     # -- Jobs -----------------------------------------------------------------
 
