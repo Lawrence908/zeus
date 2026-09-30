@@ -18,12 +18,14 @@ from zeus.voice.stt import WhisperSTT
 from zeus.voice.tts import VoiceboxTTS
 from zeus.voice.wake import WakeWordDetector
 
+from zeus.core.config import core_base_url
+
 logger = logging.getLogger("orpheus")
 
 
 class OrpheusPipeline:
     def __init__(self) -> None:
-        self.core_url = os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+        self.core_url = core_base_url()
         self.emitter = VoiceStateEmitter(
             publish_url=os.getenv("ZEUS_VOICE_STATE_PUBLISH_URL", f"{self.core_url}/voice-state/publish"),
             secret=os.getenv("ZEUS_VOICE_STATE_SECRET", ""),

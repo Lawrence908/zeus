@@ -37,6 +37,8 @@ from pydantic import BaseModel, Field
 from zeus.core.small_llm import small_llm_call
 from zeus.mcp.tools import capitolscope_context_pack
 
+from zeus.core.config import core_base_url
+
 logger = logging.getLogger("zeus.kronos.scrutiny_watch")
 
 # Relative, gitignored default (under the writable data mount, NOT the indexed
@@ -259,7 +261,7 @@ def _slug(text: str, max_len: int = 50) -> str:
 async def _spawn_deep_research(topic: str, *, depth: str) -> dict[str, str]:
     """POST a one-off deep_research Kronos job (mirrors core/tools/deep_research).
     Returns {job_id, path} on success or {error} on failure. Never raises."""
-    core_url = os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+    core_url = core_base_url()
     reports_dir = os.getenv("ZEUS_DEEP_RESEARCH_DIR", "/home/chris/zeus/docs/research").rstrip("/")
     today = datetime.now(timezone.utc).date().isoformat()
     short_id = uuid.uuid4().hex[:6]
@@ -350,7 +352,7 @@ def _render_brief(
 # ---------------------------------------------------------------- writeback
 async def _writeback(out_path: Path, period: str, n_escalated: int) -> dict[str, str]:
     results = {"inbox": "skipped", "library": "skipped"}
-    core_url = os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+    core_url = core_base_url()
     note = f"Scrutiny watch ({period}): {n_escalated} escalated to research -> {out_path}"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:

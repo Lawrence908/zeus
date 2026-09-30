@@ -24,7 +24,7 @@ Zeus is a self-hosted, voice-first, privacy-preserving AI assistant built from p
 | Sessions | `zeus/core/sessions.py` | In-memory by default; `ZEUS_SESSION_BACKEND=sqlite` switches to `SQLiteSessionStorage` at `zeus/data/sessions.db`. Rolling summary at `ZEUS_SESSION_SUMMARY_AT_TURNS` (200), keep-raw at `ZEUS_SESSION_KEEP_RAW_TURNS` (150). |
 | Vector DB | Qdrant 1.15+ (Docker, port 6333) | Two collections: `zeus_memories` (bi-temporal facts) and `zeus_knowledge` (dense + optional sparse BM25 vectors). |
 | Embeddings | `nomic-embed-text:v1.5` via Ollama | 768-dim cosine. |
-| API bus | FastAPI on port 8203 | All HTTP surfaces mount here: chat, oracle, admin, orchestration, voice, newsletter. |
+| API bus | FastAPI, container port 8000, published on `ZEUS_CORE_PORT` (default 8203) | All HTTP surfaces mount here: chat, oracle, admin, orchestration, voice, newsletter. See "Reaching the bus" below before hardcoding a port. |
 | Chat UI | React SPA in `zeus/frontend/`, served from `zeus/core/static/app/` | Legacy static `chat.html` / `admin.html` / `viz/` still present for fallback. |
 | MCP | `zeus/mcp/server.py` (FastMCP) | Memory tools: `zeus_query`, `zeus_profile`, `zeus_remember`, `zeus_ingest_trigger`, `zeus_memory_search`. Olympian read tools: `olympian_status_read`, `olympian_server_health`, `olympian_file_read`, `olympian_file_search`, `olympian_action_list`, `zeus_calendar_today`, `zeus_newsletter_latest`, `zeus_news_search`, `zeus_image_generate` (gated by `ZEUS_IMAGE_ENABLED`). Olympian write tools (gated by `ZEUS_MCP_ALLOW_WRITE`): `olympian_inbox_append`, `olympian_action_run`, `olympian_twitter_post` (additionally gated by `PHEME_TWITTER_ENABLED`). The action runner additionally requires `ZEUS_ACTIONS_ENABLED=1`. Each tool is mirrored as a chat-path `ToolSpec` in `zeus/core/tools/` and exposed through both surfaces. |
 | Telegram | `zeus/integrations/telegram/bot.py` | python-telegram-bot, Aegis-filtered plain-text replies, chat-id allowlist. Runtime-restartable via `PATCH /admin/settings`. |
@@ -49,7 +49,7 @@ All subsystems use Greek mythology names. Agents and humans working in this repo
 - **olympus** production server (the always-on host, typical: RTX 3080-class)
 - **oracle** Zeus Context API (serves structured context to agents)
 - **kairos** background agent daemon (observe, decide, act, update cycles)
-- **zeus-os** Hyprland-style tiling-WM web shell (SvelteKit SPA + `/zeus-os/*` FastAPI bridge), served from `/os/` on port 8203 alongside the React dashboard
+- **zeus-os** Hyprland-style tiling-WM web shell (SvelteKit SPA + `/zeus-os/*` FastAPI bridge), served from `/os/` on the same bus port as the React dashboard
 
 ## Repo Structure
 
@@ -149,6 +149,23 @@ The system supports two environments controlled by `ZEUS_ENV`:
 - `prod` uses Ollama (Qwen2.5-7B) for LLM calls, runs on the always-on production host (typical: RTX 3080-class, 10 GB VRAM), structured logging.
 
 `ZEUS_LLM` overrides per process (`claude` | `ollama` | unset). All services must check `ZEUS_ENV` / `ZEUS_LLM` and configure themselves accordingly. Never hardcode model names or API endpoints.
+
+### Reaching the bus (`ZEUS_CORE_URL`)
+
+`zeus-core` binds **8000 inside the container**. Compose publishes it on the host as
+`${ZEUS_CORE_PORT:-8203}`, so the host port is deployment-specific: the reference daedalus
+deployment runs on **8102**, assigned from that host's 81xx allocator block and registered in the
+homelab service catalog. Treat 8203 as the default, not as a fact.
+
+Call `core_base_url()` from [`zeus/core/config.py`](zeus/core/config.py) instead of reading the env
+directly. It prefers `ZEUS_CORE_URL` (compose sets it to the container-internal address) and
+otherwise derives the address from `ZEUS_CORE_PORT`.
+
+This matters because the two sides fail differently. In-container callers get `ZEUS_CORE_URL` from
+the compose `environment:` block, which overrides `env_file`, so they are always right. Host-side
+callers -- the stdio MCP server, host-run Kronos jobs, Kairos -- get whatever `.env` says, and a
+stale port there fails as a silent connection-refused that looks like a broken feature rather than a
+wrong address.
 
 ## Code Standards
 

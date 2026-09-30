@@ -8,9 +8,11 @@ from typing import Any
 
 import httpx
 
+from zeus.core.config import core_base_url
+
 
 def _core_url() -> str:
-    return os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+    return core_base_url()
 
 
 def _allow_write() -> bool:

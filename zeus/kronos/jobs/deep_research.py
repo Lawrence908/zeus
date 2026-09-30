@@ -45,6 +45,8 @@ from pydantic import BaseModel, Field
 from zeus.core.small_llm import small_llm_call
 from zeus.safety.policy_engine import aegis_enabled, evaluate_text
 
+from zeus.core.config import core_base_url
+
 logger = logging.getLogger("zeus.kronos.deep_research")
 
 REPORTS_DIR = Path(
@@ -830,7 +832,7 @@ async def _writeback_completion(
     """
     results = {"inbox": "skipped", "library": "skipped"}
 
-    core_url = os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+    core_url = core_base_url()
     inbox_text = (
         f"Research complete: \"{topic[:80]}\" "
         f"({depth}, {source_count} sources) -> {out_path}"

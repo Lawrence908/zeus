@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field, ValidationError
 from zeus.memory.search import search_memories
 from zeus.safety.integration import aegis_bus_pre_hook
 
+from zeus.core.config import core_base_url
+
 logger = logging.getLogger("zeus.kairos")
 
 _DEFAULT_ALLOWLIST = "zeus_memory_search"
@@ -88,7 +90,7 @@ class KairosState:
 
 
 def _core_url() -> str:
-    return os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+    return core_base_url()
 
 
 async def _http_get_json(path: str, params: dict[str, Any] | None = None, timeout: float = 10.0) -> Any:

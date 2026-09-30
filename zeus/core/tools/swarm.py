@@ -16,13 +16,15 @@ import httpx
 from zeus.core.tools import registry
 from zeus.core.tools.base import ToolResult, ToolSpec
 
+from zeus.core.config import core_base_url
+
 logger = logging.getLogger("zeus.tools.swarm")
 
 _OS_HINT = "Open the Swarm app in Zeus OS (/os/) to watch or approve."
 
 
 def _core_url() -> str:
-    return os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+    return core_base_url()
 
 
 def _err(name: str, msg: str) -> ToolResult:
