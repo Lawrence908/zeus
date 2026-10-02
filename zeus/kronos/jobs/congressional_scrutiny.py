@@ -29,6 +29,8 @@ import httpx
 from zeus.core.small_llm import small_llm_call
 from zeus.mcp.tools import capitolscope_context_pack
 
+from zeus.core.config import core_base_url
+
 logger = logging.getLogger("zeus.kronos.congressional_scrutiny")
 
 # Relative, gitignored default (under the writable data mount, NOT the indexed
@@ -254,7 +256,7 @@ async def _writeback_brief(*, out_path: Path, period: str, sectors: list[str],
     """Append an inbox note and ingest the brief into the Zeus knowledge store.
     Mirrors deep_research's writeback. Best-effort; errors are logged."""
     results = {"inbox": "skipped", "library": "skipped"}
-    core_url = os.getenv("ZEUS_CORE_URL", "http://127.0.0.1:8203").rstrip("/")
+    core_url = core_base_url()
 
     note = f"Congressional scrutiny brief ({period}): {', '.join(tickers[:5]) or 'thin week'} -> {out_path}"
     try:
