@@ -1,0 +1,15 @@
+{
+  "$schema": "https://paseo.sh/schemas/paseo.project.v1.json",
+  "worktree": {
+    "setup": [
+      "[ -f \"$PASEO_SOURCE_CHECKOUT_PATH/.env\" ] && cp \"$PASEO_SOURCE_CHECKOUT_PATH/.env\" .env || true",
+      "python3 -m venv .venv",
+      ".venv/bin/pip install -r requirements-dev.txt"
+    ]
+  },
+  "scripts": {
+    "verify": { "command": ".venv/bin/ruff check . && .venv/bin/pytest -q" },
+    "test": { "command": ".venv/bin/pytest -q" },
+    "lint": { "command": ".venv/bin/ruff check ." }
+  }
+}
