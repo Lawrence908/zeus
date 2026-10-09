@@ -266,3 +266,6 @@ zeus/data/pheme/
 
 # Generated deep-research artifacts (dossiers, maps): output, not repo docs
 docs/research/
+
+# Timestamped .env backups hold live secrets; never commit them.
+.env.bak*
