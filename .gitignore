@@ -269,3 +269,8 @@ docs/research/
 
 # Timestamped .env backups hold live secrets; never commit them.
 .env.bak*
+
+# Runtime output: generated images and the eval-query copy written at runtime
+# (the tracked originals live in tests/retrieval_eval_queries/).
+zeus/data/images/
+zeus/data/eval_queries/
