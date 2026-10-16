@@ -158,6 +158,40 @@ def _domain(url: str) -> str:
         return "link"
 
 
+def _format_editor_html(digest: PhemeDigest, header: str) -> str:
+    """Claude-edited digest: sections, per-story context, one primary link
+    plus up to two other outlets as named links."""
+    from zeus.pheme.editor import distinct_links
+
+    lines: list[str] = [header, "", f"<i>{_esc(digest.lead.strip())}</i>"]
+    section = None
+    for i, (story, cluster) in enumerate(zip(digest.stories, digest.clusters), 1):
+        if story.section != section:
+            section = story.section
+            lines += ["", f"<b>{_esc(section.upper())}</b>"]
+        # No "day N" marker here: thread matching is loose enough (shared
+        # "AI" + "data centre" tokens) that a new story can land on a 3-week
+        # thread, and the editor already says "ongoing" in prose when it is.
+        lines += ["", f"<b>{i}. {_esc(story.headline)}</b>", _esc(story.summary)]
+        if story.why_it_matters:
+            lines.append(f"<i>Why it matters:</i> {_esc(story.why_it_matters)}")
+        if story.watch:
+            lines.append(f"<i>Watch:</i> {_esc(story.watch)}")
+        links = distinct_links(cluster)
+        if links:
+            lines.append(
+                "🔗 "
+                + " · ".join(f'<a href="{_esc(url)}">{_esc(dom)}</a>' for dom, url in links)
+            )
+    if digest.insights:
+        lines += ["", "💡 <b>The bigger picture</b>"]
+        lines += [f"•  {_esc(ins)}" for ins in digest.insights]
+    if digest.editor_connections:
+        lines += ["", "🏛️ <b>Congress x news</b>"]
+        lines += [f"•  {_esc(c)}" for c in digest.editor_connections]
+    return "\n".join(lines).strip()
+
+
 def format_digest_html(digest: PhemeDigest, *, breaking: bool = False) -> str:
     """Render the digest as Telegram HTML: bold headers, one titled link per
     story, and compact meta lines instead of bracket noise."""
@@ -168,6 +202,8 @@ def format_digest_html(digest: PhemeDigest, *, breaking: bool = False) -> str:
     header = "🚨 <b>Pheme Breaking Alert</b>" if breaking else "🗞️ <b>Pheme Daily Digest</b>"
     if day:
         header += f" · {day}"
+    if digest.stories:
+        return _format_editor_html(digest, header)
 
     lines: list[str] = [header, "", _esc(digest.lead.strip())]
 
@@ -322,8 +358,9 @@ async def send_digest_telegram(digest: PhemeDigest, *, breaking: bool = False) -
                     await bot.send_audio(
                         chat_id=chat_id,
                         audio=fh,
-                        title=f"Pheme Daily Digest {day}",
+                        title=f"Pheme Briefing {day}",
                         performer="Zeus",
+                        filename=audio_path.name,
                     )
             except Exception as exc:
                 logger.warning("digest audio send failed: %s", exc)

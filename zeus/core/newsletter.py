@@ -43,7 +43,7 @@ _ADVICE_DIR = _MANIFEST_DIR / "advice"
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # Filename validation: alphanumeric, underscores, hyphens, dots only
-_SAFE_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+\.wav$")
+_SAFE_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+\.(wav|mp3)$")
 
 _SUMMARIZE_SYSTEM_PROMPT = """\
 You are a newsletter summarizer for a personal AI assistant. \
@@ -495,7 +495,9 @@ async def get_newsletter_audio(filename: str) -> FileResponse:
     if not filepath.is_file():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
-    return FileResponse(str(filepath), media_type="audio/wav")
+    # Pheme digests ship MP3 (zeus/pheme/audio.py); newsletters ship WAV.
+    media_type = "audio/mpeg" if filepath.suffix == ".mp3" else "audio/wav"
+    return FileResponse(str(filepath), media_type=media_type)
 
 
 @router.get("/api/newsletter/sources")

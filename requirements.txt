@@ -38,3 +38,8 @@ pdfminer.six>=20221105
 python-telegram-bot>=21.0
 # Kiwix ZIM ingest (KiwixZimSource → zeus_knowledge). Requires libzim-dev at build.
 libzim>=3.1.0
+# Pheme Claude editor: bundles the Claude Code CLI binary (zeus/pheme/editor.py
+# runs it headless on the subscription). Pinned: the CLI's flags are the contract.
+claude-agent-sdk==0.2.168
+# Pheme morning audio: PCM -> MP3 encode without an ffmpeg dependency.
+lameenc==1.9.0

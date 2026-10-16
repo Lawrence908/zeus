@@ -95,6 +95,46 @@ class ClusterSummary(BaseModel):
     outlet_count: int = 0      # distinct outlet domains across all copies
 
 
+class EditorStory(BaseModel):
+    """One story as written by the Claude editor stage (zeus/pheme/editor.py)."""
+
+    index: int = Field(..., description="Candidate number from the input list")
+    section: str = ""
+    headline: str = ""
+    summary: str = ""          # what happened plus the context needed to follow it
+    why_it_matters: str = ""
+    watch: str = ""            # optional: the next concrete thing to look for
+
+
+class EditorTweet(BaseModel):
+    index: int = Field(..., description="Candidate number whose link is attached")
+    text: str = ""
+
+
+class EditorOutput(BaseModel):
+    """Whole-digest output of the Claude editor stage. URLs are never part of
+    the model's output: links are attached deterministically by candidate index."""
+
+    lead: str = ""
+    stories: list[EditorStory] = Field(default_factory=list)
+    insights: list[str] = Field(default_factory=list)
+    connections: list[str] = Field(default_factory=list)
+    audio_script: str = ""
+    public_lead: str = ""
+    public_thread: list[EditorTweet] = Field(default_factory=list)
+
+
+class DigestStory(BaseModel):
+    """Editorial copy for one rendered story, aligned with PhemeDigest.clusters."""
+
+    cluster_key: str
+    section: str = ""
+    headline: str = ""
+    summary: str = ""
+    why_it_matters: str = ""
+    watch: str = ""
+
+
 class PhemeDigest(BaseModel):
     id: str
     trigger: Literal["daily", "breaking"]
@@ -103,6 +143,11 @@ class PhemeDigest(BaseModel):
     insights: list[str] = Field(default_factory=list)       # cross-story observations
     connections: list[Correlation] = Field(default_factory=list)
     clusters: list[ClusterSummary] = Field(default_factory=list)
+    # Claude editor output, same order as clusters. Empty on the local path,
+    # which renders from cluster names and claims instead.
+    stories: list[DigestStory] = Field(default_factory=list)
+    editor_connections: list[str] = Field(default_factory=list)
+    editor: str = "local"                                   # "local" or the Claude model that served
     body: str = ""                                          # full personal digest (markdown-ish plain text)
     audio_file: str | None = None                           # TTS filename under NEWSLETTER_AUDIO_DIR
     audio_url: str | None = None                            # served via /api/newsletter/audio/

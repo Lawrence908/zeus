@@ -27,7 +27,16 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from zeus.memory.news import NewsHit, NewsStore, get_news_store
+from zeus.pheme.audio import synthesize_briefing
 from zeus.pheme.cache import StageCache, run_key
+from zeus.pheme.editor import (
+    EditorFailed,
+    apply_editor_output,
+    distinct_links,
+    editor_candidate_count,
+    editor_enabled,
+    run_editor,
+)
 from zeus.pheme.llm import PhemeLLMFailed, pheme_llm_call, pheme_llm_text
 from zeus.pheme.models import (
     ClusterName,
@@ -35,6 +44,8 @@ from zeus.pheme.models import (
     ClusterSummary,
     Correlation,
     CorrelationJudgment,
+    DigestStory,
+    EditorOutput,
     InsightList,
     ItemExtraction,
     PhemeDigest,
@@ -113,6 +124,10 @@ class _Item(BaseModel):
             topics=[str(t) for t in p.get("topics") or []],
             claim=str(p.get("claim", "") or ""),
         )
+
+
+def _has_body(item: "_Item") -> bool:
+    return len(item.text or "") > len(item.title or "") + 80
 
 
 def _norm_entities(entities: list[str]) -> set[str]:
@@ -299,6 +314,14 @@ class _UnionFind:
         ra, rb = self.find(a), self.find(b)
         if ra != rb:
             self.parent[rb] = ra
+
+
+def _is_recurring_report(cluster: ClusterSummary) -> bool:
+    """CapitolScope window items (scrutiny movers, headline, sector rotation)
+    are periodic data reports keyed by window date, not news stories."""
+    return bool(cluster.item_ids) and all(
+        k.startswith("capitolscope:window:") for k in cluster.item_ids
+    )
 
 
 def _url_domain(url: str) -> str:
@@ -609,9 +632,12 @@ async def _stage_thread(
 
     from zeus.pheme.threads import match_and_update
 
+    # Recurring reports never join the thread registry: the same weekly
+    # CapitolScope scrutiny list re-ingested daily read as "day 74" of one story.
     rows = [
         (c.key, _entity_tokens(c.entities) | _entity_tokens([c.name]), c.name, c.claim)
         for c in clusters
+        if not _is_recurring_report(c)
     ]
     generic = _generic_tokens([r[1] for r in rows])
     matches = await asyncio.to_thread(
@@ -822,6 +848,33 @@ def _cluster_heuristic(cluster: ClusterSummary, correlated_keys: set[str]) -> fl
     return max(0.0, heuristic)
 
 
+async def _reader_facts() -> list[str]:
+    facts: list[str] = []
+    try:
+        from zeus.memory.search import get_profile_facts, search_memories
+
+        # Profile facts are partitioned by ZEUS_USER_ID (memories are
+        # stored under "chris", not the generic default).
+        user_id = os.getenv("ZEUS_USER_ID", "user")
+        facts = await asyncio.to_thread(get_profile_facts, user_id, 6)
+        # The generic profile query surfaces working-style facts; news
+        # ranking needs the interest facts specifically, so fetch them
+        # with a targeted query and merge.
+        interest_hits = await asyncio.to_thread(
+            search_memories,
+            "news market interests follows reads congressional trading semiconductors",
+            user_id,
+            6,
+        )
+        for hit in interest_hits:
+            text = str(hit.get("memory", "")).strip()
+            if text and text not in facts:
+                facts.append(text)
+    except Exception as exc:
+        logger.warning("profile facts unavailable: %s", exc)
+    return facts
+
+
 async def _stage_rank(
     clusters: list[ClusterSummary],
     correlations: list[Correlation],
@@ -845,29 +898,7 @@ async def _stage_rank(
     if cached and len(cached.get("relevance", [])) == len(clusters):
         relevance = [float(x) for x in cached["relevance"]]
     else:
-        facts: list[str] = []
-        try:
-            from zeus.memory.search import get_profile_facts, search_memories
-
-            # Profile facts are partitioned by ZEUS_USER_ID (memories are
-            # stored under "chris", not the generic default).
-            user_id = os.getenv("ZEUS_USER_ID", "user")
-            facts = await asyncio.to_thread(get_profile_facts, user_id, 6)
-            # The generic profile query surfaces working-style facts; news
-            # ranking needs the interest facts specifically, so fetch them
-            # with a targeted query and merge.
-            interest_hits = await asyncio.to_thread(
-                search_memories,
-                "news market interests follows reads congressional trading semiconductors",
-                user_id,
-                6,
-            )
-            for hit in interest_hits:
-                text = str(hit.get("memory", "")).strip()
-                if text and text not in facts:
-                    facts.append(text)
-        except Exception as exc:
-            logger.warning("profile facts unavailable for ranking: %s", exc)
+        facts = await _reader_facts()
         if not facts:
             logger.warning("no profile facts; relevance stays neutral 0.5 for all clusters")
         elif clusters:
@@ -1091,6 +1122,119 @@ def _compose_public_trim(
     return lead, thread
 
 
+def _local_audio_script(lead: str, insights: list[str], top: list[ClusterSummary]) -> str:
+    """Spoken script for the local fallback path, one paragraph per segment."""
+    d = _audio_summary_dict(lead, insights, top)
+    paras = ["Here's your Pheme news briefing.", d["summary"]]
+    paras += [b if b.endswith(".") else f"{b}." for b in d["bullets"]]
+    if d["advice"]:
+        paras.append(f"Worth noting: {d['advice']}")
+    return "\n\n".join(p for p in paras if p.strip())
+
+
+def _compose_editor_body(
+    lead: str,
+    stories: list[DigestStory],
+    top: list[ClusterSummary],
+    insights: list[str],
+    connections: list[str],
+) -> str:
+    """Plain-text body for the Claude-edited digest (manifest, Aegis view,
+    Telegram plain fallback). Same order as top/stories."""
+    lines: list[str] = [lead.strip(), ""]
+    section = None
+    for i, (story, cluster) in enumerate(zip(stories, top), 1):
+        if story.section != section:
+            section = story.section
+            lines += [section.upper(), ""]
+        lines.append(f"{i}. {story.headline}")
+        lines.append(f"   {story.summary}")
+        if story.why_it_matters:
+            lines.append(f"   Why it matters: {story.why_it_matters}")
+        if story.watch:
+            lines.append(f"   Watch: {story.watch}")
+        links = distinct_links(cluster)
+        if links:
+            also = ", ".join(d for d, _ in links[1:])
+            lines.append(f"   Source: {links[0][1]}" + (f" (also {also})" if also else ""))
+        lines.append("")
+    if insights:
+        lines.append("The bigger picture:")
+        lines += [f"- {ins}" for ins in insights]
+        lines.append("")
+    if connections:
+        lines.append("Congress x news:")
+        lines += [f"- {c}" for c in connections]
+    return "\n".join(lines).strip()
+
+
+def _excerpts_for(
+    cluster: ClusterSummary, items_by_key: dict[str, _Item], limit: int = 3
+) -> list[tuple[str, str, str]]:
+    """Up to ``limit`` (domain, title, text) excerpts from distinct outlets,
+    longest text first, so the editor reads real reporting, not one-liners."""
+    members = [items_by_key[k] for k in cluster.item_ids if k in items_by_key]
+    members.sort(key=lambda it: len(it.text or ""), reverse=True)
+    out: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for it in members:
+        dom = _url_domain(it.url) if it.url else it.source
+        if dom in seen:
+            continue
+        seen.add(dom)
+        text = " ".join((it.text or "").split())
+        if len(text) > 900:
+            text = text[:900].rsplit(" ", 1)[0] + " …"
+        out.append((dom, it.title.strip(), text))
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def _stage_edit(
+    trigger: str,
+    now: datetime,
+    candidates: list[ClusterSummary],
+    recurring: list[ClusterSummary],
+    correlations: list[Correlation],
+    items_by_key: dict[str, _Item],
+) -> tuple[EditorOutput, dict[str, Any]]:
+    """Stage 6 (Claude path): hand the ranked candidates to the editor."""
+    liked: list[str] = []
+    disliked: list[str] = []
+    try:
+        from zeus.pheme.feedback import recent_reaction_summary
+
+        liked, disliked = recent_reaction_summary()
+    except Exception as exc:
+        logger.debug("reaction summary unavailable: %s", exc)
+
+    background: list[str] = []
+    for c in recurring:
+        for key in c.item_ids[:2]:
+            it = items_by_key.get(key)
+            if it is not None:
+                background.append(f"{it.title}: {' '.join(it.text.split())[:600]}")
+
+    try:
+        from zoneinfo import ZoneInfo
+
+        local = now.astimezone(ZoneInfo(os.getenv("PHEME_TIMEZONE", "America/Vancouver")))
+    except Exception:
+        local = now
+    return await run_editor(
+        trigger=trigger,
+        date_label=local.strftime("%A, %B %-d, %Y"),
+        candidates=candidates,
+        excerpts={c.key: _excerpts_for(c, items_by_key) for c in candidates},
+        background=background,
+        correlations=[c.claim for c in correlations[:5]],
+        facts=await _reader_facts(),
+        liked=liked,
+        disliked=disliked,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1113,10 +1257,15 @@ async def run_pheme_pipeline(
         lookback = 24 if trigger == "daily" else 6
         since = (now - timedelta(hours=lookback)).isoformat()
 
+    # Over-fetch, then keep the items with real body text first: GDELT
+    # headline-only items are most of Canary's volume, and a plain limit
+    # let them crowd out every feed with reporting in it.
     hits = await asyncio.to_thread(
-        store.scroll_recent, since=since, sources=NEWS_SOURCES, limit=_max_items()
+        store.scroll_recent, since=since, sources=NEWS_SOURCES, limit=_max_items() * 4
     )
     items = [_Item.from_hit(h) for h in hits if h.id]
+    items.sort(key=lambda i: (_has_body(i), i.published_at), reverse=True)
+    items = items[: _max_items()]
     if scope_item_keys:
         wanted = set(scope_item_keys)
         items = [i for i in items if i.key in wanted]
@@ -1146,36 +1295,67 @@ async def run_pheme_pipeline(
 
     # Undisplayable clusters (junk name, no claim - e.g. an all-junk-title
     # GDELT group) never reach the digest regardless of score.
-    top = [c for c in clusters if not (_is_junk_text(c.name) and not c.claim.strip())][: _top_n()]
-    conn_block = "\n".join(f"- {c.claim}" for c in correlations[:3]) or "(none found)"
-    story_block = "\n".join(
-        f"- {c.name} ({c.thread_status}): {c.claim[:150]}" for c in top
-    )
-    try:
-        lead = await pheme_llm_text(
-            system=_LEAD_SYSTEM,
-            user=f"Cross-source connections:\n{conn_block}\n\nTop stories:\n{story_block}",
-            max_tokens=300,
-            caller="pheme.synthesize",
-        )
-    except PhemeLLMFailed as exc:
-        logger.warning("lead synthesis failed, using fallback: %s", exc)
-        lead = top[0].claim if top else "No significant news in this window."
+    displayable = [c for c in clusters if not (_is_junk_text(c.name) and not c.claim.strip())]
+    # Recurring data reports are background, not stories, unless they are
+    # literally all there is (a Canary outage day).
+    recurring = [c for c in displayable if _is_recurring_report(c)]
+    story_pool = [c for c in displayable if not _is_recurring_report(c)] or recurring
+    top = story_pool[: _top_n()]
 
-    insights = await _synthesize_insights(top, correlations)
-
-    # Morning-listen track via the newsletter TTS path. Best-effort: returns
-    # None whenever Voicebox is unreachable, and the digest ships without it.
-    audio_file: str | None = None
-    if _audio_enabled() and top:
+    stories: list[DigestStory] = []
+    editor_connections: list[str] = []
+    editor_info: dict[str, Any] = {"mode": "local"}
+    edited: EditorOutput | None = None
+    if editor_enabled() and story_pool:
+        candidates = story_pool[: editor_candidate_count()]
         try:
-            from zeus.core.newsletter import _generate_audio
+            edited, info = await _stage_edit(
+                trigger, now, candidates, recurring, correlations, items_by_key
+            )
+            top, stories, public_lead, public_thread = apply_editor_output(
+                edited, candidates, max_stories=8 if trigger == "daily" else 2
+            )
+            editor_info = {"mode": "claude", **info}
+        except EditorFailed as exc:
+            logger.warning("claude editor failed, falling back to local synthesis: %s", exc)
+            editor_info = {"mode": "local", "editor_error": str(exc)[:300]}
+            edited = None
 
-            audio_file = await _generate_audio(_audio_summary_dict(lead, insights, top))
+    if edited is not None:
+        lead = edited.lead.strip() or stories[0].summary
+        insights = [i.strip() for i in edited.insights[:4] if i.strip()]
+        editor_connections = [c.strip() for c in edited.connections[:3] if c.strip()]
+        audio_script = edited.audio_script.strip()
+        body = _compose_editor_body(lead, stories, top, insights, editor_connections)
+    else:
+        conn_block = "\n".join(f"- {c.claim}" for c in correlations[:3]) or "(none found)"
+        story_block = "\n".join(
+            f"- {c.name} ({c.thread_status}): {c.claim[:150]}" for c in top
+        )
+        try:
+            lead = await pheme_llm_text(
+                system=_LEAD_SYSTEM,
+                user=f"Cross-source connections:\n{conn_block}\n\nTop stories:\n{story_block}",
+                max_tokens=300,
+                caller="pheme.synthesize",
+            )
+        except PhemeLLMFailed as exc:
+            logger.warning("lead synthesis failed, using fallback: %s", exc)
+            lead = top[0].claim if top else "No significant news in this window."
+        insights = await _synthesize_insights(top, correlations)
+        audio_script = _local_audio_script(lead, insights, top)
+        public_lead, public_thread = _compose_public_trim(correlations, top)
+        body = _compose_body(lead, insights, correlations, top)
+
+    # Morning-listen track. Daily only; best-effort, the text digest ships
+    # without it when TTS is down.
+    audio_file: str | None = None
+    if _audio_enabled() and trigger == "daily" and top and audio_script:
+        try:
+            audio_file = await synthesize_briefing(audio_script)
         except Exception as exc:
-            logger.warning("digest audio generation failed: %s", exc)
+            logger.warning("digest audio generation failed: %r", exc)
 
-    public_lead, public_thread = _compose_public_trim(correlations, top)
     digest = PhemeDigest(
         id=digest_id,
         trigger=trigger,
@@ -1184,7 +1364,10 @@ async def run_pheme_pipeline(
         insights=insights,
         connections=correlations,
         clusters=top,
-        body=_compose_body(lead, insights, correlations, top),
+        stories=stories,
+        editor_connections=editor_connections,
+        editor=editor_info.get("model", "local") if editor_info["mode"] == "claude" else "local",
+        body=body,
         audio_file=audio_file,
         audio_url=f"/api/newsletter/audio/{audio_file}" if audio_file else None,
         public_lead=public_lead,
@@ -1194,6 +1377,7 @@ async def run_pheme_pipeline(
             "clusters": len(clusters),
             "correlations": len(correlations),
             "since": since,
+            "editor": editor_info,
         },
     )
     cache.put("digest", digest.model_dump(), fingerprint=fp)
@@ -1220,8 +1404,16 @@ def _record_manifest_entry(digest: PhemeDigest) -> None:
             newsletter_type="pheme",
             date=digest.generated_at,
             summary=digest.lead,
-            bullets=[f"{c.name}: {_one_line_take(c)}" for c in digest.clusters],
-            advice="\n".join(c.claim for c in digest.connections[:3]),
+            bullets=(
+                [f"{st.headline}: {st.summary}" for st in digest.stories]
+                if digest.stories
+                else [f"{c.name}: {_one_line_take(c)}" for c in digest.clusters]
+            ),
+            advice=(
+                "\n".join(digest.insights + digest.editor_connections)
+                if digest.stories
+                else "\n".join(c.claim for c in digest.connections[:3])
+            ),
             audio_file=digest.audio_file,
             audio_url=digest.audio_url,
             generated_at=digest.generated_at,

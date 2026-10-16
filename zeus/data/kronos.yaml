@@ -142,7 +142,9 @@ jobs:
       seed time; edit the live job via /kronos to change it later.
     category: briefing
     schedule:
-      cron: "0 ${PHEME_DIGEST_HOUR:-7} * * *"
+      # :30 so the ~25 min run (local stages + Claude editor + CPU TTS) lands
+      # before a 7:00 listen. PHEME_DIGEST_HOUR is the hour.
+      cron: "30 ${PHEME_DIGEST_HOUR:-6} * * *"
       timezone: America/Los_Angeles
     executor: zeus.kronos.jobs.pheme.run_daily_digest
     params:

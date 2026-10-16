@@ -4,7 +4,9 @@ Pheme (personification of rumor and public report) is the Zeus news subsystem:
 it consolidates news from **Canary** (OSINT platform) and **CapitolScope**
 (congressional-trading signals) into a dedicated Qdrant collection, runs a
 staged local-only analytical pipeline to surface non-obvious cross-source
-signal, and delivers a daily digest plus rate-capped breaking alerts.
+signal, and delivers a daily digest plus rate-capped breaking alerts. Stages
+1-5 run on local Ollama; the final editorial stage can run on Claude via the
+owner's subscription (`PHEME_EDITOR=claude`), with the local path as fallback.
 
 Root brief: [`../../CLAUDE.md`](../../CLAUDE.md). Sibling layers:
 [`../memory/CLAUDE.md`](../memory/CLAUDE.md), scheduler:
@@ -17,8 +19,9 @@ Canary ─────┐                             ┌─ Telegram push (proa
             ├─ Iris sources ─> zeus_news ─┤
 CapitolScope┘   (NewsStore)               └─ Twitter (gated, approval-first)
                      │
-               Pheme pipeline (local Ollama, staged, cached)
-               extract -> cluster -> thread -> correlate -> rank -> synthesize
+               Pheme pipeline (stages 1-5 local Ollama, staged, cached)
+               extract -> cluster -> thread -> correlate -> rank -> edit
+                                                  (Claude subscription, or local fallback)
                      │
                daily digest (Kronos)  +  breaking alert (KAIROS observer)
 ```
@@ -28,10 +31,12 @@ CapitolScope┘   (NewsStore)               └─ Twitter (gated, approval-firs
 | Piece | File | Notes |
 |---|---|---|
 | NewsStore | `zeus/memory/news.py` | `zeus_news` collection, 768-dim dense, no LLM on writes. Deterministic uuid5 point ids from `(source, source_id)` make re-ingest an in-place upsert. Payload indexes: source, topics, entities, published_at, ingested_at, pinned, significance. `sweep_expired()` enforces `NEWS_RETENTION_DAYS` (default 45); `pinned=True` survives. |
-| Ingest sources | `zeus/ingest/sources/canary.py`, `capitolscope.py` | `target = "news"`. Canary: JWT login as the `zeus@canary.local` analyst service user, processed articles only, HTML stripped, `full_grade` stored as `bias`. CapitolScope: Signals context pack decomposed into headline / notable-trade / cluster / scrutiny items with tickers and members pre-seeded as entities. |
+| Ingest sources | `zeus/ingest/sources/canary.py`, `capitolscope.py` | `target = "news"`. Canary: JWT login as the `zeus@canary.local` analyst service user, processed articles only, HTML stripped, `full_grade` stored as `bias`. Pages the whole window (Canary caps each page at 200; a total cap of 200 once kept only GDELT), keeps every feed article and the newest `CANARY_GDELT_MAX` (300) GDELT ones, and fetches `content` from `/articles/{id}` for feed items because the list endpoint omits it and Canary's `summary` is empty. CapitolScope: Signals context pack decomposed into headline / notable-trade / cluster / scrutiny items with tickers and members pre-seeded as entities. |
 | Pipeline | `zeus/pheme/pipeline.py` | Six stages, every LLM call local (`pheme_llm_call`, provider pinned to `ollama`), every stage cached under `zeus/data/pheme/<run>/`. |
+| Claude editor | `zeus/pheme/editor.py` | Stage 6 when `PHEME_EDITOR=claude`. Runs the Claude Code CLI headless (binary bundled by the pinned `claude-agent-sdk`) on `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`. `ANTHROPIC_API_KEY` is stripped from the child env (Claude Code prefers an API key over OAuth and would bill the API); `--bare` is unusable because it refuses OAuth; isolation is an empty temp cwd + temp `CLAUDE_CONFIG_DIR` + `--tools ""`. Output is schema-validated (`--json-schema`); the model cites candidates by number and links are attached from cluster data, so it cannot emit a URL. Any failure raises `EditorFailed` and that run falls back to the local path; `digest.stats.editor` records which path ran and the model that served. |
+| Morning audio | `zeus/pheme/audio.py` | Kokoro (`zeus-tts`, CPU) per paragraph as raw PCM with `PHEME_AUDIO_CHUNK_TIMEOUT_SEC` (300), encoded once to MP3 via `lameenc`. Daily only. |
 | Local LLM wrapper | `zeus/pheme/llm.py` | `small_llm_call(providers=["ollama"], min_privacy_tier=1)` + 3-attempt validate-and-retry (reflection pattern). Cloud providers are unreachable from Pheme by construction. |
-| Daily trigger | `zeus/kronos/jobs/pheme.py` + `zeus/data/kronos.yaml` (`pheme-daily-digest`) | Ingest both sources -> retention sweep -> pipeline -> delivery. Cron seeded from `PHEME_DIGEST_HOUR` (kronos seed YAML now supports `${VAR:-default}`); edit the live job via `/kronos` afterwards. |
+| Daily trigger | `zeus/kronos/jobs/pheme.py` + `zeus/data/kronos.yaml` (`pheme-daily-digest`) | Ingest both sources -> retention sweep -> pipeline -> delivery. Runs at 06:30 Pacific: the run takes ~25 min (local stages 8-14, editor 1-3, CPU TTS ~10), so it lands before a 07:00 listen. Cron seeded from `PHEME_DIGEST_HOUR` (as HH:30) (kronos seed YAML now supports `${VAR:-default}`); edit the live job via `/kronos` afterwards. |
 | Breaking trigger | `zeus/pheme/observer.py` (`PhemeBreakingObserver`) | KAIROS `ObservationSource`, registered only when `PHEME_BREAKING_ENABLED=1`. Fires on an entity burst (>= `PHEME_BREAKING_MIN_ITEMS` fresh items, cross-source or larger single-source), runs a scoped breaking pipeline, delivers, and reports what it sent. Hard-capped by `PHEME_MAX_ALERTS_PER_DAY` (default 3); an entity alerts at most once per day. No tools, so the KAIROS allowlist is untouched. |
 | Telegram push | `zeus/pheme/delivery.py` + `zeus/integrations/telegram/bot.py` | Proactive `Bot.send_message` to `PHEME_TELEGRAM_CHAT_ID`, Aegis `evaluate_text` (policy `pheme`) before send, plain-text via `markdown_to_plaintext`. Inline **Tweet it / Skip** keyboard when Twitter is enabled and autopost is off; the long-polling bot answers the callback and fires/drops the pending tweet. |
 | Twitter poster | `zeus/integrations/twitter/poster.py` | `post_news_thread(lead, thread)` is the single choke point to `POST /2/tweets`: `PHEME_TWITTER_ENABLED` gate + Aegis `evaluate_payload` (policy `pheme`) on every tweet. OAuth2 user-context bearer with refresh (`/2/oauth2/token`), rotated tokens persisted to `zeus/data/pheme/twitter_token.json`. Ports the posting path from `~/services/api-clients/resources/PF/Integrations/twitter/` (the PF module depends on that app's DB stack, so the two HTTP calls are mirrored, not imported; the older `clients/twitter` client never implemented posting). |
@@ -68,7 +73,17 @@ CapitolScope┘   (NewsStore)               └─ Twitter (gated, approval-firs
    development, correlation participation) blended 50/50 with a single
    profile-relevance scoring call over `get_profile_facts()`. Significance is
    written back to `zeus_news`.
-6. **Synthesize**: LLM writes the lead paragraph plus a 2-4 bullet **Insights**
+6. **Edit** (`PHEME_EDITOR=claude`): the top `PHEME_EDITOR_CANDIDATES` (18)
+   ranked clusters go to Claude with up to 3 article excerpts each (distinct
+   outlets), thread status and what-changed notes, the reader profile, recent
+   thumbs, and the recurring CapitolScope reports as background. Claude picks
+   5-8 stories (1-2 for breaking), assigns a section, and writes headline,
+   context summary, why it matters, what to watch, 2-4 cross-story insights,
+   congressional x news connections, the 450-750 word spoken script for the
+   audio track, and the public Twitter trim. Telegram renders sections with
+   one primary link plus up to two other outlets per story.
+
+   **Synthesize** (local fallback): LLM writes the lead paragraph plus a 2-4 bullet **Insights**
    section (cross-story observations: shared drivers, tensions, what to watch);
    body, item list, links, and the public trim are composed deterministically.
    The digest is mirrored into the newsletter manifest as
@@ -85,11 +100,13 @@ fed into the relevance prompt. Reactions resolve via
 `digest_context.json` (last 15 digests); older digests answer "feedback window
 expired".
 
-**Audio digest** (`PHEME_AUDIO=1`, default on): stage 6 renders a
-voice-friendly script (lead, per-story one-liners with "Day N of ..."
-markers, insights as the closer) through the newsletter TTS path
-(`_generate_audio` -> Voicebox). Best-effort: when `VOICEBOX_URL` is down the
-digest ships without audio. When generated, the track is sent to the Telegram
+**Audio digest** (`PHEME_AUDIO=1`, default on, daily only): the editor's
+spoken script (or, on the local path, lead + per-story one-liners + insights)
+is synthesized by `zeus/pheme/audio.py`. Until 2026-10-16 this went through the
+newsletter `_generate_audio` path in one request under the voice client's 20s
+fail-fast timeout, and CPU Kokoro on this host runs ~0.4x realtime, so no
+digest ever shipped audio. Best-effort: when TTS is down the digest ships
+without it. When generated, the track is sent to the Telegram
 news chat as an audio message and exposed on the manifest entry
 (`/api/newsletter/audio/...`) so the `/newsletters` UI plays it.
 
@@ -142,8 +159,17 @@ thin, check Canary's NLP worker backlog (`/articles/pipeline-status`).
 
 ## What not to do
 
-- Don't route any Pheme analytical stage onto the cloud `small_llm_call`
-  chain. `pheme_llm_call` pins `providers=["ollama"]`; keep it that way.
+- Don't route any Pheme analytical stage (1-5) onto the cloud `small_llm_call`
+  chain. `pheme_llm_call` pins `providers=["ollama"]`; keep it that way. The
+  editor stage is the one deliberate cloud step (owner decision 2026-10-16,
+  profile facts included), and it goes through `zeus/pheme/editor.py` only.
+- Don't give the editor tools, `--bare`, or an inherited env. No tools keeps
+  untrusted article text from steering it into actions; `--bare` disables
+  OAuth; an inherited `ANTHROPIC_API_KEY` switches billing to the API.
+- Don't let the editor emit URLs. Links come from cluster data by index.
+- Don't promote recurring CapitolScope window reports (scrutiny movers,
+  headline) to stories or threads: re-ingested daily, they read as "day 74"
+  of one story. They are editor background.
 - Don't call `post_news_thread` from anywhere new without going through its
   built-in Aegis pre-hook (there is no bypass parameter on purpose).
 - Don't add `olympian_twitter_post` to the KAIROS tool allowlist.
