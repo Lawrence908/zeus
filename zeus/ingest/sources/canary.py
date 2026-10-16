@@ -11,6 +11,7 @@
 #   CANARY_PASSWORD  service account password
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -25,11 +26,18 @@ logger = logging.getLogger("iris.canary")
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+# Body text cap per article: enough for the Pheme editor to see real reporting,
+# well inside nomic-embed-text's context for the single news vector.
+_MAX_CONTENT_CHARS = 1500
 
 # GDELT items often carry filename-shaped titles ("article 29079025 64b2 ... .html").
 # The URL path usually holds the real slug; recover the headline from there.
 _FILENAME_TITLE_RE = re.compile(r"^article[ _-][0-9a-f]{4,}.*(\.html?)?$", re.IGNORECASE)
 _SLUG_JUNK_RE = re.compile(r"^(article|news|story|index|ap[_-]news)[_-]?", re.IGNORECASE)
+
+
+def _is_gdelt(art: dict) -> bool:
+    return "gdelt" in str(art.get("source_name", "")).lower()
 
 
 def _strip_html(text: str) -> str:
@@ -86,14 +94,26 @@ class CanaryNewsSource:
         email: str | None = None,
         password: str | None = None,
         days_back: int = 3,
-        limit: int = 200,
+        limit: int = 5000,
+        gdelt_max: int | None = None,
         user_id: str = "user",
     ) -> None:
         self.api_url = (api_url or os.getenv("CANARY_API_URL", "")).rstrip("/")
         self.email = email or os.getenv("CANARY_EMAIL", "")
         self.password = password or os.getenv("CANARY_PASSWORD", "")
         self.days_back = max(1, days_back)
-        self.limit = max(1, min(limit, 200))  # Canary caps limit at 200
+        # Total across pages. Canary caps each PAGE at 200; this used to cap the
+        # total at 200 too, so a 3-day window (~550 articles) kept only the
+        # newest 200, which were all GDELT, and no feed with body text survived.
+        self.limit = max(1, limit)
+        # GDELT publishes ~1000 headline-only items a day against ~70 from feeds
+        # with body text; every feed item is kept, GDELT is trimmed to the newest N.
+        if gdelt_max is None:
+            try:
+                gdelt_max = int(os.getenv("CANARY_GDELT_MAX", "300"))
+            except ValueError:
+                gdelt_max = 300
+        self.gdelt_max = max(0, gdelt_max)
         self.user_id = user_id
         if not self.api_url:
             raise ValueError("canary: CANARY_API_URL not set")
@@ -118,7 +138,7 @@ class CanaryNewsSource:
         articles: list[dict] = []
         offset = 0
         while len(articles) < self.limit:
-            page = min(self.limit - len(articles), 100)
+            page = min(self.limit - len(articles), 200)
             r = await client.get(
                 f"{self.api_url}/articles",
                 params={
@@ -139,10 +159,51 @@ class CanaryNewsSource:
             offset += len(batch)
         return articles
 
+    def _balance(self, articles: list[dict]) -> list[dict]:
+        """All non-GDELT articles plus the newest ``gdelt_max`` GDELT ones
+        (the API returns newest first)."""
+        gdelt = [a for a in articles if _is_gdelt(a)]
+        others = [a for a in articles if not _is_gdelt(a)]
+        logger.info(
+            "canary: %d feed article(s), %d GDELT (keeping %d)",
+            len(others), len(gdelt), min(len(gdelt), self.gdelt_max),
+        )
+        return others + gdelt[: self.gdelt_max]
+
+    async def _attach_content(
+        self, client: httpx.AsyncClient, token: str, articles: list[dict]
+    ) -> None:
+        """The list endpoint omits `content`; fetch it from the detail endpoint
+        for articles that could have it. GDELT items are headline + URL only,
+        so they are skipped (they are most of the volume)."""
+        wanted = [
+            a for a in articles
+            if not (a.get("summary") or "").strip()
+            and not _is_gdelt(a)
+            and a.get("id")
+        ]
+        sem = asyncio.Semaphore(4)
+
+        async def one(art: dict) -> None:
+            async with sem:
+                try:
+                    r = await client.get(
+                        f"{self.api_url}/articles/{art['id']}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    r.raise_for_status()
+                    art["content"] = (r.json() or {}).get("content") or ""
+                except (httpx.HTTPError, ValueError) as exc:
+                    logger.debug("canary: no content for %s: %s", art.get("id"), exc)
+
+        await asyncio.gather(*(one(a) for a in wanted))
+        logger.info("canary: fetched body text for %d non-GDELT article(s)", len(wanted))
+
     async def chunks(self) -> AsyncIterator[Chunk]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             token = await self._login(client)
-            articles = await self._fetch_articles(client, token)
+            articles = self._balance(await self._fetch_articles(client, token))
+            await self._attach_content(client, token, articles)
 
         logger.info("canary: %d processed article(s) in last %dd", len(articles), self.days_back)
         for art in articles:
@@ -150,7 +211,14 @@ class CanaryNewsSource:
             url = str(art.get("url", "") or "")
             title = _clean_title(_strip_html(str(art.get("title", "") or "")), url)
             summary = _strip_html(str(art.get("summary", "") or ""))
-            text = summary or title
+            # Canary's summarizer left `summary` empty on every article
+            # (measured 2026-10-16), so title-only text starved Pheme's editor
+            # even for feeds that carry body text (Guardian, NPR, UN News).
+            # GDELT items have no content and stay title-only.
+            content = " ".join(_strip_html(str(art.get("content", "") or "")).split())
+            if len(content) > _MAX_CONTENT_CHARS:
+                content = content[:_MAX_CONTENT_CHARS].rsplit(" ", 1)[0] + " …"
+            text = summary or content or title
             if not art_id or not text:
                 continue
             yield Chunk(

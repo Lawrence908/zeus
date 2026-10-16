@@ -90,7 +90,9 @@ sources:
   canary:
     target: news
     days_back: 3
-    limit: 200
+    # Total articles scanned across pages (Canary caps each page at 200).
+    # GDELT is then trimmed to CANARY_GDELT_MAX (300); feed articles all kept.
+    limit: 5000
 
   capitolscope:
     target: news

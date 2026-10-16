@@ -189,7 +189,8 @@ def _apply_config_overrides(sources: list, ingest_cfg, cli_args=None) -> list:
             if src_cfg.days_back is not None and (cli_days is None or cli_days == 3):
                 source.days_back = max(1, src_cfg.days_back)
             if key == "canary" and src_cfg.limit is not None:
-                source.limit = max(1, min(src_cfg.limit, 200))
+                # Total across pages; Canary caps each page (not the total) at 200.
+                source.limit = max(1, src_cfg.limit)
     return sources
 
 
