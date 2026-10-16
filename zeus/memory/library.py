@@ -23,7 +23,9 @@ from qdrant_client.http import models as qmodels
 logger = logging.getLogger("zeus.memory.library")
 
 DEFAULT_COLLECTION = os.getenv("ZEUS_KNOWLEDGE_COLLECTION", "zeus_knowledge")
-DEFAULT_EMBED_DIMS = 768  # nomic-embed-text
+# Re-exported from _embed so the vector width has ONE source of truth; a local
+# copy silently disagreed with the configured model after an embedder swap.
+from zeus.memory._embed import DEFAULT_EMBED_DIMS  # noqa: E402
 
 # Named-vector keys — keep stable, they're written into Qdrant points.
 DENSE_VECTOR = "dense"
@@ -153,10 +155,11 @@ class KnowledgeStore:
     # -- embeddings ---------------------------------------------------------
 
     def _embed_dense(self, texts: list[str], *, task: str = "document") -> list[list[float]]:
-        """Dense embeddings via the shared Ollama helper (nomic-embed-text).
+        """Dense embeddings via the shared Ollama helper.
 
-        ``task`` selects the nomic query/document instruction prefix when
-        ZEUS_EMBED_PREFIXES is enabled; pass ``task="query"`` on the search path.
+        ``task`` selects the query/document instruction prefix for whichever
+        convention the configured model uses (see _embed.prefix_style); pass
+        ``task="query"`` on the search path.
         """
         from zeus.memory._embed import embed_texts
 

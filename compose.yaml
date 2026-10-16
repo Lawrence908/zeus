@@ -27,7 +27,32 @@ services:
   # Prod: serves Qwen2.5-7B-Instruct Q4_K_M on RTX 3080
   # Dev: serves test models on RTX 5080
   ollama:
-    image: ollama/ollama:latest
+    # PINNED, NOT :latest, AND THAT IS DELIBERATE.
+    # This node is the no-failover target for /api/embed* (see ollama-gateway
+    # Caddyfile). A runtime version change can move nomic-embed-text's vector
+    # space without any error: embeddings keep returning 200, cosine ranking
+    # silently degrades against the ~315k vectors already in zeus_knowledge /
+    # zeus_news / zeus_memories, and reindexing is the only repair. With :latest
+    # any unrelated `docker compose pull` could trigger that at an arbitrary time.
+    # Bump this tag only as a deliberate act, and verify first:
+    #   1. capture reference embeddings on the OLD version
+    #   2. bump + recreate
+    #   3. re-embed the same probes; require per-vector cosine >0.9999 AND
+    #      max pairwise-cosine delta <1e-4 (relative geometry drives recall)
+    #
+    # 0.40.4 WAS TESTED 2026-10-15 AND FAILED THAT CHECK. DO NOT BUMP TO IT.
+    # Same model digest (0a109f422b47), runtime change only, yet nomic-embed-text
+    # moved: per-vector cosine vs 0.13.3 fell to 0.789 ('SELECT * FROM ...'),
+    # 0.902 (unicode), 0.947 (long prose), 0.961 (plain sentence); max pairwise-
+    # cosine delta 0.061. Short/alphanumeric strings were unaffected (0.99999+),
+    # so a casual spot-check PASSES and hides it. Re-running the same probes on
+    # restored 0.13.3 gave cosine 1.00000000 and pairwise delta 0.0, confirming
+    # the test has no noise floor and the drift was entirely the runtime.
+    # Upgrading therefore requires reindexing ~318k vectors (zeus_knowledge
+    # 307454 + zeus_news 8011 + zeus_memories_hybrid 1853 + zeus_memories 788
+    # + mem0migrations 27), or splitting embed onto its own pinned 0.13.3 node.
+    # Rollback image also preserved locally as ollama/ollama:rollback-0.13.3.
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.13.3}
     container_name: zeus-ollama
     ports:
       - "${OLLAMA_PORT:-11435}:11434"
@@ -145,7 +170,31 @@ services:
       - .env
     environment:
       - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_URL=http://ollama:11434
+      # Via ollama-gateway (:11440), not the local ollama container directly.
+      # The gateway sends generation to Apollo's 5080 first (falling back to the
+      # local 3080) and PINS /api/embed* to the 3080 with no failover, so vectors
+      # written to Qdrant always come from one model on one node. See
+      # services/ollama-gateway/Caddyfile for why embeddings must not fail over.
+      # Consequence: any model Zeus may request for GENERATION must exist with an
+      # identical tag on BOTH nodes, or it 404s when Apollo is the live upstream.
+      - OLLAMA_URL=http://ollama-gateway:11440
+      # Cross-encoder rerank runs in services/rerank-gateway, not in this image.
+      # It used to be in-process via sentence-transformers, which made
+      # zeus/memory/reranker.py the only torch consumer in the tree and dragged
+      # the CUDA wheels plus a re-downloaded 1.1GB checkpoint into a 22GB image.
+      # The gateway owns an ordered TEI pool (apollo's 5080 first, a daedalus CPU
+      # node as fallback) with health probing and failover.
+      #
+      # Deliberately NO depends_on: KnowledgeStore._rerank and MemoryStore._rerank
+      # both catch and keep the pre-rerank order, so an outage degrades ranking
+      # rather than breaking retrieval. A hard dependency would contradict that
+      # and couple two independently deployed repos.
+      #
+      # The timeout must stay ABOVE the gateway's own RERANK_REQUEST_TIMEOUT (15s)
+      # or a truncated read here replaces the gateway's error text with a bare
+      # timeout, hiding which node failed and why.
+      - ZEUS_RERANKER_URL=http://rerank-gateway:8191
+      - ZEUS_RERANKER_TIMEOUT=25.0
       - WHISPER_URL=ws://whisper:9090
       - WHISPER_REST_URL=http://whisper:8000
       # Server-side TTS for the browser voice orb (/voice/tts proxy). Kokoro

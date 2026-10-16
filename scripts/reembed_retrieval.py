@@ -33,7 +33,7 @@ import time
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
-from zeus.memory._embed import DEFAULT_EMBED_DIMS, EMBED_PREFIXES, embed_texts
+from zeus.memory._embed import DEFAULT_EMBED_DIMS, embed_texts, prefix_style
 
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "bm25"
@@ -72,12 +72,20 @@ def _retry(fn, *, what: str, retries: int = 12):
             delay = min(delay * 2, 180.0)
 
 
-def _embed_dense(texts: list[str], chunk: int = 32) -> list[list[float]]:
-    """Dense-embed in small chunks so a retry re-does at most `chunk` items."""
+# Bigger chunks mean fewer HTTP round trips against Ollama. Measured on 256 real
+# zeus_knowledge chunks (mean 909 chars) with qwen3-embedding:4b:
+#   chunk=32 -> 7.16 pts/s     chunk=256 -> 9.47 pts/s
+# The trade-off is retry granularity: a failed chunk re-embeds all of it. 128 is
+# the compromise. Override with --embed-chunk.
+DEFAULT_EMBED_CHUNK = 128
+
+
+def _embed_dense(texts: list[str], chunk: int = DEFAULT_EMBED_CHUNK) -> list[list[float]]:
+    """Dense-embed in chunks so a retry re-does at most `chunk` items."""
     out: list[list[float]] = []
     for i in range(0, len(texts), chunk):
         sub = texts[i : i + chunk]
-        out.extend(_retry(lambda s=sub: embed_texts(s, task="document"), what="embed"))
+        out.extend(_retry(lambda s=sub: embed_texts(s, task="document", batch_size=chunk), what="embed"))
     return out
 
 
@@ -85,8 +93,11 @@ def _existing_ids(client: QdrantClient, coll: str) -> set:
     ids: set = set()
     offset = None
     while True:
-        pts, offset = client.scroll(
-            collection_name=coll, with_payload=False, with_vectors=False, limit=1000, offset=offset
+        pts, offset = _retry(
+            lambda o=offset: client.scroll(
+                collection_name=coll, with_payload=False, with_vectors=False, limit=1000, offset=o
+            ),
+            what="scroll-existing",
         )
         ids.update(p.id for p in pts)
         if offset is None or not pts:
@@ -100,11 +111,26 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
     ap.add_argument("--to-hybrid", action="store_true", help="build a named dense + BM25 copy at <collection>_hybrid")
     ap.add_argument("--target", help="write to this collection instead of in place (preserves source shape; safe for live cutover)")
-    ap.add_argument("--batch", type=int, default=256)
+    ap.add_argument("--batch", type=int, default=256, help="points scrolled/upserted per round")
+    ap.add_argument("--embed-chunk", type=int, default=DEFAULT_EMBED_CHUNK, help="texts per Ollama call")
+    ap.add_argument(
+        "--upsert-wait",
+        action="store_true",
+        help="block until Qdrant indexes each batch (slower; measured 6.3s vs 2.2s per 256). "
+        "Off by default: the run verifies the final count anyway, and the job is resumable.",
+    )
     ap.add_argument("--qdrant-url", default=os.getenv("QDRANT_URL", "http://localhost:6333"))
+    ap.add_argument(
+        "--qdrant-timeout",
+        type=float,
+        default=120.0,
+        help="seconds. The client default (~5s) is far too low here: while Qdrant's "
+        "optimizer indexes wide (2560-dim) vectors, scroll and count routinely "
+        "exceed it, and a timeout on the source read used to kill the whole run.",
+    )
     args = ap.parse_args()
 
-    client = QdrantClient(url=args.qdrant_url)
+    client = QdrantClient(url=args.qdrant_url, timeout=args.qdrant_timeout)
     src = args.collection
     info = client.get_collection(src)
     total = client.count(collection_name=src, exact=True).count
@@ -123,9 +149,19 @@ def main() -> int:
     existing_colls = {c.name for c in client.get_collections().collections}
     resuming = target != src and target in existing_colls
 
-    print(f"source:    {src}  ({total} points, named={src_named}, sparse={src_sparse})")
-    print(f"target:    {target}  (named={want_named}, sparse={want_sparse}){'  [RESUME]' if resuming else ''}")
-    print(f"prefixes:  ZEUS_EMBED_PREFIXES={'on' if EMBED_PREFIXES else 'off'}")
+    src_dims = (
+        vectors_cfg[DENSE_VECTOR].size if src_named else getattr(vectors_cfg, "size", None)
+    )
+    print(f"source:    {src}  ({total} points, named={src_named}, sparse={src_sparse}, dims={src_dims})")
+    print(f"target:    {target}  (named={want_named}, sparse={want_sparse}, dims={DEFAULT_EMBED_DIMS})"
+          f"{'  [RESUME]' if resuming else ''}")
+    print(f"model:     {os.getenv('ZEUS_EMBED_MODEL', 'nomic-embed-text:v1.5')}  (prefix style: {prefix_style()})")
+    if src_dims is not None and src_dims != DEFAULT_EMBED_DIMS and target == src:
+        print(
+            f"\nREFUSING: in-place re-embed would write {DEFAULT_EMBED_DIMS}-dim vectors "
+            f"into a {src_dims}-dim collection. Use --target for a new collection."
+        )
+        return 2
     if not args.apply:
         print("\nDRY RUN. Re-run with --apply to write. Snapshot the collection first.")
         return 0
@@ -156,15 +192,25 @@ def main() -> int:
     offset = None
     done = len(done_ids)
     while True:
-        points, offset = client.scroll(
-            collection_name=src, with_payload=True, with_vectors=False, limit=args.batch, offset=offset
+        # Retried like the embed/upsert calls below. This read used to be the one
+        # unguarded network call in the loop, so a single transient Qdrant timeout
+        # aborted a multi-hour job (observed at 98,560/307,451).
+        points, offset = _retry(
+            lambda o=offset: client.scroll(
+                collection_name=src,
+                with_payload=True,
+                with_vectors=False,
+                limit=args.batch,
+                offset=o,
+            ),
+            what="scroll",
         )
         if not points:
             break
         todo = [p for p in points if p.id not in done_ids] if done_ids else points
         if todo:
             texts = [str((p.payload or {}).get("text", "")) for p in todo]
-            dense = _embed_dense(texts)
+            dense = _embed_dense(texts, chunk=args.embed_chunk)
             sparse = _sparse_vectors(bm25, texts) if bm25 is not None else [None] * len(texts)
             out: list[qmodels.PointStruct] = []
             for i, p in enumerate(todo):
@@ -175,13 +221,26 @@ def main() -> int:
                 else:
                     vec = dense[i]
                 out.append(qmodels.PointStruct(id=p.id, vector=vec, payload=p.payload))
-            _retry(lambda o=out: client.upsert(collection_name=target, points=o, wait=True), what="upsert")
+            _retry(
+                lambda o=out: client.upsert(collection_name=target, points=o, wait=args.upsert_wait),
+                what="upsert",
+            )
             done += len(out)
             print(f"  re-embedded {done}/{total}", flush=True)
         if offset is None:
             break
 
-    print(f"done: {done} points -> {target}", flush=True)
+    # With wait=False the last upserts may still be indexing, so confirm the
+    # target actually landed every point rather than trusting the loop counter.
+    deadline = time.time() + 300
+    final = client.count(collection_name=target, exact=True).count
+    while final < total and time.time() < deadline:
+        time.sleep(5)
+        final = client.count(collection_name=target, exact=True).count
+    print(f"done: {done} embedded; {target} holds {final}/{total} points", flush=True)
+    if final != total:
+        print(f"WARNING: {target} has {final} of {total} points. Re-run to resume the gap.")
+        return 1
     if args.to_hybrid:
         print("next: verify counts, then point QDRANT_COLLECTION at the hybrid collection and set ZEUS_MEMORY_HYBRID=1")
     return 0

@@ -18,7 +18,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-import httpx
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
@@ -26,7 +25,9 @@ from qdrant_client.http import models as qmodels
 logger = logging.getLogger("zeus.memory.news")
 
 DEFAULT_COLLECTION = os.getenv("ZEUS_NEWS_COLLECTION", "zeus_news")
-DEFAULT_EMBED_DIMS = 768  # nomic-embed-text
+# Re-exported from _embed so the vector width has ONE source of truth; a local
+# copy silently disagreed with the configured model after an embedder swap.
+from zeus.memory._embed import DEFAULT_EMBED_DIMS, embed_texts  # noqa: E402
 
 # Stable UUID5 namespace for deterministic point ids. Never change this value:
 # it is what makes re-ingest of the same (source, source_id) an in-place upsert.
@@ -157,28 +158,20 @@ class NewsStore:
 
     # -- embeddings ---------------------------------------------------------
 
-    def _embed(self, texts: list[str]) -> list[list[float]]:
-        keep_alive = os.getenv("ZEUS_EMBED_KEEP_ALIVE", "24h")
-        vectors: list[list[float]] = []
-        with httpx.Client(
-            timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
-        ) as client:
-            for text in texts:
-                resp = client.post(
-                    f"{self.ollama_url}/api/embeddings",
-                    json={
-                        "model": self.embed_model,
-                        "prompt": text,
-                        "keep_alive": keep_alive,
-                        "options": {"num_ctx": 2048},
-                    },
-                )
-                resp.raise_for_status()
-                emb = (resp.json() or {}).get("embedding")
-                if not isinstance(emb, list) or not emb:
-                    raise RuntimeError(f"ollama returned no embedding ({len(text)} chars)")
-                vectors.append(emb)
-        return vectors
+    def _embed(self, texts: list[str], *, task: str = "document") -> list[list[float]]:
+        """Delegates to the shared helper.
+
+        This used to be a private copy of the embed loop with its own hardcoded
+        num_ctx and no instruction prefixes, which meant news vectors were built
+        differently from every other collection. Sharing _embed.embed_texts keeps
+        the model, prefix style, batching, and width check identical everywhere.
+        """
+        return embed_texts(
+            texts,
+            ollama_url=self.ollama_url,
+            model=self.embed_model,
+            task=task,
+        )
 
     # -- write --------------------------------------------------------------
 
@@ -360,7 +353,7 @@ class NewsStore:
         self.ensure_collection()
         if not query.strip():
             return []
-        [vec] = self._embed([query])
+        [vec] = self._embed([query], task="query")
         resp = self._client.query_points(
             collection_name=self.collection,
             query=vec,
