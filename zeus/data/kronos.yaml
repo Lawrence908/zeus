@@ -138,13 +138,14 @@ jobs:
       retention sweep, staged local-Ollama analysis (extract, cluster, thread,
       correlate, rank, synthesize), then delivery - Telegram push to the news
       chat and Twitter via the approval gate (autopost only when
-      PHEME_TWITTER_AUTOPOST=1). Digest hour comes from PHEME_DIGEST_HOUR at
-      seed time; edit the live job via /kronos to change it later.
+      PHEME_TWITTER_AUTOPOST=1). Weekdays only; pheme-weekend-digest covers
+      Sat/Sun. Digest hour comes from PHEME_DIGEST_HOUR at seed time; edit the
+      live job via /kronos to change it later.
     category: briefing
     schedule:
-      # :30 so the ~25 min run (local stages + Claude editor + CPU TTS) lands
-      # before a 7:00 listen. PHEME_DIGEST_HOUR is the hour.
-      cron: "30 ${PHEME_DIGEST_HOUR:-6} * * *"
+      # :45 so the ~25 min run (local stages + Claude editor + CPU TTS) lands
+      # around 7:10. PHEME_DIGEST_HOUR is the hour.
+      cron: "45 ${PHEME_DIGEST_HOUR:-6} * * 1-5"
       timezone: America/Los_Angeles
     executor: zeus.kronos.jobs.pheme.run_daily_digest
     params:
@@ -153,6 +154,27 @@ jobs:
     timeout_seconds: 3600
     max_retries: 1
     tags: [pheme, news, daily]
+    enabled: true
+
+  - id: pheme-weekend-digest
+    name: Pheme Weekend News Digest
+    description: >
+      Weekend run of pheme-daily-digest (same executor and params), later so it
+      lands around 9:00 Sat/Sun. Hour comes from PHEME_WEEKEND_DIGEST_HOUR at
+      seed time; edit the live job via /kronos to change it later.
+    category: briefing
+    schedule:
+      # A second job because Kronos takes one cron per job and the weekday and
+      # weekend fires differ in both hour and minute.
+      cron: "35 ${PHEME_WEEKEND_DIGEST_HOUR:-8} * * 0,6"
+      timezone: America/Los_Angeles
+    executor: zeus.kronos.jobs.pheme.run_daily_digest
+    params:
+      news_days_back: 2
+    safety_policy: pheme
+    timeout_seconds: 3600
+    max_retries: 1
+    tags: [pheme, news, daily, weekend]
     enabled: true
 
   - id: nightly-retrieval-eval
