@@ -21,6 +21,7 @@ from zeus.core.middleware import QueryLoggingMiddleware
 from zeus.core.newsletter import router as newsletter_router
 from zeus.core.query import QueryEngine, _run_llm, _active_model_name, _chat_use_claude, _ollama_model, set_ollama_model
 from zeus.core.actions import router as actions_router
+from zeus.core.analytics import router as analytics_router
 from zeus.core.calendar import router as calendar_router
 from zeus.core.comfyui import router as images_router
 from zeus.core.inbox import router as inbox_router
@@ -142,6 +143,7 @@ async def lifespan(app: FastAPI):
     from zeus.core.tools.deep_research import register as _register_deep_research
     from zeus.core.tools.swarm import register as _register_swarm_tools
     from zeus.core.tools.news_search import register as _register_news_search
+    from zeus.core.tools.umami import register_if_configured as _register_umami
 
     _register_current_time()
     _register_web_search()
@@ -157,6 +159,7 @@ async def lifespan(app: FastAPI):
     _register_deep_research()
     _register_swarm_tools()  # swarm_status/propose/approve/answer (if ZEUS_SWARM_ENABLED)
     _register_news_search()
+    _register_umami()  # umami_stats/umami_events (if UMAMI_DB_URL)
     app.state.tools_registered = [spec.name for spec in tool_registry.list_specs()]
 
     # Observability — query log ring buffer
@@ -426,6 +429,7 @@ app.include_router(inbox_router)
 app.include_router(mesh_router)
 app.include_router(actions_router)
 app.include_router(calendar_router)
+app.include_router(analytics_router)
 app.include_router(images_router)
 app.include_router(zeus_os_router)
 

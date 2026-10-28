@@ -405,6 +405,40 @@ async def capitolscope_context_pack(*, days: int = 7) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Umami - read-only web analytics (via Core /analytics/umami/*)
+# ---------------------------------------------------------------------------
+# Through Core rather than a direct DB connection: umami-db is reachable only on
+# the umami-analytics Docker network, which zeus-core joins and this host-side
+# stdio process cannot.
+async def umami_stats(*, site: str = "all", period: str = "7d", limit: int = 5) -> dict[str, Any]:
+    """Umami pageviews, visitors (distinct sessions), visits, top pages, top
+    referrers and top custom events for one website or 'all', over a rolling
+    window (24h/7d/30d), with percent change vs the previous window."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{_core_url()}/analytics/umami/stats",
+            params={"site": site, "period": period, "limit": max(1, min(25, int(limit)))},
+            timeout=20.0,
+        )
+        r.raise_for_status()
+        return r.json() or {}
+
+
+async def umami_events(*, period: str = "7d", event: str = "", limit: int = 20) -> dict[str, Any]:
+    """Server-side homelab events from Umami's 'Homelab events' site
+    (backup_completed, backup_failed, ...): counts, last occurrence, and the
+    most recent events with their key=value data."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{_core_url()}/analytics/umami/events",
+            params={"period": period, "event": event, "limit": max(1, min(100, int(limit)))},
+            timeout=20.0,
+        )
+        r.raise_for_status()
+        return r.json() or {}
+
+
+# ---------------------------------------------------------------------------
 # Pheme - news deep-dive search + gated Twitter posting
 # ---------------------------------------------------------------------------
 async def zeus_news_search(

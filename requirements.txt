@@ -43,3 +43,5 @@ libzim>=3.1.0
 claude-agent-sdk==0.2.168
 # Pheme morning audio: PCM -> MP3 encode without an ffmpeg dependency.
 lameenc==1.9.0
+# Umami analytics tools (zeus/core/analytics.py): read-only Postgres client.
+psycopg[binary]>=3.2,<4

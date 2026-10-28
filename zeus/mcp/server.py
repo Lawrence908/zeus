@@ -30,6 +30,8 @@ from zeus.mcp.tools import (
     olympian_server_health,
     olympian_status_read,
     olympian_twitter_post,
+    umami_events,
+    umami_stats,
     zeus_calendar_today,
     zeus_image_generate,
     zeus_ingest_trigger,
@@ -226,6 +228,16 @@ async def capitolscope_sector_flow_tool(days: int = 90):
 async def capitolscope_leaderboard_tool(limit: int = 20):
     return await capitolscope_leaderboard(limit=limit)
 
+
+
+@mcp.tool(name="umami_stats")
+async def umami_stats_tool(site: str = "all", period: str = "7d", limit: int = 5):
+    return await umami_stats(site=site, period=period, limit=limit)
+
+
+@mcp.tool(name="umami_events")
+async def umami_events_tool(period: str = "7d", event: str = "", limit: int = 20):
+    return await umami_events(period=period, event=event, limit=limit)
 
 def main() -> None:
     # FastMCP uses stdio by default.

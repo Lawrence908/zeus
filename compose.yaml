@@ -231,6 +231,11 @@ services:
       retries: 3
     networks:
       - web
+      # Read-only Umami reporting path for the umami_stats / umami_events tools
+      # (zeus/core/analytics.py). umami-db lives only on this network and has
+      # no host port. Connects as umami_ro via UMAMI_DB_URL in .env:
+      #   UMAMI_DB_URL=postgresql://umami_ro:<password>@umami-db:5432/umami
+      - umami-analytics
 
 volumes:
   qdrant_data:
@@ -241,3 +246,7 @@ networks:
   web:
     external: true
     name: homelab-web
+  # Created by services/umami/compose.yaml; must exist before zeus-core starts.
+  umami-analytics:
+    external: true
+    name: umami-analytics

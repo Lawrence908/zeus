@@ -339,6 +339,45 @@ MCP_TOOLS: list[McpToolSpec] = [
         },
         write_gated=True,
     ),
+    McpToolSpec(
+        name="umami_stats",
+        description=(
+            "Read-only Umami web analytics for one website (by name or domain) "
+            "or 'all': pageviews, visitors (distinct sessions), visits, top "
+            "pages, top referrers, top custom events, and percent change vs "
+            "the previous window of the same length. Proxies Core "
+            "/analytics/umami/stats; needs UMAMI_DB_URL on zeus-core."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "site": {"type": "string", "default": "all"},
+                "period": {
+                    "type": "string",
+                    "default": "7d",
+                    "description": "Rolling window ending now: 24h, 7d, 30d, 4w.",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 5},
+            },
+        },
+    ),
+    McpToolSpec(
+        name="umami_events",
+        description=(
+            "Read-only server-side homelab events from Umami's 'Homelab "
+            "events' site (backup_completed, backup_failed, ...): counts, last "
+            "occurrence, and recent events with their key=value data. Proxies "
+            "Core /analytics/umami/events."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "period": {"type": "string", "default": "7d"},
+                "event": {"type": "string", "default": "", "description": "Optional exact event name."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+        },
+    ),
 ]
 
 
