@@ -322,17 +322,19 @@ class TestFilenameValidation:
         "newsletter_20260409_abc12345.wav",
         "test-file_123.wav",
         "a.wav",
+        "pheme_20261027_briefing.mp3",
     ])
     def test_valid_filenames(self, name: str):
         assert _SAFE_FILENAME_RE.match(name)
 
     @pytest.mark.parametrize("name", [
         "../etc/passwd",
-        "file.mp3",
+        "file.ogg",
         "newsletter 20260409.wav",
         "../../secret.wav",
         "",
         "file.wav.exe",
+        "file.mp3.exe",
     ])
     def test_invalid_filenames(self, name: str):
         assert not _SAFE_FILENAME_RE.match(name)
